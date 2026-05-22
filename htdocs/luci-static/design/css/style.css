@@ -4140,3 +4140,206 @@ td.cbi-button, .cbi-button-apply,
         grid-template-columns: 1fr;
     }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §8 CMD+K COMMAND PALETTE — upgrade.md §1.S1
+ * Keyboard-driven menu navigation overlay. Triggered by ⌘K / Ctrl+K
+ * (desktop) or magnifier icon in header (any size).
+ * Backed by htdocs/luci-static/resources/cmdk.js
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.cmdk-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 10vh var(--space-4) var(--space-4);
+    background: rgba(0, 0, 0, 0.45);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--ease-out);
+}
+.cmdk-overlay.open {
+    display: flex;
+    opacity: 1;
+}
+
+.cmdk-panel {
+    width: 100%;
+    max-width: 640px;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    transform: translateY(-8px);
+    transition: transform var(--motion-fast) var(--ease-out);
+}
+.cmdk-overlay.open .cmdk-panel {
+    transform: translateY(0);
+}
+
+.cmdk-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-5);
+    border-bottom: 1px solid var(--color-border-subtle);
+}
+.cmdk-input-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+/* Doubled selector specificity to override global input{} rules without
+   reaching for !important on every property. */
+.cmdk-input.cmdk-input {
+    flex: 1;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-lg);
+    min-height: auto;
+    max-width: none;
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+}
+.cmdk-input.cmdk-input:focus {
+    box-shadow: none;
+    border: 0;
+    background: transparent;
+}
+.cmdk-input::placeholder {
+    color: var(--color-text-subtle);
+}
+
+.cmdk-results {
+    list-style: none;
+    margin: 0;
+    padding: var(--space-2) 0;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+.cmdk-item {
+    padding: var(--space-3) var(--space-5);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    transition: background-color var(--motion-fast) var(--ease-out);
+}
+.cmdk-item-title {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--color-text);
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cmdk-item-breadcrumb {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cmdk-item-selected {
+    background-color: var(--color-accent-500-12);
+}
+.cmdk-item-selected .cmdk-item-title {
+    color: var(--color-accent-600);
+}
+
+.cmdk-empty {
+    padding: var(--space-6) var(--space-5);
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+}
+
+.cmdk-footer {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-5);
+    border-top: 1px solid var(--color-border-subtle);
+    background: var(--color-surface-1);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+.cmdk-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+.cmdk-footer kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-text);
+    line-height: 1;
+}
+.cmdk-hint-label { margin-left: 2px; }
+
+/* Header trigger button (kept visible on all sizes; ⌘K is the power-user
+   shortcut, the button is for discoverability + mobile). */
+.cmdk-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: background-color var(--motion-fast) var(--ease-out),
+                color var(--motion-fast) var(--ease-out);
+    padding: 0;
+}
+.cmdk-trigger:hover {
+    background-color: var(--color-surface-1);
+    color: var(--color-text);
+}
+.cmdk-trigger svg { width: 18px; height: 18px; }
+
+/* Mobile: panel takes more screen, drop hint bar (esc/enter hard on phones).
+   font-size 16px on input prevents iOS Safari zoom-on-focus. */
+@media (max-width: 640px) {
+    .cmdk-overlay {
+        padding: 4vh var(--space-3) var(--space-3);
+    }
+    .cmdk-panel {
+        max-height: 92vh;
+    }
+    .cmdk-footer { display: none; }
+    .cmdk-input.cmdk-input { font-size: 16px; }
+}
+
+/* Backdrop-filter fallback for old WebViews / embedded browsers */
+@supports not (backdrop-filter: blur(4px)) {
+    .cmdk-overlay { background: rgba(0, 0, 0, 0.6); }
+}

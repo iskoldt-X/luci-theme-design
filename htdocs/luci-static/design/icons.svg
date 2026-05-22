@@ -98,4 +98,24 @@
 		<line x1="12" x2="12.01" y1="17" y2="17"/>
 	</symbol>
 
+	<symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+		<circle cx="11" cy="11" r="8"/>
+		<path d="m21 21-4.3-4.3"/>
+	</symbol>
+
+	<symbol id="i-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+		<path d="m5 12 7-7 7 7"/>
+		<path d="M12 19V5"/>
+	</symbol>
+
+	<symbol id="i-arrow-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+		<path d="M12 5v14"/>
+		<path d="m19 12-7 7-7-7"/>
+	</symbol>
+
+	<symbol id="i-corner-down-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+		<polyline points="9 10 4 15 9 20"/>
+		<path d="M20 4v7a4 4 0 0 1-4 4H4"/>
+	</symbol>
+
 </svg>
