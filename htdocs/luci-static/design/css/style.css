@@ -603,12 +603,13 @@ body div {
 }
 
 .h1, .h2, .h3, .h4, .h5, .h6, h1, h2, h3, h4, h5, h6 {
-    font-family: -apple-system, 'Microsoft Yahei';
+    font-family: var(--font-sans);
     font-weight: 600;
     line-height: 1.1;
     color: inherit;
-    clear:both;
-    text-transform: capitalize;
+    clear: both;
+    /* text-transform: capitalize removed — looks bad for CJK and
+       inconsistent for non-ASCII Latin scripts (German ß, Turkish dotted i). */
 }
 
 html {
@@ -3934,8 +3935,8 @@ input[name="nslookup"] {
 
 td.cbi-button, .cbi-button-apply,
 .right .cbi-button {
-    font-size: 0.92rem;
-    font-family: -apple-system, 'Microsoft Yahei', sans-serif, Helvetica, Arial, sans-serif;
+    font-size: var(--text-sm);
+    font-family: var(--font-sans);
     border: var(--inputBorder);
     transition: color 150ms ease, border-color 150ms ease, opacity 150ms ease;
     -webkit-transition: color 150ms ease, border-color 150ms ease, opacity 150ms ease;

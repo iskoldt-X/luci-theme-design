@@ -108,7 +108,7 @@ endef
 
 ```sh
 #!/bin/sh
-# root/etc/uci-defaults/30_luci-theme-design (v2 修订)
+# root/etc/uci-defaults/30_luci-theme-design (v2)
 
 if [ "$PKG_UPGRADE" != 1 ]; then
     uci get luci.themes.Design >/dev/null 2>&1 || uci batch <<-EOF
@@ -118,7 +118,7 @@ if [ "$PKG_UPGRADE" != 1 ]; then
     EOF
 fi
 
-# v2 新增：验证 uhttpd CGI 启用
+# v2: ensure uhttpd CGI is enabled
 [ -f /etc/config/uhttpd ] && [ -z "$(uci -q get uhttpd.main.cgi_prefix)" ] && {
     uci set uhttpd.main.cgi_prefix='/cgi-bin'
     uci commit uhttpd
@@ -164,10 +164,10 @@ if (await designCap.nlbw()) {
     renderTrafficAnalysis();
 } else {
     renderInstallPlaceholder({
-        title: '流量分析',
+        title: _('Traffic Analysis'),
         requires: 'luci-app-nlbw',
-        unlocks: ['实时分用户带宽', '24h / 7 天累计排行', '设备每小时使用图'],
-        cta: { label: '打开软件包管理', href: L.url('admin/system/opkg') }
+        unlocks: [_('Per-device real-time bandwidth'), _('24h / 7-day cumulative ranking'), _('Hourly usage timeline per device')],
+        cta: { label: _('Open Package Manager'), href: L.url('admin/system/opkg') }
     });
 }
 ```
@@ -190,6 +190,81 @@ if (await designCap.nlbw()) {
 ```
 
 占位卡片用主题统一的 token（圆角、阴影、留白），**不是丑陋的 inline alert**。
+
+---
+
+## 0.6 i18n 规范（v2 新增章节）
+
+### 总原则：英文是源，其余语言走 LuCI 核心翻译 + fallback
+
+LuCI 的 i18n 工具链以**英文为提取 key**——所有 `_('...')` / `<%:...%>` 包装的字符串由 `xgettext` 提取，翻译者据此翻其他语言。源代码直接写中文 = 工具链反着工作，其他语言贡献者完全迷失。
+
+**约定：所有源代码字符串使用英文。**
+
+### 规则
+
+1. **JS 字符串** — 用 `_('English text')` 包装：
+
+    ```javascript
+    // ❌ 反模式
+    toast.success('Wi-Fi 已重启');
+    const DEVICE_TYPES = { 'macbook': { type: '电脑' } };
+
+    // ✅ 正确
+    toast.success(_('Wi-Fi restarted'));
+    const DEVICE_TYPES = { 'macbook': { type: _('Computer') } };
+    ```
+
+2. **HTML / Lua 模板** — 用 `<%:English text%>` 包装：
+
+    ```html
+    <button aria-label="<%:Open command palette%>">⌘K</button>
+    <input placeholder="<%:Search menus, settings...%>" />
+    ```
+
+3. **代码注释也用英文** — 方便其他贡献者阅读。
+
+4. **不维护 `po/` 翻译文件** — 这是务实取舍。本主题不自带 .po/.lmo，依赖：
+   - **LuCI 核心已翻译**的通用字符串（"Save" / "Apply" / "Network" / "Wireless" → 50+ 语言自动适配）
+   - **主题特有字符串**（"Command palette" / "Wi-Fi Link Test" / "Computer" 等）→ 用户语言里没翻译时 **fallback 到英文 key 显示**
+   - 维护负担：0；用户体验：与英文标签混合的界面（接受这个代价）
+
+5. **本文档约定** — `upgrade.md` 内：
+   - **视觉示意图**（ASCII art 框框，含 `┌──┐` / `╭──╮`）保留中文 placeholder — 这是给中文读者的设计直觉，**不会进代码**
+   - **代码块**（` ```javascript / ```sh / ```html / ```css `）**全部英文** — 它们是给实施者直接 copy-paste 的
+
+### CI 强制（lint.yml 已落地）
+
+`.github/workflows/lint.yml` 加了一条规则：**禁止源代码非注释处出现 CJK 字符**。任何后续贡献（包括 AI agent）写硬编码中文会被 CI 拒绝。
+
+```python
+# Goes inside lint.yml's "Forbid raw CJK in source files" step
+import re, sys, glob
+fail = []
+patterns = ['htdocs/**/*.js', 'luasrc/**/*.htm', 'htdocs/**/*.css']
+for path in sum((glob.glob(p, recursive=True) for p in patterns), []):
+    src = open(path).read()
+    src = re.sub(r'//.*$', '', src, flags=re.M)
+    src = re.sub(r'/\*.*?\*/', '', src, flags=re.DOTALL)
+    src = re.sub(r'<!--.*?-->', '', src, flags=re.DOTALL)
+    src = re.sub(r'<%#.*?%>', '', src, flags=re.DOTALL)
+    for i, line in enumerate(src.split('\n'), 1):
+        if re.search(r'[\u4e00-\u9fff]', line):
+            fail.append(f'{path}:{i}: {line.strip()[:80]}')
+if fail:
+    print('FAIL — raw CJK outside comments:')
+    print('\n'.join(fail))
+    sys.exit(1)
+```
+
+### 实施清单（每个 step 完成前核查）
+
+- [ ] 所有新增 user-visible JS string 包在 `_()` 里
+- [ ] 所有新增 user-visible HTML/Lua template string 包在 `<%:%>` 里
+- [ ] 字符串内容**英文**（即使开发者母语是中文）
+- [ ] 占位卡 / 错误消息 / 设备类型标签 / aria-label / placeholder / title 也走 i18n
+- [ ] 注释用英文
+- [ ] `act` 或 GitHub Actions 跑 lint.yml — "Forbid raw CJK" step 通过
 
 ---
 
@@ -228,8 +303,8 @@ Cmd+K 让用户说出意图，UI 找路径。Linear / Notion / Vercel / Arc / Gi
 **实现路径：**
 
 ```javascript
-// 1. 数据源：递归遍历 ui.menu.load() 的结果
-//    注意：menu-design.js:48 已经在用 ui.menu.load()，复用即可
+// 1. Data source: recursively walk ui.menu.load() output
+//    Note: menu-design.js:48 already calls ui.menu.load() — reuse the result
 async function buildMenuIndex() {
     const tree = await ui.menu.load();
     const flat = [];
@@ -237,7 +312,7 @@ async function buildMenuIndex() {
     return flat;   // [{ path, breadcrumb, title, name, keywords }, ...]
 }
 
-// 2. 触发器：⌘K / Ctrl+K + 移动端顶栏放大镜按钮
+// 2. Trigger: ⌘K / Ctrl+K + magnifier icon on mobile
 document.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
@@ -245,7 +320,7 @@ document.addEventListener('keydown', e => {
     }
 });
 
-// 3. 过滤：fuzzy match（英文 / 中文 / 拼音首字母）
+// 3. Filter: fuzzy match (English / CJK / pinyin initials)
 function filter(items, q) {
     const re = new RegExp(q.split('').map(escape).join('.*'), 'i');
     return items
@@ -255,7 +330,7 @@ function filter(items, q) {
         .slice(0, 12);
 }
 
-// 4. 导航：直接跳转
+// 4. Navigate: jump to the page
 function open(item) {
     location.href = L.url(item.path);
 }
@@ -331,7 +406,7 @@ window.toast = {
     dismiss(id) { /* ... */ }
 };
 
-// 拦截 LuCI 现有 ui.addNotification 调用
+// Intercept LuCI's existing ui.addNotification
 if (typeof ui !== 'undefined' && ui.addNotification) {
     const orig = ui.addNotification;
     ui.addNotification = (title, msg, level) => {
@@ -395,21 +470,21 @@ if (window.L && L.ui && L.ui.changes) {
     L.ui.changes.displayChanges = async function() {
         let changes;
         try { changes = await L.uci.changes(); }
-        catch { return origDisplay(); }   // 兜底：API 不可用回退原生
+        catch { return origDisplay(); }   // fallback: replay native flow if API shape unknown
 
         const confirmed = await showDiffModal(changes);
         if (!confirmed) return;
 
-        const tId = toast.info('应用中...', { duration: 0, progress: true });
+        const tId = toast.info(_('Applying...'), { duration: 0, progress: true });
         try {
             await L.uci.apply();
             toast.dismiss(tId);
-            toast.success('配置已应用', {
-                action: { label: '撤销', onClick: () => L.uci.revert() }
+            toast.success(_('Configuration applied'), {
+                action: { label: _('Undo'), onClick: () => L.uci.revert() }
             });
         } catch (e) {
             toast.dismiss(tId);
-            toast.error('应用失败: ' + e.message);
+            toast.error(_('Apply failed') + ': ' + e.message);
         }
     };
 }
@@ -419,13 +494,13 @@ if (window.L && L.ui && L.ui.changes) {
 
 ```javascript
 const DANGEROUS_KEYS = [
-    { match: /^network\.lan\.ipaddr$/,    warn: '修改 LAN IP 会断开浏览器连接' },
-    { match: /^network\.lan\.netmask$/,   warn: '修改子网掩码可能导致访问中断' },
+    { match: /^network\.lan\.ipaddr$/,    warn: _('Changing the LAN IP will disconnect your browser') },
+    { match: /^network\.lan\.netmask$/,   warn: _('Changing the subnet mask may interrupt access') },
     { match: /^firewall\..*\.enabled$/,
-      check: c => c.value === '0', warn: '关闭防火墙增加安全风险' },
+      check: c => c.value === '0', warn: _('Disabling the firewall increases security risk') },
     { match: /^dhcp\.lan\.ignore$/,
-      check: c => c.value === '1', warn: '禁用 DHCP 后客户端无法自动获取 IP' },
-    { match: /^system\.@system\[0\]\.hostname$/, warn: '修改主机名后旧的 hostname 链接失效' },
+      check: c => c.value === '1', warn: _('Disabling DHCP prevents clients from getting an IP automatically') },
+    { match: /^system\.@system\[0\]\.hostname$/, warn: _('Old hostname links become invalid after rename') },
 ];
 ```
 
@@ -487,7 +562,7 @@ const sysinfo = L.rpc.declare({
 
 setInterval(async () => {
     const sys = await sysinfo();
-    cpuRing.push(sys.load[0] / 65536);   // ubus 返回的 load 是 fixed-point Q16
+    cpuRing.push(sys.load[0] / 65536);   // ubus returns load as fixed-point Q16
     memRing.push(1 - sys.memory.available / sys.memory.total);
     renderTile('cpu', cpuRing);
     renderTile('mem', memRing);
@@ -518,7 +593,7 @@ printf '{"zones":[%s]}\n' "$TEMPS"
 if (await designCap.thermal()) {
     renderTempTile();
 } else {
-    // 卡片直接不渲染，或显示 "温度传感器不可用"
+    // Hide the card entirely, or render _('Temperature sensor unavailable')
     hideTile('temp');
 }
 ```
@@ -533,7 +608,7 @@ class MetricRing {
         if (this.data.length > this.max) this.data.shift();
     }
     sparklinePath(width, height) {
-        // 返回 SVG <path d="M0,30 L20,22 ..."/>
+        // Returns SVG <path d="M0,30 L20,22 ..."/>
     }
 }
 
@@ -607,7 +682,7 @@ UCI 配置：
 
 ```sh
 uci set luci-theme-design.appearance.show_isp='1'
-uci set luci-theme-design.appearance.isp_provider='ipapi.co'   # 或 ip-api.com / ipinfo.io
+uci set luci-theme-design.appearance.isp_provider='ipapi.co'   # or ip-api.com / ipinfo.io
 uci commit luci-theme-design
 ```
 
@@ -688,19 +763,19 @@ uci commit luci-theme-design
 
 ```javascript
 const DEVICE_TYPES = {
-    'macbook|imac|mac-?mini':       { icon: 'laptop',     type: '电脑' },
-    'iphone':                       { icon: 'smartphone', type: '手机' },
-    'ipad':                         { icon: 'tablet',     type: '平板' },
-    'android|pixel|samsung-galaxy': { icon: 'smartphone', type: '安卓设备' },
-    'tv|bravia|webos|chromecast':   { icon: 'tv',         type: '电视' },
-    'switch|nintendo|ps5|xbox':     { icon: 'gamepad',    type: '游戏机' },
+    'macbook|imac|mac-?mini':       { icon: 'laptop',     type: _('Computer') },
+    'iphone':                       { icon: 'smartphone', type: _('Phone') },
+    'ipad':                         { icon: 'tablet',     type: _('Tablet') },
+    'android|pixel|samsung-galaxy': { icon: 'smartphone', type: _('Android device') },
+    'tv|bravia|webos|chromecast':   { icon: 'tv',         type: _('TV') },
+    'switch|nintendo|ps5|xbox':     { icon: 'gamepad',    type: _('Game console') },
     'thermostat|nest|hue|aqara':    { icon: 'thermo',     type: 'IoT' },
-    'camera|cam|doorbell|ring':     { icon: 'camera',     type: '摄像头' },
-    'printer|laserjet|brother':     { icon: 'printer',    type: '打印机' },
-    'echo|alexa|homepod':           { icon: 'mic',        type: '智能音箱' },
+    'camera|cam|doorbell|ring':     { icon: 'camera',     type: _('Camera') },
+    'printer|laserjet|brother':     { icon: 'printer',    type: _('Printer') },
+    'echo|alexa|homepod':           { icon: 'mic',        type: _('Smart speaker') },
 };
 
-// 精选 ~200 个常见 OUI prefix（vendor only，不暗示设备类型）
+// Curated ~200 common OUI prefixes (vendor only, no device-type hint)
 const OUI = {
     '3C:22:FB': 'Apple',           'A4:C4:94': 'Samsung',
     'B8:27:EB': 'Raspberry Pi',    '00:1A:11': 'Google',
@@ -715,19 +790,19 @@ function inferDevice(client) {
         }
     }
     const vendor = ouiVendor(client.mac);
-    return { icon: 'device-generic', type: vendor ? `${vendor} 设备` : '未知设备', vendor };
+    return { icon: 'device-generic', type: vendor ? vendor + ' ' + _('device') : _('Unknown device'), vendor };
 }
 ```
 
 **数据获取（v2 修正）：**
 
 ```javascript
-// 用 LuCI RPC 而不是直接读 /tmp/dhcp.leases
+// Use LuCI RPC instead of reading /tmp/dhcp.leases directly
 const leases  = await L.rpc.declare({ object: 'luci-rpc', method: 'getDHCPLeases' })();
 const assocs  = await L.rpc.declare({ object: 'iwinfo',   method: 'assoclist',
                                        params: ['device'] })({ device: radio });
 
-// 合并
+// Merge by MAC
 const clients = mergeByMac(leases, assocs);
 ```
 
@@ -827,7 +902,7 @@ bars + dBm 数字双重信息。颜色：
 
 ```javascript
 async function runSpeedtest() {
-    // 1. 延迟测试（10 次取中位数）
+    // 1. Latency test (10 samples, take median)
     const pings = [];
     for (let i = 0; i < 10; i++) {
         const t0 = performance.now();
@@ -837,14 +912,14 @@ async function runSpeedtest() {
     const latency = median(pings);
     const jitter = stddev(pings);
 
-    // 2. 下载测试（拉一个大文件，测时间）
+    // 2. Download test (fetch a big file, measure time)
     const downloadStart = performance.now();
     const resp = await fetch('/cgi-bin/design/download?bytes=20000000');
     const blob = await resp.blob();
     const downloadMs = performance.now() - downloadStart;
     const downloadMbps = (blob.size * 8 / 1e6) / (downloadMs / 1000);
 
-    // 3. 上传测试（POST 大 blob）
+    // 3. Upload test (POST big blob)
     const uploadBlob = new Blob([new Uint8Array(10_000_000)]);
     const uploadStart = performance.now();
     await fetch('/cgi-bin/design/upload', { method: 'POST', body: uploadBlob });
@@ -876,7 +951,7 @@ echo "Cache-Control: no-store"
 echo ""
 BYTES=$(echo "$QUERY_STRING" | sed -n 's/.*bytes=\([0-9]\+\).*/\1/p')
 BYTES=${BYTES:-1000000}
-# /dev/urandom 防止中间路由器/浏览器缓存
+# /dev/urandom prevents intermediate router / browser caching
 dd if=/dev/urandom bs=$BYTES count=1 2>/dev/null
 ```
 
@@ -885,7 +960,7 @@ dd if=/dev/urandom bs=$BYTES count=1 2>/dev/null
 #!/bin/sh
 echo "Content-Type: text/plain"
 echo ""
-# 读 stdin 但丢弃，只测速度
+# Read stdin but discard — measuring throughput only
 dd of=/dev/null 2>/dev/null
 echo "ok"
 ```

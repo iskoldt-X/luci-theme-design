@@ -79,3 +79,42 @@ jobs:
                   print(f'OK   {path}: {opens} template tags')
           sys.exit(0 if ok else 1)
           PY
+
+      - name: Forbid raw CJK in source files
+        # See doc/upgrade.md §0.6 — all user-visible strings must be wrapped
+        # in _() (JS) or <%:%> (Lua templates) with English text. Raw CJK
+        # characters in source files (outside comments) break LuCI's i18n
+        # extraction pipeline, which uses English as the msgid key.
+        run: |
+          python3 <<'PY'
+          import re, sys, glob
+          fail = []
+          patterns = [
+              'htdocs/**/*.js',
+              'htdocs/**/*.css',
+              'luasrc/**/*.htm',
+              'luasrc/**/*.lua',
+              'root/www/cgi-bin/**/*',
+          ]
+          for path in sum((glob.glob(p, recursive=True) for p in patterns), []):
+              try:
+                  src = open(path).read()
+              except (UnicodeDecodeError, IsADirectoryError):
+                  continue
+              # Strip comments first so doc-comments don't trigger.
+              src = re.sub(r'//.*$', '', src, flags=re.M)              # JS //
+              src = re.sub(r'/\*.*?\*/', '', src, flags=re.DOTALL)     # JS/CSS /* */
+              src = re.sub(r'<!--.*?-->', '', src, flags=re.DOTALL)    # HTML
+              src = re.sub(r'<%#.*?%>', '', src, flags=re.DOTALL)      # Lua template
+              src = re.sub(r'(^|\s)#.*$', '', src, flags=re.M)         # shell / yaml
+              for i, line in enumerate(src.split('\n'), 1):
+                  if re.search(r'[\u4e00-\u9fff]', line):
+                      fail.append(f'  {path}:{i}: {line.strip()[:80]}')
+          if fail:
+              print('FAIL — raw CJK found outside comments.')
+              print('All user-visible strings must use _() or <%:%> with')
+              print('English text; see doc/upgrade.md §0.6.\n')
+              print('\n'.join(fail))
+              sys.exit(1)
+          print('OK — no raw CJK in source files')
+          PY
