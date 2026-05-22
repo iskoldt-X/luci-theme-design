@@ -1,19 +1,57 @@
-# Luci-Theme-Design 进阶升级计划（Upgrade Proposal）
+# Luci-Theme-Design 进阶升级计划（Upgrade Proposal v2）
 
-> 起草时间：2026-05-22
+> v1 起草时间：2026-05-22
+> **v2 修订时间：2026-05-22**（同日，对照源码 / OpenWrt 实情核查 + 用户拍板范围后）
 > 前置：[styling-progress.md](styling-progress.md) 视觉系统升级已完成 20 个 Step
+> 关联：[finalplan.md](finalplan.md) 代码健康度 31/32 修复已完成
 > 性质：**功能性**升级（不只是视觉），让主题从"漂亮的管理面板"变成"实用的控制台"
 > 配套预览：[upgrade-preview.html](upgrade-preview.html) — 单文件可交互 demo
 
 ---
 
+## 🎯 v2 修订摘要（读这一节就够）
+
+### 范围决定（用户 2026-05-22 拍板）
+
+| 决定 | 影响 |
+|---|---|
+| ❌ 删除 **B2 Pull-to-Refresh** | 手势冲突调试成本高、桌面用户零价值 |
+| ❌ 删除 **B3 系统健康分** | v1 自评"做作"，且会让用户对小波动焦虑 |
+| ✅ 其他全部保留**在主题包内** | 不拆分独立 `luci-app-*`，换主题 = 拿到全套体验 |
+| ✅ 新增**「渐进增强 / 优雅降级」**原则（§0.5） | 依赖外部包的功能在缺失时显示样式化引导，安装后自动启用 |
+| ✅ 接受**主题包带 CGI 脚本** | v1 隐含禁止，v2 明确允许（部署到 `/www/cgi-bin/design/`） |
+
+### 事实性修正（v1 写错的点）
+
+| v1 写法 | v2 修正 |
+|---|---|
+| `fetch('/cgi-bin/luci/admin/status/sysinfo').then(r=>r.json())` | LuCI 该 endpoint 返回 HTML view，**不是 JSON**。改为 ubus call `system.info`（见 S3） |
+| CGI 脚本放在 `htdocs/luci-static/design/speedtest/*.cgi` | `/luci-static/` 是 uhttpd 静态资源目录，**不会执行 CGI**。改部署到 `root/www/cgi-bin/design/`（见 §0.5、A1、A5） |
+| "拦截 `ui.addNotification` 让每次保存都顺滑" | 全屏"应用配置" modal 由 `ui.changes.displayChanges()` 渲染，**不走** notification。拆为 **S2a**（通用 toast 层）+ **S2b**（应用变更体验重塑，吸收原 B4） |
+| 累计工时 ~36h | 含 a11y / i18n / 移动端 / 错误兜底实际 **~70h ≈ 1.5–2 周全职** |
+| CSS gzip ≤ 25 KB · JS gzip ≤ 15 KB | 加完 Cmd+K + sparkline + WAN + 测速 + 设备列表 + 流量分析必破。**v2 提到 35 / 35 KB**，仍远低于普通 Web app |
+
+### 实施波次（v2 重排）
+
+| 波次 | 范围 | 工时 | 部署复杂度 |
+|---|---|---|---|
+| 第一波 | 纯主题增量（Cmd+K / Toast / Bottom Sheet / Lucide 完整迁移） | ~16h | 零（仍是纯静态资源） |
+| 第二波 | CGI 基础设施 + 实时数据（Sparkline / WAN Hero / 测速） | ~18h | 引入 `/www/cgi-bin/design/` |
+| 第三波 | 交互深化（设备列表 / 快速操作 / 应用变更重塑） | ~15h | 不增加 |
+| 第四波 | 流量分析渐进增强（nlbw 装/未装两套 UI） | ~10h | 不增加 |
+| 长期 | 工程优化（CSS 拆分 / i18n 压测 / Lighthouse CI / 兼容矩阵） | ~11h | 独立 PR |
+| **合计** | | **~70h** | |
+
+---
+
 ## 0. 总指导原则
 
-让这套主题真正区别于"又一个开源 LuCI 皮肤"的，不是**色彩**，而是**信息组织方式**和**交互流畅度**。本计划提案的所有功能围绕三个目标：
+让这套主题真正区别于"又一个开源 LuCI 皮肤"的，不是**色彩**，而是**信息组织方式**和**交互流畅度**。本计划提案的所有功能围绕四个目标：
 
 1. **快速找到东西** — LuCI 100+ 菜单项分散在 3 级嵌套里，导航成本高
 2. **看清正在发生什么** — 静态数字 vs. 动态数据可视化
 3. **操作流畅自然** — 现代 Web 应用的反馈节奏 vs. 90 年代式 modal/alert
+4. **渐进增强 / 优雅降级（v2 新增）** — 主题在最小依赖下 100% 可用；进阶功能（流量分析需 nlbw、温度需 thermal_zone、ISP 查询需第三方 API）以**可选启用**形式提供，未满足时显示样式化的安装/缺失说明，而不是默默 hide 或抛错
 
 每个升级项都标注 **优先级 / 工时 / 风险 / 实现路径**，按 Tier 组织：
 
@@ -27,6 +65,134 @@
 
 ---
 
+## 0.5 CGI / RPC 基础设施（v2 新增章节）
+
+**为什么需要这一节：** v1 默认主题只含静态资源（HTML / CSS / JS / SVG / 字体）。但 S3 温度读取、A1 ping 延迟、A5 测速这些功能浏览器无法纯靠 LuCI 现有 API 完成，必须有少量服务器侧执行。v2 明确允许主题包**自带 CGI 脚本**。
+
+### 主题包目录约定
+
+```
+luci-theme-design/
+├── htdocs/luci-static/design/   静态资源（CSS/JS/SVG/字体/图片）
+│                                浏览器访问：/luci-static/design/*
+├── root/etc/uci-defaults/       首装脚本
+├── root/www/cgi-bin/design/     ← v2 新增：主题自带 CGI
+│                                浏览器访问：/cgi-bin/design/*
+└── luasrc/                      LuCI 模板 + 可选 RPC handler
+```
+
+### 主题自带 CGI 一览
+
+| 路径 | 用途 | 大小 | 服务于 |
+|---|---|---|---|
+| `/cgi-bin/design/ping` | latency 测试（echo "pong"） | < 100B | A1 WAN Hero · A5 测速 |
+| `/cgi-bin/design/download` | 下行测速（`dd if=/dev/urandom`） | < 200B | A5 测速 |
+| `/cgi-bin/design/upload` | 上行测速（读 stdin 丢弃） | < 200B | A5 测速 |
+| `/cgi-bin/design/temp` | 温度读取（遍历 `/sys/class/thermal/`） | < 400B | S3 sparkline |
+| `/cgi-bin/design/clients` | 客户端聚合（dhcp.leases + iwinfo 合并 JSON） | < 1 KB | A2 设备列表（可选优化项） |
+
+**CGI 总体积 ≤ 2 KB**，单个脚本调用响应 < 50ms（除测速下载本身）。
+
+### Makefile 改动
+
+```makefile
+define Package/luci-theme-design/install
+	$(CP) ./htdocs $(1)/www/
+	$(CP) ./luasrc $(1)/usr/lib/lua/luci/view/
+	$(CP) ./root/* $(1)/
+	chmod +x $(1)/www/cgi-bin/design/*    # ← v2 新增
+endef
+```
+
+### uci-defaults 增强
+
+```sh
+#!/bin/sh
+# root/etc/uci-defaults/30_luci-theme-design (v2 修订)
+
+if [ "$PKG_UPGRADE" != 1 ]; then
+    uci get luci.themes.Design >/dev/null 2>&1 || uci batch <<-EOF
+        set luci.themes.Design=/luci-static/design
+        set luci.main.mediaurlbase=/luci-static/design
+        commit luci
+    EOF
+fi
+
+# v2 新增：验证 uhttpd CGI 启用
+[ -f /etc/config/uhttpd ] && [ -z "$(uci -q get uhttpd.main.cgi_prefix)" ] && {
+    uci set uhttpd.main.cgi_prefix='/cgi-bin'
+    uci commit uhttpd
+    /etc/init.d/uhttpd reload 2>/dev/null
+}
+
+exit 0
+```
+
+### 渐进增强协议
+
+每个依赖外部能力的卡片实现一个 `detect()` 函数：
+
+```javascript
+// htdocs/luci-static/design/js/capability.js
+window.designCap = {
+    async nlbw() {
+        return await L.resolveDefault(L.uci.load('luci-app-nlbw'), null) !== null;
+    },
+    async thermal() {
+        try {
+            const r = await fetch('/cgi-bin/design/temp', { signal: AbortSignal.timeout(800) });
+            return r.ok && (await r.text()).trim().length > 0;
+        } catch { return false; }
+    },
+    async wireless() {
+        const sys = await L.rpc.declare({ object: 'iwinfo', method: 'devices' })().catch(() => null);
+        return sys && sys.devices && sys.devices.length > 0;
+    },
+    async cgi(name) {
+        try {
+            const r = await fetch('/cgi-bin/design/' + name + '?probe=1', { signal: AbortSignal.timeout(800) });
+            return r.ok;
+        } catch { return false; }
+    }
+};
+```
+
+**卡片渲染前一律先 detect：**
+
+```javascript
+if (await designCap.nlbw()) {
+    renderTrafficAnalysis();
+} else {
+    renderInstallPlaceholder({
+        title: '流量分析',
+        requires: 'luci-app-nlbw',
+        unlocks: ['实时分用户带宽', '24h / 7 天累计排行', '设备每小时使用图'],
+        cta: { label: '打开软件包管理', href: L.url('admin/system/opkg') }
+    });
+}
+```
+
+**样式化占位卡片**（统一模板）：
+
+```
+┌──────────────────────────────────────────────┐
+│ 📊 流量分析                                   │
+│ ─────────────────────────────────────────────│
+│  此功能需要 luci-app-nlbw                     │
+│                                              │
+│  安装后可看到：                               │
+│  • 实时分用户带宽占用                         │
+│  • 24h / 7 天累计排行                         │
+│  • 设备每小时使用图                           │
+│                                              │
+│            [ 打开软件包管理 → ]              │
+└──────────────────────────────────────────────┘
+```
+
+占位卡片用主题统一的 token（圆角、阴影、留白），**不是丑陋的 inline alert**。
+
+---
+
 ## 1. Tier S — Game Changers
 
 > **如果你只做三件事，做这三件。**
@@ -36,6 +202,7 @@
 ### S1 · Cmd+K 命令面板（**最高优先级**）
 
 **Why this matters:**
+
 LuCI 自带 100+ 菜单项，分散在"状态/网络/服务/防火墙/系统"等 3 级嵌套里。用户找东西全靠记位置。这是 LuCI 用了 15 年的根本痛点。
 
 Cmd+K 让用户说出意图，UI 找路径。Linear / Notion / Vercel / Arc / GitHub 都有。这是 modern productivity tool 的分界线。
@@ -43,7 +210,7 @@ Cmd+K 让用户说出意图，UI 找路径。Linear / Notion / Vercel / Arc / Gi
 **视觉效果：**
 
 ```
-[ 用户按 ⌘K / Ctrl+K ]
+[ 用户按 ⌘K / Ctrl+K（移动端点放大镜图标） ]
 
 ╭───────────────────────────────────────╮
 │ 🔍 wifi__                              │
@@ -62,14 +229,15 @@ Cmd+K 让用户说出意图，UI 找路径。Linear / Notion / Vercel / Arc / Gi
 
 ```javascript
 // 1. 数据源：递归遍历 ui.menu.load() 的结果
+//    注意：menu-design.js:48 已经在用 ui.menu.load()，复用即可
 async function buildMenuIndex() {
     const tree = await ui.menu.load();
     const flat = [];
     walk(tree, [], flat);
-    return flat;   // [{ path, breadcrumb, title, name }, ...]
+    return flat;   // [{ path, breadcrumb, title, name, keywords }, ...]
 }
 
-// 2. 触发器：⌘K / Ctrl+K
+// 2. 触发器：⌘K / Ctrl+K + 移动端顶栏放大镜按钮
 document.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
@@ -77,10 +245,14 @@ document.addEventListener('keydown', e => {
     }
 });
 
-// 3. 过滤：fuzzy match（支持英文 / 中文 / 拼音首字母）
+// 3. 过滤：fuzzy match（英文 / 中文 / 拼音首字母）
 function filter(items, q) {
-    const re = new RegExp(q.split('').join('.*'), 'i');
-    return items.filter(i => re.test(i.title) || re.test(i.path));
+    const re = new RegExp(q.split('').map(escape).join('.*'), 'i');
+    return items
+        .map(i => ({ ...i, score: scoreMatch(i, q) }))
+        .filter(i => i.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12);
 }
 
 // 4. 导航：直接跳转
@@ -89,24 +261,43 @@ function open(item) {
 }
 ```
 
+**Production-ready 要做完的事（v2 明确）：**
+
+- [x] 基础 fuzzy match
+- [ ] 键盘导航 ↑↓ / Enter / Esc / Tab
+- [ ] 移动端顶栏放大镜图标触发
+- [ ] aria-activedescendant + 屏幕阅读器支持
+- [ ] i18n（菜单 title 已 i18n，但搜索框 placeholder 也要走 `<%:Search...%>`）
+- [ ] 拼音首字母支持（中文用户搜"wxsz"找到"无线设置"）
+- [ ] 最近使用 5 项置顶（localStorage 持久化）
+- [ ] 高亮匹配字符
+
 | 维度 | 评估 |
 |---|---|
-| 工时 | ~150 行 JS + ~80 行 CSS（约 3-4 小时） |
+| 工时 | 核心代码 ~3h，**production-ready ~8h** |
 | 风险 | 极低（纯附加 UI，不改任何现有流程） |
 | 依赖 | LuCI `ui.menu` API（已存在） |
-| 兼容性 | 全现代浏览器（不依赖任何新 API） |
-| 移动端 | 自动适配——手机端按"搜索"图标触发 |
+| 兼容性 | 全现代浏览器；移动端从顶栏放大镜按钮触发 |
+| 可访问性 | role="combobox" + aria-controls + aria-activedescendant |
 
-**Bonus：** 后续可扩展为"搜配置项"——不仅搜菜单，还能搜 CBI 字段（"DNS 服务器"直接跳到那个配置框）。
+**Bonus（v2+）：** 后续可扩展为"搜配置项"——不仅搜菜单，还能搜 CBI 字段（"DNS 服务器"直接跳到那个配置框）。先发 v1。
 
 ---
 
-### S2 · Toast 通知系统（**改善每一次保存**）
+### S2 · 反馈系统（v2 拆为两层）
 
-**Why this matters:**
-LuCI 当前每次"保存并应用"会弹一个**全屏阻塞 modal**："正在应用配置..."。15 秒后页面刷新。这是 2010 年代的反馈方式。
+v1 把 "Toast 通知" 和 "替换应用配置 modal" 混为一谈。实际上：
 
-Toast 是非阻塞的、自动消失的、可堆叠的、可携带 action 的——它是**每一次用户操作**的反馈语言。
+| 子项 | 拦截对象 | 难度 | 风险 |
+|---|---|---|---|
+| **S2a Toast 通知层** | `ui.addNotification` | 简单 | 低 |
+| **S2b 应用变更体验重塑** | `ui.changes.displayChanges` | 复杂 | 中（吸收 v1 的 B4 diff viewer） |
+
+#### S2a · Toast 通知层
+
+**Why：** LuCI 的 `ui.addNotification` 在保存配置 / 错误提示等场景被广泛调用，默认渲染是页面顶部的 banner。Toast 是非阻塞的、自动消失的、可堆叠的、可携带 action 的——它是**每一次小操作**的反馈语言。
+
+**范围限定（v2）：** 只拦截 `addNotification`，**不**碰"应用配置时的全屏阻塞 modal"。那是 S2b 的事。
 
 **视觉效果：**
 
@@ -117,7 +308,7 @@ Toast 是非阻塞的、自动消失的、可堆叠的、可携带 action 的—
                               │                     [撤销]    │
                               ╰─────────────────────────────╯
                                                           ↑
-                                右下角，2 秒自动消失，支持点击撤销
+                                右下角（移动端从底部），2 秒自动消失
 ```
 
 **支持的 4 种类型：**
@@ -132,18 +323,15 @@ Toast 是非阻塞的、自动消失的、可堆叠的、可携带 action 的—
 **实现路径：**
 
 ```javascript
-// 全局 API
 window.toast = {
-    success(msg, opts = {}) { show('success', msg, opts); },
-    info(msg, opts = {}) { ... },
-    warning(msg, opts = {}) { ... },
-    error(msg, opts = {}) { ... }
+    success(msg, opts = {}) { return show('success', msg, opts); },
+    info(msg, opts = {})    { return show('info',    msg, opts); },
+    warning(msg, opts = {}) { return show('warning', msg, opts); },
+    error(msg, opts = {})   { return show('error',   msg, opts); },
+    dismiss(id) { /* ... */ }
 };
 
-// 用法
-toast.success('Wi-Fi 已重启', { duration: 3000, action: { label: '撤销', onClick: undo } });
-
-// 拦截 LuCI 现有 ui.addNotification 调用，自动走 toast
+// 拦截 LuCI 现有 ui.addNotification 调用
 if (typeof ui !== 'undefined' && ui.addNotification) {
     const orig = ui.addNotification;
     ui.addNotification = (title, msg, level) => {
@@ -154,19 +342,107 @@ if (typeof ui !== 'undefined' && ui.addNotification) {
 
 | 维度 | 评估 |
 |---|---|
-| 工时 | ~80 行 JS + ~50 行 CSS（约 2-3 小时） |
-| 风险 | 低（拦截或覆盖 LuCI 现有 API） |
-| 影响范围 | 全主题——每个保存动作都受益 |
-| 移动端 | 自动适配——移动端从底部弹起而非右下 |
-| 可访问性 | 需加 `aria-live="polite"` 让屏幕阅读器读出 |
+| 工时 | ~80 行 JS + ~50 行 CSS（**3h**） |
+| 风险 | 低 |
+| 覆盖范围 | 所有 inline notification（保存、错误、提示） |
+| 可访问性 | `role="status"` + `aria-live="polite"`；error 用 `aria-live="assertive"` |
 
-**进阶想法：** Toast 堆叠时自动 collapse（"5 个保存成功"）；error toast 持久显示直到用户关闭。
+#### S2b · "应用变更"体验重塑（v2 新，合并原 B4 Diff Viewer）
+
+**Why this matters:**
+
+LuCI 当前"保存并应用"流程：
+
+1. 用户点 **Save & Apply**
+2. 一个**全屏阻塞 modal** 显示"正在应用配置..."（由 `ui.changes.displayChanges()` 渲染）
+3. 15-30 秒后页面刷新或 modal 关闭
+
+这个 modal 用户每天看几十次，2010 年代体验。**v2 重塑**为现代流程：
+
+```
+[ 用户点 "Save & Apply" ]
+        ↓
+╭────────────────────────────────────────╮
+│ 即将应用 3 项变更                       │
+├────────────────────────────────────────┤
+│ network.lan                              │
+│   + ipaddr  = 192.168.1.1                │
+│   - ipaddr  = 192.168.0.1                │
+│                                          │
+│ wireless.radio0                          │
+│   + channel = 11                         │
+│   - channel = auto                       │
+│                                          │
+│ firewall.@redirect[0]                    │
+│   + new redirect (dest_port=80)          │
+├────────────────────────────────────────┤
+│ ⚠ 修改 LAN IP 会断开你的浏览器连接       │
+│                                          │
+│         [ 取消 ]  [ 确认应用 ]          │
+╰────────────────────────────────────────╯
+        ↓ 用户确认
+[ 右下角 toast: ⟳ 应用中 0:08 ]
+        ↓ 完成
+[ 右下角 toast: ✓ 配置已应用 · [撤销] ]
+```
+
+**实现路径：**
+
+```javascript
+// monkey-patch ui.changes.displayChanges
+if (window.L && L.ui && L.ui.changes) {
+    const origDisplay = L.ui.changes.displayChanges.bind(L.ui.changes);
+    L.ui.changes.displayChanges = async function() {
+        let changes;
+        try { changes = await L.uci.changes(); }
+        catch { return origDisplay(); }   // 兜底：API 不可用回退原生
+
+        const confirmed = await showDiffModal(changes);
+        if (!confirmed) return;
+
+        const tId = toast.info('应用中...', { duration: 0, progress: true });
+        try {
+            await L.uci.apply();
+            toast.dismiss(tId);
+            toast.success('配置已应用', {
+                action: { label: '撤销', onClick: () => L.uci.revert() }
+            });
+        } catch (e) {
+            toast.dismiss(tId);
+            toast.error('应用失败: ' + e.message);
+        }
+    };
+}
+```
+
+**危险变更标记（吸收原 B4）：**
+
+```javascript
+const DANGEROUS_KEYS = [
+    { match: /^network\.lan\.ipaddr$/,    warn: '修改 LAN IP 会断开浏览器连接' },
+    { match: /^network\.lan\.netmask$/,   warn: '修改子网掩码可能导致访问中断' },
+    { match: /^firewall\..*\.enabled$/,
+      check: c => c.value === '0', warn: '关闭防火墙增加安全风险' },
+    { match: /^dhcp\.lan\.ignore$/,
+      check: c => c.value === '1', warn: '禁用 DHCP 后客户端无法自动获取 IP' },
+    { match: /^system\.@system\[0\]\.hostname$/, warn: '修改主机名后旧的 hostname 链接失效' },
+];
+```
+
+| 维度 | 评估 |
+|---|---|
+| 工时 | ~120 行 JS + ~80 行 CSS + diff 渲染器（**5h**） |
+| 风险 | **中** —— `L.ui.changes` 内部 API 不是 stable contract，LuCI 升级（21→22→23→24）可能改 |
+| 兜底 | 检测到 API 签名变化时 `try/catch` 回退到原生 displayChanges |
+| 测试矩阵 | LuCI 21.02 / 22.03 / 23.05 / 24.10 各跑一次（见 C6） |
+| 可访问性 | modal 用 `<dialog>` + focus trap + Escape 关闭 |
 
 ---
 
 ### S3 · Sparkline / Live Metrics（**Dashboard 从静态变活的**）
 
 **Why this matters:**
+
 当前主题（也包括所有商业路由器 admin）的状态总览，CPU 显示 12%——但这是**这一秒**的 12%。下一秒它可能跳到 85%。用户无法判断系统是否健康。
 
 Sparkline 把"瞬时数字"变成"过去 5 分钟的趋势"。一眼看见 CPU 是稳定 12% 还是震荡 5%↔85%。
@@ -190,20 +466,66 @@ Sparkline 把"瞬时数字"变成"过去 5 分钟的趋势"。一眼看见 CPU �
 └─────────────────────────┘  └─────────────────────────┘
 ```
 
-**数据源（无依赖）：**
+**数据源（v2 修正：用 LuCI ubus，不用 HTML endpoint）：**
 
-| 指标 | 路径 | 兼容性 |
-|---|---|---|
-| CPU 负载 | `/proc/loadavg` | 100% Linux |
-| 内存使用 | `/proc/meminfo` | 100% Linux |
-| 实时流量 | `/proc/net/dev`（轮询 + 差分） | 100% Linux |
-| 温度 | `/sys/class/thermal/thermal_zone0/temp` | **需 fallback**（部分老硬件没有） |
-| 网络客户端数 | `cat /tmp/dhcp.leases | wc -l` | 99% |
+| 指标 | v1 错误写法 | v2 正确写法 | 可用性 |
+|---|---|---|---|
+| CPU loadavg | `fetch('/admin/status/sysinfo').json()` ❌（是 HTML） | `ubus call system info` → `.load[0..2]` | ✅ 100% |
+| 内存 | 同上 | `ubus call system info` → `.memory` | ✅ 100% |
+| 实时流量 | `/proc/net/dev` 差分 | `ubus call network.device status` 差分 | ✅ 100% |
+| 温度 | `fetch('/sys/class/thermal/.../temp')` ❌（浏览器无法直接读 `/sys/`） | CGI `/cgi-bin/design/temp` | **需 fallback** |
+| DHCP 客户端数 | `cat /tmp/dhcp.leases` ❌（同上） | `ubus call luci-rpc getDHCPLeases` | ✅ |
 
-**实现路径：**
+**ubus 调用方式（LuCI 内置 RPC）：**
 
 ```javascript
-// 维护一个 60 点滑动窗口（每 5 秒一个采样 = 5 分钟）
+const sysinfo = L.rpc.declare({
+    object: 'system',
+    method: 'info',
+    expect: { '': {} }
+});
+
+setInterval(async () => {
+    const sys = await sysinfo();
+    cpuRing.push(sys.load[0] / 65536);   // ubus 返回的 load 是 fixed-point Q16
+    memRing.push(1 - sys.memory.available / sys.memory.total);
+    renderTile('cpu', cpuRing);
+    renderTile('mem', memRing);
+}, 5000);
+```
+
+**温度 CGI（v2 新增）：**
+
+```sh
+#!/bin/sh
+# root/www/cgi-bin/design/temp
+echo "Content-Type: application/json"
+echo ""
+TEMPS=""
+for z in /sys/class/thermal/thermal_zone*/temp; do
+    [ -r "$z" ] || continue
+    T=$(cat "$z" 2>/dev/null) || continue
+    [ -n "$T" ] || continue
+    [ -n "$TEMPS" ] && TEMPS="$TEMPS,"
+    TEMPS="$TEMPS$((T/1000))"
+done
+printf '{"zones":[%s]}\n' "$TEMPS"
+```
+
+**温度卡片渐进增强：**
+
+```javascript
+if (await designCap.thermal()) {
+    renderTempTile();
+} else {
+    // 卡片直接不渲染，或显示 "温度传感器不可用"
+    hideTile('temp');
+}
+```
+
+**Sparkline 渲染（用 SVG 不用 canvas）：**
+
+```javascript
 class MetricRing {
     constructor(max = 60) { this.max = max; this.data = []; }
     push(v) {
@@ -215,30 +537,23 @@ class MetricRing {
     }
 }
 
-// 用 SVG 重绘而不是 canvas — 矢量、可主题化、轻量
 function renderSparkline(svg, ring) {
     const path = ring.sparklinePath(200, 40);
     svg.querySelector('.line').setAttribute('d', path);
     svg.querySelector('.fill').setAttribute('d', path + ' L200,40 L0,40 Z');
 }
-
-// 5 秒一次轮询
-setInterval(async () => {
-    const cpu = await fetch('/cgi-bin/luci/admin/status/sysinfo').then(r => r.json());
-    cpuRing.push(cpu.loadavg[0]);
-    renderTile('cpu', cpuRing);
-}, 5000);
 ```
 
 | 维度 | 评估 |
 |---|---|
-| 工时 | ~120 行 JS + ~60 行 CSS（约 4 小时） |
-| 风险 | 低（纯前端，SVG 绘制） |
-| 数据依赖 | LuCI sysinfo endpoint（已存在 LuCI 21.02+） |
-| 性能 | 5s 轮询，单次 ~200 字节响应，可忽略 |
-| 移动端 | 完全兼容 |
+| 工时 | ~120 行 JS + ~60 行 CSS + 温度 CGI（**6h**） |
+| 风险 | 低（纯前端 SVG，ubus 是稳定 API） |
+| 数据依赖 | `system.info` ubus（LuCI 19+ 都有） |
+| 性能 | 5s 轮询，单次 ~500 字节响应，可忽略 |
+| 移动端 | 完全兼容；卡片在小屏单列 |
+| 渐进增强 | 温度无传感器时自动隐藏卡片 |
 
-**进阶想法：**
+**进阶想法（v2+）：**
 - 长按 tile 弹出"过去 1 小时"详细图表
 - 历史持久化：用 `localStorage` 跨页面刷新保留 5 分钟数据
 - 如果装了 `collectd-mod-cpu`，直接拉 24 小时历史
@@ -247,11 +562,12 @@ setInterval(async () => {
 
 ## 2. Tier A — 高实用度
 
-### A1 · WAN / 互联网状态 Hero 卡片（**面向全球用户重新设计**）
+### A1 · WAN / 互联网状态 Hero 卡片
 
 **Why：** 用户打开管理面板，**首要问题**是"我的网是好的吗？"。把这个问题做成首屏最大的一张卡片。
 
 **🌍 全球用户考虑：**
+
 原方案用第三方 API 自动查 ISP（"China Telecom"），有 3 个问题：
 1. **隐私**：用户公网 IP 离开路由器到第三方服务
 2. **可达性**：部分地区/国家网络无法访问 ipapi.co 类服务
@@ -278,10 +594,12 @@ setInterval(async () => {
 | 在线状态 | `ubus call network.interface.wan status` `.up` | ✅ |
 | 公网 IP | 同上 `.ipv4-address[0].address` | ✅ |
 | 连接方式 | `.proto`（pppoe / dhcp / static / wireguard） | ✅ |
-| WAN 接口 + 速率 | `ethtool ${ifname}` 或 `/sys/class/net/${ifname}/speed` | ✅ |
-| 延迟到网关 | 浏览器 `fetch('/luci-static/design/ping.cgi')` 测毫秒 | ✅ |
-| 实时上下行 | `/proc/net/dev` 差分（5s 轮询） | ✅ |
+| WAN 接口 + 速率 | `ethtool ${ifname}` 或 `/sys/class/net/${ifname}/speed`（通过 ubus 包装） | ✅ |
+| 延迟到网关 | 浏览器 `fetch('/cgi-bin/design/ping')` 测毫秒 ✅ | ✅ |
+| 实时上下行 | `ubus call network.device status` 差分（5s 轮询） | ✅ |
 | 在线时长 | `network.interface.wan.uptime` | ✅ |
+
+**CGI 路径修正（v2）：** v1 写 `fetch('/luci-static/design/ping.cgi')` 是错的——`/luci-static/` 是 uhttpd 静态资源目录，**不会执行 CGI**。正确路径见 §0.5：`/cgi-bin/design/ping`。
 
 **ISP 显示作为可选功能，opt-in：**
 
@@ -289,11 +607,12 @@ UCI 配置：
 
 ```sh
 uci set luci-theme-design.appearance.show_isp='1'
-uci set luci-theme-design.appearance.isp_provider='ipapi.co'   # or ip-api.com, ipinfo.io
+uci set luci-theme-design.appearance.isp_provider='ipapi.co'   # 或 ip-api.com / ipinfo.io
 uci commit luci-theme-design
 ```
 
 启用后：
+
 1. 第一次显示前弹 modal：「将发送您的公网 IP `203.0.113.45` 至 `ipapi.co` 查询运营商信息，是否继续？」
 2. 用户同意后查询，结果缓存 1 小时（避免 rate limit）
 3. 用户可随时关闭这个开关
@@ -302,9 +621,12 @@ uci commit luci-theme-design
 
 **i18n：** ISP provider 列表里包含支持本地化的服务（`ip-api.com` 返回的 `org` 字段对国内 ISP 也有中文）。
 
-| 工时 | ~120 行 JS + ~80 行 CSS（3-4 小时，含 ISP 同意 modal） |
-| 风险 | 极低（默认无外部依赖） |
+| 维度 | 评估 |
+|---|---|
+| 工时 | ~120 行 JS + ~80 行 CSS + ping CGI + 同意 modal（**6h**） |
+| 风险 | 低（默认无外部依赖） |
 | 隐私 | 默认 100% 本地；ISP 功能 opt-in + 显式同意 |
+| 渐进增强 | WAN 接口找不到时显示"网络配置缺失"占位 |
 
 ---
 
@@ -312,7 +634,16 @@ uci commit luci-theme-design
 
 **Why：** DHCP 客户端 / 无线客户端表格里 `a4:c4:94:6c:8f:33` 谁知道是什么设备。
 
+**范围澄清（v2）：**
+
+主题**不替换** LuCI 自带的 `admin/network/dhcp` 页面（那个 controller / view 由 LuCI 提供，主题动不了）。主题的做法：
+
+1. **Overview 页新增"LAN 客户端"卡片**（紧凑单行 + 点击展开），用主题 JS 后注入
+2. **保留** LuCI 自带的 dhcp 页面（详细管理用），只用 CSS 美化统一表格 token
+3. 用户日常用 Overview 卡片就够了；需要详细管理 → 进 LuCI dhcp 页
+
 **关键决定：紧凑布局**
+
 原方案多列表格占太多垂直空间，10 个设备就要滚动。**重新设计为单行 + 点击展开详情**。
 
 **单行视觉（每行约 40px 高）：**
@@ -357,7 +688,6 @@ uci commit luci-theme-design
 
 ```javascript
 const DEVICE_TYPES = {
-    // hostname 关键词 → icon
     'macbook|imac|mac-?mini':       { icon: 'laptop',     type: '电脑' },
     'iphone':                       { icon: 'smartphone', type: '手机' },
     'ipad':                         { icon: 'tablet',     type: '平板' },
@@ -370,7 +700,7 @@ const DEVICE_TYPES = {
     'echo|alexa|homepod':           { icon: 'mic',        type: '智能音箱' },
 };
 
-// 精选的 200 个常见 OUI prefix（vendor only，不暗示设备类型）
+// 精选 ~200 个常见 OUI prefix（vendor only，不暗示设备类型）
 const OUI = {
     '3C:22:FB': 'Apple',           'A4:C4:94': 'Samsung',
     'B8:27:EB': 'Raspberry Pi',    '00:1A:11': 'Google',
@@ -379,29 +709,43 @@ const OUI = {
 };
 
 function inferDevice(client) {
-    // 1. hostname 关键词（首选）
     for (const [pattern, info] of Object.entries(DEVICE_TYPES)) {
         if (new RegExp(pattern, 'i').test(client.hostname || '')) {
             return { ...info, vendor: ouiVendor(client.mac) };
         }
     }
-    // 2. MAC OUI 兜底（只能给厂商，类型给"未知设备"）
     const vendor = ouiVendor(client.mac);
     return { icon: 'device-generic', type: vendor ? `${vendor} 设备` : '未知设备', vendor };
 }
 ```
 
+**数据获取（v2 修正）：**
+
+```javascript
+// 用 LuCI RPC 而不是直接读 /tmp/dhcp.leases
+const leases  = await L.rpc.declare({ object: 'luci-rpc', method: 'getDHCPLeases' })();
+const assocs  = await L.rpc.declare({ object: 'iwinfo',   method: 'assoclist',
+                                       params: ['device'] })({ device: radio });
+
+// 合并
+const clients = mergeByMac(leases, assocs);
+```
+
 **信号强度展示：**
 
 bars + dBm 数字双重信息。颜色：
+
 - ≥ -50 dBm → 4 格全绿（优）
 - -50 ~ -65 → 3 格绿（良好）
 - -65 ~ -75 → 2 格橙（一般）
 - < -75 → 1 格红（弱）
 
-| 工时 | ~80 行 JS + ~120 行 CSS + 200 项 OUI 表（4-5 小时） |
+| 维度 | 评估 |
+|---|---|
+| 工时 | ~80 行 JS + ~120 行 CSS + 200 项 OUI 表 + 展开详情面板（**7h**） |
 | 风险 | 低 |
-| 数据来源 | `dhcp.leases` + `iwinfo.assoclist` + 内置 OUI 数据 |
+| 数据来源 | `luci-rpc.getDHCPLeases` + `iwinfo.assoclist` + 内置 OUI |
+| 渐进增强 | 无 Wi-Fi 时只显示有线（隐藏信号列） |
 
 **Bonus：** 用户可以**手动给设备改名**（存 UCI），下次显示就用自定义名。比如把 `android-1234567890` 改成 `老婆的手机`。
 
@@ -414,7 +758,7 @@ bars + dBm 数字双重信息。颜色：
 **视觉：**
 
 ```
-顶栏右侧（理论挨着主题切换按钮）：
+顶栏右侧（挨着主题切换按钮）：
                                                     ⚡
                                                     ↓
                                 ╭──────────────────────╮
@@ -429,14 +773,17 @@ bars + dBm 数字双重信息。颜色：
                                 ╰──────────────────────╯
 ```
 
-**实现：** 一个下拉 popover + 调用 LuCI 现有的 ubus 接口。
+**实现：** 一个下拉 popover + 调用 LuCI 现有 ubus 接口。每个危险操作前用 S2b 的 diff/confirm modal。
 
-| 工时 | ~80 行 JS + ~60 行 CSS（2-3 小时） |
-| 风险 | 中（涉及实际操作，需 confirm） |
+| 维度 | 评估 |
+|---|---|
+| 工时 | ~80 行 JS + ~60 行 CSS（**3h**） |
+| 风险 | 中（涉及实际操作，每个都需 confirm） |
+| 渐进增强 | 检测各能力存在性，不存在的项灰掉 |
 
 ---
 
-### A5 · Wi-Fi / LAN 链路测速（**新增 · 替换原 WAN Speedtest**）
+### A5 · Wi-Fi / LAN 链路测速（替换原 v1 WAN Speedtest）
 
 **Why：** 用户抱怨"Wi-Fi 慢"时，原本无法判断是 Wi-Fi 慢还是 WAN 慢。这个功能测的是**浏览器 ↔ 路由器**的实际连接质量——直接反映用户当前 Wi-Fi 体验。
 
@@ -468,6 +815,7 @@ bars + dBm 数字双重信息。颜色：
 ```
 
 **实用场景：**
+
 - 抱怨"Wi-Fi 慢" → 测一下证明是不是 Wi-Fi 的事（vs WAN）
 - 比较"我在卧室 vs 客厅" → 拿着手机走一圈测
 - 比较"2.4G vs 5G" → 切 SSID 后再测
@@ -483,7 +831,7 @@ async function runSpeedtest() {
     const pings = [];
     for (let i = 0; i < 10; i++) {
         const t0 = performance.now();
-        await fetch('/luci-static/design/speedtest/ping?t=' + Date.now());
+        await fetch('/cgi-bin/design/ping?t=' + Date.now());
         pings.push(performance.now() - t0);
     }
     const latency = median(pings);
@@ -491,7 +839,7 @@ async function runSpeedtest() {
 
     // 2. 下载测试（拉一个大文件，测时间）
     const downloadStart = performance.now();
-    const resp = await fetch('/luci-static/design/speedtest/download?bytes=20000000');
+    const resp = await fetch('/cgi-bin/design/download?bytes=20000000');
     const blob = await resp.blob();
     const downloadMs = performance.now() - downloadStart;
     const downloadMbps = (blob.size * 8 / 1e6) / (downloadMs / 1000);
@@ -499,9 +847,7 @@ async function runSpeedtest() {
     // 3. 上传测试（POST 大 blob）
     const uploadBlob = new Blob([new Uint8Array(10_000_000)]);
     const uploadStart = performance.now();
-    await fetch('/luci-static/design/speedtest/upload', {
-        method: 'POST', body: uploadBlob
-    });
+    await fetch('/cgi-bin/design/upload', { method: 'POST', body: uploadBlob });
     const uploadMs = performance.now() - uploadStart;
     const uploadMbps = (10 * 8) / (uploadMs / 1000);
 
@@ -509,10 +855,13 @@ async function runSpeedtest() {
 }
 ```
 
-#### 服务器侧 CGI（主题包含）
+#### 服务器侧 CGI（v2 路径修正）
+
+**v1 写错：** `htdocs/luci-static/design/speedtest/*.cgi` ❌
+**v2 正确：** `root/www/cgi-bin/design/*` ✅
 
 ```sh
-# htdocs/luci-static/design/speedtest/ping.cgi
+# root/www/cgi-bin/design/ping
 #!/bin/sh
 echo "Content-Type: text/plain"
 echo ""
@@ -520,17 +869,19 @@ echo "pong"
 ```
 
 ```sh
-# htdocs/luci-static/design/speedtest/download.cgi
+# root/www/cgi-bin/design/download
 #!/bin/sh
 echo "Content-Type: application/octet-stream"
+echo "Cache-Control: no-store"
 echo ""
-BYTES=${QUERY_STRING:-1000000}
-# 用 /dev/urandom 防止中间路由器/浏览器缓存
+BYTES=$(echo "$QUERY_STRING" | sed -n 's/.*bytes=\([0-9]\+\).*/\1/p')
+BYTES=${BYTES:-1000000}
+# /dev/urandom 防止中间路由器/浏览器缓存
 dd if=/dev/urandom bs=$BYTES count=1 2>/dev/null
 ```
 
 ```sh
-# htdocs/luci-static/design/speedtest/upload.cgi
+# root/www/cgi-bin/design/upload
 #!/bin/sh
 echo "Content-Type: text/plain"
 echo ""
@@ -540,14 +891,18 @@ echo "ok"
 ```
 
 **Bonus 功能：**
+
 - **理论上限对比**：根据当前 wireless mode（802.11ac 80MHz 等）算理论速率，告诉用户"你的链路实测占理论 86%"
 - **2.4G vs 5G 对比模式**：用户先连 5G 测一次，切到 2.4G 再测，对比两次结果
 - **历史记录**：最近 10 次测试用 localStorage 存，看趋势
 
-| 工时 | ~150 行 JS + ~80 行 CSS + 3 个 CGI 脚本（5-6 小时） |
+| 维度 | 评估 |
+|---|---|
+| 工时 | ~150 行 JS + ~80 行 CSS + 3 个 CGI（**6h**） |
 | 风险 | 低（纯前端 + 自带 CGI） |
 | 依赖 | 0 外部依赖 |
 | 兼容性 | 全浏览器；CGI 在 OpenWrt 上 100% 可用 |
+| 渐进增强 | CGI 探测失败时显示 "CGI 未启用" 提示 |
 
 ---
 
@@ -570,91 +925,36 @@ echo "ok"
                            ╰──────────────╯
 ```
 
-| 工时 | ~70 行 CSS + ~30 行 JS（媒体查询切换） |
+| 工时 | ~70 行 CSS + ~30 行 JS（媒体查询切换，**2h**） |
 | 风险 | 低 |
 
 ---
 
-### B2 · Pull-to-Refresh
+### ~~B2 · Pull-to-Refresh~~（v2 删除）
 
-**Why：** 移动端 status 页用户最频繁的动作是"再看看数据更新了没"。原生下拉刷新手势 = iOS 体验。
+**v2 决定：删除。**
 
-```
-[ 状态页顶部 ] ── 手指下滑 ──>  [ 显示 ↻ 旋转图标 ]
-                                       ↓
-                                  [ 刷新数据 + 触觉反馈 ]
-```
-
-**实现：** `touchstart / touchmove / touchend` + transform translateY。
-
-| 工时 | ~80 行 JS（2-3 小时） |
-| 风险 | 中（手势冲突需测：与 iOS Safari 边缘划返回不冲突，安全的下滑距离需要测）|
+理由：
+- 手势冲突调试成本高（与 iOS Safari 边缘划返回、长页面正常滚动、原生 iOS Web 拉出 URL 都冲突）
+- 桌面用户零价值
+- 移动用户可用浏览器原生刷新 / A3 快速操作里加"刷新数据"按钮替代
 
 ---
 
-### B3 · 系统健康分（Health Score）
+### ~~B3 · 系统健康分（Health Score）~~（v2 删除）
 
-**Why：** 把 CPU / RAM / 温度 / Uptime / Load / 磁盘 聚合成 0-100 一个数。一眼判断系统状态。
+**v2 决定：删除。**
 
-```
-        ╭──────────╮
-        │          │       系统健康
-        │   87     │       ↑ 1 分 vs 昨天
-        │ /100     │       
-        │          │       CPU         ●●●●○ 良好
-        ╰──────────╯       内存        ●●●○○ 注意
-       (SVG circle ring)   温度        ●●●●● 优
-                           网络        ●●●●○ 良好
-                           运行时长     ●●●●● 优
-```
-
-**坑：** 这种"打分"容易显得**做作 / 不真实**。建议：
-
-- 算法**透明**：点开能看到每一项是怎么打分的
-- 默认**隐藏**：UCI 配置开关，喜欢的人开，怕做作的人关
-- 不显示**总分上升下降趋势**（容易让人焦虑）
-
-| 工时 | ~60 行 JS + ~50 行 CSS（含 SVG circle） |
-| 风险 | 低（实现），中（争议） |
+理由：
+- v1 提案自评"容易显得做作 / 不真实"
+- 累加打分容易让用户对小波动焦虑（87 → 85 触发不必要的关注）
+- 已有 S3 sparkline 提供每个指标的趋势，无需聚合分数
 
 ---
 
-### B4 · 配置变更预览（Diff Viewer）
+### ~~B4 · 配置变更预览（Diff Viewer）~~（v2 合并到 S2b）
 
-**Why：** LuCI 自带 uci-change 显示"红/绿/灰"三色 diff，但藏在"未保存变更"小角落。**应用前**让用户清楚知道改了什么，是配置安全的关键。
-
-**视觉：**
-
-```
-[ 应用变更 ] 按钮点击后弹出：
-
-╭────────────────────────────────────────────╮
-│ 你即将应用 3 项变更                          │
-├────────────────────────────────────────────┤
-│ network.lan                                  │
-│   + ipaddr  = 192.168.1.1                    │
-│   - ipaddr  = 192.168.0.1                    │
-│                                              │
-│ wireless.radio0                              │
-│   + channel = 11                             │
-│   - channel = auto                           │
-│                                              │
-│ firewall.@redirect[0]                        │
-│   + dest_port = 80                           │
-│   (new redirect rule)                        │
-├────────────────────────────────────────────┤
-│ ⚠ 修改 LAN IP 后你的浏览器会断开连接          │
-│                                              │
-│         [ 取消 ]    [ 确认应用 ]              │
-╰────────────────────────────────────────────╯
-```
-
-**实现：** 已有 `uci.changes()` API 拉数据，包装一个 modal。
-
-**特别有价值：** 危险变更（改 LAN IP / 关防火墙 / 改 DHCP 池）加红色警告。
-
-| 工时 | ~100 行 JS + ~80 行 CSS（4-5 小时） |
-| 风险 | 中（需测各种 plugin 的 UCI 变更格式） |
+合并入 **S2b "应用变更体验重塑"**。Diff Viewer 是替换 LuCI 全屏 modal 的核心内容，没必要单独列。
 
 ---
 
@@ -662,7 +962,7 @@ echo "ok"
 
 ### C1 · CSS 文件拆分 + stylelint
 
-**Why：** 当前 style.css = 4141 行 / 93 KB 单文件。继续往上加规则会失控。
+**Why：** 当前 [style.css](htdocs/luci-static/design/css/style.css) = **4141 行 / 93 KB** 单文件（v2 实测）。继续往上加规则会失控。
 
 **拆分方案：**
 
@@ -679,12 +979,13 @@ htdocs/luci-static/design/css/
 ```
 
 加 stylelint 规则：
+
 - `no-duplicate-selectors`
 - `declaration-block-no-redundant-longhand-properties`
 - `color-named: never`
 - `unit-allowed-list: [px, rem, em, %, vh, vw, fr, deg, ms, s]`
 
-| 工时 | ~3 小时（拆分）+ ~1 小时（CI 配置） |
+| 工时 | ~3h（拆分）+ ~1h（CI 配置） = **4h** |
 | 风险 | 中（拆分时容易破坏 cascade 顺序） |
 
 ---
@@ -697,13 +998,14 @@ htdocs/luci-static/design/css/
 - 部分小图标：散落在 CSS 里的字符（`\eb03` 之类）
 
 完整迁移到 Lucide：
-- 删除 'design' 字体（~25 KB）
+
+- 删除 'design' 字体（~22 KB）
 - 删除所有 `[data-node-name="xxx"]:before { content: "\eXXX" }` CSS 规则（~50 条）
 - menu-design.js 直接渲染 `<svg><use href="..."/></svg>`
 
-| 工时 | ~3-4 小时 |
-| 风险 | 中（涉及很多插件适配） |
-| 收益 | -25 KB 字体；可单独着色每个图标；不依赖字体加载 |
+| 工时 | **4h** |
+| 风险 | 中（涉及很多插件适配；需要把 design icon font 的所有码位映射到 Lucide 名） |
+| 收益 | -22 KB 字体；可单独着色每个图标；不依赖字体加载 |
 
 ---
 
@@ -716,14 +1018,14 @@ htdocs/luci-static/design/css/
 ```javascript
 if (location.search.includes('debug=pseudo-long')) {
     document.querySelectorAll('button, label, .nav-item').forEach(el => {
-        el.textContent = el.textContent + ' '.repeat(0) + el.textContent;
+        el.textContent = el.textContent + ' ' + el.textContent;
     });
 }
 ```
 
 把所有标签 ×2，看哪里崩。还可以做"短串"模式（CJK 字符），"RTL"模式（阿拉伯/希伯来）。
 
-| 工时 | ~2 小时（脚本 + 修补发现的问题） |
+| 工时 | **2h**（脚本 + 修补发现的问题） |
 | 风险 | 极低 |
 
 ---
@@ -733,31 +1035,90 @@ if (location.search.includes('debug=pseudo-long')) {
 **Why：** 加 features 容易，但每加一个都让首屏变慢一点。需要硬约束。
 
 **方案：**
+
 - `.github/workflows/lighthouse.yml` PR 触发
 - 用 `lhci` 跑 Lighthouse
 - 性能 < 90 / 可访问性 < 95 直接 fail
-- 资源体积超出预算（CSS > 100 KB / JS > 50 KB）fail
+- 资源体积超出预算（CSS > 100 KB / JS > 50 KB 未压缩）fail
 
-| 工时 | ~2 小时 |
+| 工时 | **2h** |
 | 风险 | 零 |
+
+---
+
+### C5 · CGI 脚本安全审计（v2 新增）
+
+**Why：** v2 引入 `/cgi-bin/design/*`，每个脚本都暴露给 LuCI 鉴权后的用户。需要确保：
+
+- 输入参数严格白名单（`bytes` 只接受数字，`temp` 不接任何参数）
+- 没有 shell injection（`$QUERY_STRING` 不直接 eval）
+- 没有路径穿越
+- `download` 的 `bytes` 上限（避免被恶意请求 GB 级流量）
+- shellcheck 跑过
+
+**工作清单：**
+
+- [ ] `shellcheck root/www/cgi-bin/design/*` 在 lint workflow 跑通
+- [ ] 每个脚本顶部加 `set -u` + 输入校验
+- [ ] `download` 的 `bytes` clamp 到 [1KB, 100MB]
+- [ ] 在 README 写明"CGI 仅响应 LuCI 鉴权后的请求"（依赖 uhttpd 配置）
+
+| 工时 | **1h** |
+| 风险 | 低（但漏审计可能引入 CVE） |
+
+---
+
+### C6 · LuCI 版本兼容矩阵 CI（v2 新增）
+
+**Why：** S2b monkey-patch `L.ui.changes.displayChanges`、S3 用 `system.info` ubus、A2 用 `luci-rpc.getDHCPLeases`——这些都假设了 LuCI 的内部 API 形状。LuCI 21.02 / 22.03 / 23.05 / 24.10 之间会有差异。
+
+**方案：**
+
+```yaml
+# .github/workflows/luci-compat.yml
+strategy:
+  matrix:
+    luci: [21.02, 22.03, 23.05, 24.10]
+steps:
+  - run: |
+      docker run --rm -v $PWD:/theme openwrt/sdk:${{ matrix.luci }} \
+          /theme/.ci/check-luci-api.sh
+```
+
+`check-luci-api.sh` 用 `grep -F` 验证关键 API 在该版本 LuCI 源码里存在：
+
+```sh
+for sym in 'ui.menu.load' 'ui.addNotification' 'L.ui.changes.displayChanges' 'system.info' 'luci-rpc.getDHCPLeases'; do
+    grep -rq "$sym" /openwrt/feeds/luci/ || { echo "MISSING: $sym"; exit 1; }
+done
+```
+
+| 工时 | **2h** |
+| 风险 | 零（CI only） |
+| 价值 | 每次 LuCI 主版本发布后，自动告知主题哪里要适配 |
 
 ---
 
 ## 5. Tier D — 流量分析
 
-> 之前的 D1 (WAN Speedtest) 和 D3 (AI 助手) 已**删除**——前者超出主题边界（需外部包），后者完全跑偏。
->
-> 剩下的 D2 流量地图**扩展为完整的流量分析模块**。
+> v1 的 D1 (WAN Speedtest) 和 D3 (AI 助手) 已删除。剩下的 D2 是流量分析。
 
-### D2 · 流量分析（实时 + 历史累计）
+### D2 · 流量分析（实时 + 历史累计 + 渐进增强）
 
 **Why：**
 - 实时："谁在用我的带宽？"
 - 历史："过去 24 小时谁用得最多？"——用于发现"为啥昨晚网那么卡（哦原来 LG-TV 看了 4 小时 Netflix）"
 
-**两个 Tab + 时段切换：**
+**渐进增强（v2 修订）：**
 
-#### Tab 1: 实时（当前那一秒）
+参考 §0.5 渐进增强协议。
+
+- **装了 nlbw** → 显示完整功能（实时 + 历史 + 时段切换）
+- **没装 nlbw** → 显示样式化占位卡片 + 一键跳转 opkg 安装
+
+**两个 Tab + 时段切换（装了 nlbw 才显示）：**
+
+#### Tab 1: 实时
 
 ```
 现在 LAN 流量构成                    ⚪ 实时 · 自动 2s 刷新
@@ -771,7 +1132,7 @@ if (location.search.includes('debug=pseudo-long')) {
 峰值（过去 1 分钟）                    348 Mbps · 7s ago
 ```
 
-#### Tab 2: 累计（用户选择时段）
+#### Tab 2: 累计
 
 ```
 累计流量      [ 1h ] [ 6h ] [ 12h ] [✓ 24h ]   ←时段切换
@@ -794,96 +1155,133 @@ if (location.search.includes('debug=pseudo-long')) {
 [ 导出 CSV ]   [ 设置流量警报 ]
 ```
 
-**实现：**
-
-#### 实时 Tab
-- 数据源：`/proc/net/dev` per-IP 流量需要 `iptables` accounting 或 `nlbw`
-- **没 nlbw 时降级**：显示 `/proc/net/dev` 接口总流量（没法分用户）+ 提示"安装 nlbw 解锁分用户流量"
-
-#### 历史 Tab
-- **必须装 `luci-app-nlbw`**（OpenWrt 标准带宽统计包）
-- nlbw 提供 24h+ 历史，可按小时聚合
-- 时段切换 = 改 nlbw 查询参数
-
 #### 没装 nlbw 时
 
 ```
 ┌──────────────────────────────────────────────┐
-│ 📊 流量分析需要 nlbw                          │
+│ 📊 流量分析                                   │
+│ ─────────────────────────────────────────────│
+│  此功能需要 luci-app-nlbw                     │
 │                                              │
-│  安装 nlbw 后可以看到：                       │
+│  安装后可看到：                               │
 │  • 实时分用户带宽占用                         │
-│  • 过去 24h / 7 天累计流量排行                │
-│  • 单设备每小时使用图                         │
+│  • 24h / 7 天累计排行                         │
+│  • 设备每小时使用图                           │
 │                                              │
-│  [ 打开软件包管理 → opkg ]                   │
+│            [ 打开软件包管理 → opkg ]         │
 └──────────────────────────────────────────────┘
 ```
 
-**Bonus 功能：**
+**Bonus 功能（装了 nlbw 才有）：**
+
 - **导出 CSV**：把累计数据导出，自己拿去分析
 - **流量警报**：设备超过 X GB / 小时时 toast 提醒（"iPhone-John 1 小时用了 8 GB，可能在看 4K 视频"）
 - **设备时间线**：点设备名展开，看它**过去 24h 每小时**的曲线（哪几个小时最忙）
 
-| 工时 | 实时 Tab ~80 行 + 历史 Tab ~150 行 + 没 nlbw 占位 ~30 行 = **8-10 小时** |
-| 风险 | 中（重度依赖 nlbw） |
-| 依赖 | 主功能需 `luci-app-nlbw` |
+| 维度 | 评估 |
+|---|---|
+| 工时 | 实时 Tab ~80 行 + 历史 Tab ~150 行 + 没 nlbw 占位 ~30 行 = **10h** |
+| 风险 | 中（重度依赖 nlbw API） |
+| 依赖 | 主功能需 `luci-app-nlbw`；占位卡 0 依赖 |
 
 ---
 
 ## 6. 实施建议
 
-### 推荐顺序（**v2 修订后**）
+### 推荐顺序（v2 重排，按依赖度 + 风险分波）
 
-**第一波（必做，~1 个工作日 8h）：**
-1. **S1 Cmd+K** → 立刻把 LuCI 的最大痛点（找东西）解决
-2. **S2 Toast** → 替换 modal，让每次保存都顺滑
-3. **S3 Sparkline** → 让首页"活"起来
+#### 🌊 第一波 · 纯主题增量（无 CGI，无外部依赖）— **~16h**
 
-**第二波（值得做，~2 个工作日 14h）：**
-4. **A1 WAN Hero**（全球友好版，无 ISP 默认） → 答好"网通不通"
-5. **A2 紧凑设备列表 + 点击展开** → 让客户端列表有意义
-6. **A5 Wi-Fi / LAN 测速**（新增） → 用户能自己验证 Wi-Fi 质量
-7. **B4 Diff Viewer** → 配置变更安全感
+> 单 PR 合并，主题立刻显著进化，零部署复杂度。
 
-**第三波（看时间，~2 个工作日 14h）：**
-8. **A3 快速操作面板**
-9. **B1 Bottom Sheet**
-10. **B2 Pull-to-Refresh**
-11. **D2 流量分析**（实时 + 1/6/12/24h 累计，需 nlbw）
+| Step | 项 | 工时 |
+|---|---|---|
+| 1 | **S1 Cmd+K 命令面板** | 8h |
+| 2 | **S2a Toast 通知层** | 3h |
+| 3 | **B1 移动端 Bottom Sheet** | 2h |
+| 4 | **C2 完整 Lucide SVG 迁移**（删除 design icon font） | 3h |
 
-**长期工程优化（独立 PR）：**
-- C1 CSS 拆分
-- C2 完整 Lucide 迁移
-- C3 i18n 压测
-- C4 Lighthouse CI
+第一波完成后主题仍是纯静态资源 ipk，跟现在的部署方式完全一致。
 
-**已删除（曾在 v1 提案中）：**
-- ~~A4 PWA 安装引导~~ — 用户反馈不需要
+#### 🌊 第二波 · CGI 基础设施 + 实时数据 — **~18h**
+
+> 引入 `root/www/cgi-bin/design/`，需要 Makefile chmod、uci-defaults 微调。一次性投入，后面 S3/A1/A5 都受益。
+
+| Step | 项 | 工时 |
+|---|---|---|
+| 5 | **§0.5 CGI 基础设施**（目录 + Makefile + uci-defaults + capability.js） | 2h |
+| 6 | **S3 Sparkline**（用 ubus + 温度 CGI） | 6h |
+| 7 | **A1 WAN Hero**（用 ubus + ping CGI） | 6h |
+| 8 | **A5 Wi-Fi/LAN 测速**（download/upload/ping CGI） | 4h |
+
+第二波后用户看到首页有：实时活的指标卡 + 网络状态 Hero + 主动测速能力。
+
+#### 🌊 第三波 · 交互深化 — **~15h**
+
+| Step | 项 | 工时 |
+|---|---|---|
+| 9 | **A2 设备列表 + OUI** | 7h |
+| 10 | **A3 快速操作浮层** | 3h |
+| 11 | **S2b "应用变更"体验重塑**（含原 B4 diff viewer） | 5h |
+
+#### 🌊 第四波 · 流量分析渐进增强 — **~10h**
+
+| Step | 项 | 工时 |
+|---|---|---|
+| 12 | **D2 流量分析**（nlbw 检测 + 装/未装两套 UI） | 10h |
+
+#### 🔧 长期工程优化（每项独立 PR）— **~11h**
+
+| 项 | 工时 |
+|---|---|
+| C1 CSS 文件拆分 + stylelint | 4h |
+| C3 i18n 伪长串 / 短串 / RTL 压测 | 2h |
+| C4 性能预算 + Lighthouse CI | 2h |
+| C5 CGI 脚本安全审计 + shellcheck | 1h |
+| C6 LuCI 21/22/23/24 兼容性 CI | 2h |
+
+### 累计工时
+
+| 波次 | 工时 |
+|---|---|
+| 第一波 | 16h |
+| 第二波 | 18h |
+| 第三波 | 15h |
+| 第四波 | 10h |
+| 长期 | 11h |
+| **合计** | **70h ≈ 1.5–2 周全职** |
+
+### 已删除（曾在 v1 提案中）
+
+- ~~A4 PWA 安装引导~~ — v1 用户反馈不需要
 - ~~D1 WAN Speedtest~~ — 超出主题边界（应作为外部包）
 - ~~D3 AI 助手~~ — 跑偏
-
-**讨论后再定：**
-- B3 健康分（可能做作）
+- ~~B2 Pull-to-Refresh~~ — **v2 删除**（见 B2 节）
+- ~~B3 系统健康分~~ — **v2 删除**（见 B3 节）
+- ~~B4 Diff Viewer~~ — **v2 合并到 S2b**
 
 ---
 
-### 风险红线
+### 风险红线（v2 修订）
 
-- ❌ **不重写 LuCI 数据层**：所有功能基于 LuCI 现有 API
-- ❌ **不引入构建工具**：保持"一键放进去就能用"
-- ❌ **不引入运行时框架**：纯原生 JS，最多用一个 ~5KB 工具库
-- ❌ **不超过 100 KB CSS / 50 KB JS / 0 web font**
+- ❌ 不重写 LuCI 数据层（不动 controller / dispatcher）
+- ❌ 不引入构建工具（npm / webpack / vite 全 no）
+- ❌ 不引入运行时框架（Vue / React / Alpine 全 no，最多用 ~5 KB 工具库）
+- ✅ **允许**主题自带 CGI 脚本（v1 隐含禁止，**v2 明确允许**，部署到 `/www/cgi-bin/design/`）
+- ✅ **允许**主题自带 LuCI controller / RPC handler（如果纯 CGI 不够）
+- ❌ 不超过 35 KB gzip CSS / 35 KB gzip JS / 0 web font（C2 完成后字体归零）
 
-### 性能预算（继续 finalplan 的约束）
+### 性能预算（v2 修订）
 
-| 资源 | 当前 | 上限 |
-|---|---|---|
-| 主 CSS gzipped | ~20 KB | 25 KB |
-| 主 JS gzipped | ~8 KB | 15 KB |
-| 字体加载 | 22 KB (design icon font) | 25 KB |
-| SVG sprite | 5.3 KB | 15 KB |
-| 首屏 LCP | < 1s @ LAN | < 1.5s |
+| 资源 | 当前 | v1 上限 | **v2 上限** | 理由 |
+|---|---|---|---|---|
+| 主 CSS gzipped | ~18 KB | 25 KB | **35 KB** | 新功能 CSS ~10–15 KB |
+| 主 JS gzipped | ~3 KB | 15 KB | **35 KB** | Cmd+K + sparkline + speedtest + diff viewer 累计 ~30 KB |
+| 字体加载 | 22 KB | 25 KB | **0**（C2 完成后） | Lucide SVG 替代 design icon font |
+| SVG sprite | 5.3 KB | 15 KB | **15 KB** | 加 ~30 个新图标 |
+| CGI 脚本总量 | 0 | n/a | **< 5 KB**（v2 新增） | ping / download / upload / temp / clients |
+| 首屏 LCP | ? | < 1.5s | **< 1.5s @ LAN** | 不变（Lighthouse CI 强制） |
+| 首次 Cmd+K 打开时间 | n/a | n/a | **< 100ms**（v2 新增） | 菜单 index 在 idle 时预建 |
 
 ---
 
@@ -892,10 +1290,10 @@ if (location.search.includes('debug=pseudo-long')) {
 | 文档 | 范围 | 状态 |
 |---|---|---|
 | [gemini.md / codex.md / claude.md](.) | 第一轮代码审计 | 历史参考 |
-| [finalplan.md](finalplan.md) | 代码健康度修复（31/32 项） | 已完成 |
-| [claude_style.md](claude_style.md) | 视觉设计系统提案 | 已完成 |
-| [styling-progress.md](styling-progress.md) | Phase 0-5 视觉执行日志（20 个 Step） | 已完成 |
-| **upgrade.md（本文）** | **功能性升级提案** | **讨论中** |
+| [finalplan.md](finalplan.md) | 代码健康度修复（31/32 项） | ✅ 已完成 |
+| [claude_style.md](claude_style.md) | 视觉设计系统提案 | ✅ 已完成 |
+| [styling-progress.md](styling-progress.md) | Phase 0-5 视觉执行日志（20 个 Step） | ✅ 已完成 |
+| **upgrade.md（本文 v2）** | **功能性升级提案** | **active proposal** |
 | [upgrade-preview.html](upgrade-preview.html) | 单文件可交互 demo | 配套 |
 
 本文是**功能层面**的提案，不重复视觉设计相关内容（那些在 claude_style.md）。所有功能假设视觉系统已就位。
@@ -904,8 +1302,18 @@ if (location.search.includes('debug=pseudo-long')) {
 
 ## 8. 最后一句话
 
-如果只能选一件事先做：**Cmd+K**。
+v1 写："如果只能选一件事先做：Cmd+K。"
 
-它把 LuCI 用了 15 年的"我得记得这个设置在哪"——变成"我说我要什么，UI 帮我找"。这是从 90 年代式管理面板进化到 2025 年式 productivity tool 的**本质跨越**。
+**v2 依然成立。** 它把 LuCI 用了 15 年的"我得记得这个设置在哪"——变成"我说我要什么，UI 帮我找"。这是从 90 年代式管理面板进化到 2025 年式 productivity tool 的本质跨越。
 
-其他都好，但 Cmd+K **改变使用方式**。
+v2 在 v1 的基础上把"做"的承诺说清楚：
+
+- **第一波 16h 出活**，主题保持纯静态资源，零部署复杂度
+- **第二波之后接受 CGI**，换来真正的 dashboard 能力
+- 依赖外部包（nlbw / 温度传感器）的功能都走**渐进增强**——缺失时显示样式化引导，不报错不静默 hide
+- 累计 **~70h 是 1.5–2 周全职**，不是 v1 估的"5 天"
+- 性能预算从 v1 的 25/15 KB 提到 **35/35 KB**，仍远低于普通 Web app
+
+> **"做事就做到极致"** —— v2 的含义是：每个功能都做完整（CGI 安装、a11y、i18n、移动端、错误兜底、渐进增强占位、LuCI 跨版本兼容、shellcheck），不留半成品。
+>
+> 漂亮已经有了（styling-progress 20 Step）；v2 要把它变成**实用**。
