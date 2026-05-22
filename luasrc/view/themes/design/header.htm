@@ -76,6 +76,11 @@
 			<button type="button" class="showSide" aria-label="<%:Toggle menu%>"></button>
 			<a class="brand" href="<%=url('admin/status/overview')%>"><%=striptags(boardinfo.hostname or "OpenWrt")%></a>
 			<div class="status" id="indicators"></div>
+			<button type="button" id="theme-toggle" class="theme-toggle" aria-label="<%:Switch theme%>" title="<%:Switch theme%>">
+				<svg class="svg-icon icon-auto"><use href="<%=media%>/icons.svg#i-monitor"/></svg>
+				<svg class="svg-icon icon-light"><use href="<%=media%>/icons.svg#i-sun"/></svg>
+				<svg class="svg-icon icon-dark"><use href="<%=media%>/icons.svg#i-moon"/></svg>
+			</button>
 		</div>
 	</div>
 </header>

@@ -3,104 +3,468 @@
  *
  *  luci-theme-material
  *      Copyright 2015 Lutty Yang <lutty@wcan.in>
- * 
+ *
  *  luci-theme-Neobird
  *      Copyright 2021 2smile <thinktip@gmail.com>
+ *
+ *  Design System v2 (2026): see doc/claude_style.md
  *
  *  Licensed to the public under the Apache License 2.0
  */
 
- :root {
-    --bg: #f1f4f5;
-    --mainbg: #fff;
-    --bgwhite: #fff;
-    --activeColor: #5ea69b;
-    --activeBottom: #51c291 2px solid;
-    --textColor: rgb(132,119,116);
-    --borderColor: rgba(0,0,0,.15);
-    --navbgColor: rgba(255, 255, 255, .7);
-    --navBorder: 1px solid #f2f2f2;
-    --sectionbgColor: #fff;
-    --sectionbgColor2: #fff;
-    --sectionBorder: none;
+/* ═════════════════════════════════════════════════════════════════════════
+ * §1 DESIGN TOKENS — see doc/claude_style.md §2
+ * Single source of truth. Do not write magic numbers in component rules.
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+:root {
+    /* ─── 1.1 间距（4px 节拍） ─── */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 48px;
+    --space-8: 64px;
+
+    /* ─── 1.2 字号（1.25 比例） ─── */
+    --text-xs:   0.75rem;   /* 12px */
+    --text-sm:   0.875rem;  /* 14px */
+    --text-base: 1rem;      /* 16px */
+    --text-lg:   1.125rem;  /* 18px */
+    --text-xl:   1.25rem;   /* 20px */
+    --text-2xl:  1.5rem;    /* 24px */
+    --text-3xl:  1.875rem;  /* 30px */
+
+    /* ─── 1.3 字重与行高 ─── */
+    --weight-normal:   400;
+    --weight-medium:   500;
+    --weight-semibold: 600;
+    --weight-bold:     700;
+
+    --leading-tight:  1.25;
+    --leading-normal: 1.5;
+    --leading-relaxed:1.7;
+
+    /* ─── 1.4 圆角节奏 ─── */
+    --radius-sm:  6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+    --radius-pill: 999px;
+
+    /* ─── 1.5 动效 ─── */
+    --motion-fast:   120ms;
+    --motion-normal: 200ms;
+    --motion-slow:   320ms;
+    --ease-out:    cubic-bezier(0.2, 0, 0, 1);
+    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* ─── 1.6 字体栈（不加载 web font，CJK 自动各 OS 兜底） ─── */
+    --font-sans:
+        -apple-system, BlinkMacSystemFont,
+        "Segoe UI Variable", "Segoe UI",
+        "PingFang SC", "Hiragino Sans GB",
+        "Microsoft YaHei", "Microsoft YaHei UI",
+        "Noto Sans CJK SC", "Source Han Sans SC",
+        Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono:
+        "SF Mono", "JetBrains Mono", "Fira Code",
+        Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+    /* ─── 1.7 Z-index 层级 ─── */
+    --z-base:     0;
+    --z-sticky:  10;
+    --z-header:  20;
+    --z-sidebar: 30;
+    --z-overlay: 40;
+    --z-modal:   50;
+    --z-toast:   60;
+    --z-tooltip: 70;
+
+    /* ─── 1.8 主色 — Emerald (light mode) ─── */
+    --color-accent-50:  #ecfdf5;
+    --color-accent-100: #d1fae5;
+    --color-accent-200: #a7f3d0;
+    --color-accent-300: #6ee7b7;
+    --color-accent-400: #34d399;
+    --color-accent-500: #10b981;
+    --color-accent-600: #059669;
+    --color-accent-700: #047857;
+    --color-accent-800: #065f46;
+    --color-accent-900: #064e3b;
+
+    /* 派生 alpha（不用 relative color syntax，避免老浏览器降级） */
+    --color-accent-500-12: rgb(16 185 129 / 12%);
+    --color-accent-500-35: rgb(16 185 129 / 35%);
+
+    /* ─── 1.9 中性色（浅色模式） ─── */
+    --color-bg:           #fafafa;
+    --color-surface-0:    #ffffff;
+    --color-surface-1:    #f4f4f5;
+    --color-surface-2:    #e4e4e7;
+
+    --color-text:         #18181b;
+    --color-text-muted:   #52525b;
+    --color-text-subtle:  #a1a1aa;
+    --color-text-onAccent:#ffffff;
+
+    --color-border-subtle:  #e4e4e7;
+    --color-border-default: #d4d4d8;
+    --color-border-strong:  #a1a1aa;
+
+    /* ─── 1.10 语义色 ─── */
+    --color-success: #10b981;
+    --color-warning: #f59e0b;
+    --color-danger:  #ef4444;
+    --color-info:    #3b82f6;
+
+    --color-success-bg: #d1fae5;
+    --color-warning-bg: #fef3c7;
+    --color-danger-bg:  #fee2e2;
+    --color-info-bg:    #dbeafe;
+
+    /* ─── 1.11 阴影（浅色） ─── */
+    --shadow-xs: 0 1px 2px rgb(0 0 0 / 4%);
+    --shadow-sm: 0 2px 4px rgb(0 0 0 / 5%);
+    --shadow-md: 0 4px 12px rgb(0 0 0 / 6%), 0 1px 2px rgb(0 0 0 / 4%);
+    --shadow-lg: 0 12px 32px rgb(0 0 0 / 10%), 0 2px 4px rgb(0 0 0 / 4%);
+    --shadow-focus: 0 0 0 3px var(--color-accent-500-35);
+
+    /* ═════════════════════════════════════════════════════════════════════
+     * §2 LEGACY ALIASES — 旧变量名映射到新 token，老 CSS 不动也能跑
+     * 后续逐组件迁移完成后可以删掉这一节
+     * ═════════════════════════════════════════════════════════════════════ */
+    --bg:               var(--color-bg);
+    --mainbg:           var(--color-surface-0);
+    --bgwhite:          var(--color-surface-0);
+    --activeColor:      var(--color-accent-500);
+    --activeBottom:     var(--color-accent-400) 2px solid;
+    --textColor:        var(--color-text);
+    --borderColor:      var(--color-border-default);
+    --navbgColor:       rgb(255 255 255 / 80%);
+    --navBorder:        1px solid var(--color-border-subtle);
+    --sectionbgColor:   var(--color-surface-0);
+    --sectionbgColor2:  var(--color-surface-1);
+    --sectionBorder:    none;
     --sectiontabBorder: none;
-    --tabmenuBorderLR: none;
-    --tabmenubgColor: none;
-    --tabmenuBottom: #e4eaec 1px solid;
-    --tabmenuRadius: 0;
-    --sectionnodeBorder: #f7f7f7 1px solid;
-    --cbilineColor: #f7f7f7 1px solid;
-    --tabbgColor: #fff;
-    --inputbgColor: #f8f8f8;
-    --inputtextColor: #76838f;
-    --inputBorder: 1px solid #e4eaec;
-    --mainleftbgColor: rgb(255,255,255);
-    --bttextColor: #fff;
-    --badgebgColor: #f7f7f7;
-    --badgeBorder: #e4eaec 1px solid;
-    --progressbarColor: #c8c8c8;
-    --progressbar: #5ea69b;
-    --progressbartxtColor: #fff;
-    /* --logo: url('/luci-static/design/images/logo.png');
-    --mlogo: url('/luci-static/design/images/mlogo.png'); */
-    --logo_color: #222b36;
-    --alertColor: #000000;
-    --alertBackground: rgb(230 230 230);
-    --modelBackground: #d4d4d4;
-    --scrollbarColor:#d0d0d0;
+    --tabmenuBorderLR:  none;
+    --tabmenubgColor:   transparent;
+    --tabmenuBottom:    1px solid var(--color-border-subtle);
+    --tabmenuRadius:    0;
+    --sectionnodeBorder:1px solid var(--color-border-subtle);
+    --cbilineColor:     1px solid var(--color-border-subtle);
+    --tabbgColor:       var(--color-surface-0);
+    --inputbgColor:     var(--color-surface-1);
+    --inputtextColor:   var(--color-text);
+    --inputBorder:      1px solid var(--color-border-default);
+    --mainleftbgColor:  var(--color-surface-0);
+    --bttextColor:      var(--color-text-onAccent);
+    --badgebgColor:     var(--color-surface-1);
+    --badgeBorder:      1px solid var(--color-border-subtle);
+    --progressbarColor: var(--color-surface-2);
+    --progressbar:      var(--color-accent-500);
+    --progressbartxtColor: #ffffff;
+    --logo_color:       var(--color-text);
+    --alertColor:       var(--color-text);
+    --alertBackground:  var(--color-surface-1);
+    --modelBackground:  var(--color-surface-0);
+    --scrollbarColor:   var(--color-border-default);
 }
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * §3 DARK MODE OVERRIDES
+ * 不是反转色，是分层灰阶 + 强调色提亮 + 阴影换 1px 边框
+ * ═════════════════════════════════════════════════════════════════════════ */
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #000;
-    --bgwhite: #000;
-    --textColor: #fefefe;
-    --activeColor: #5ea69b;
-    --activeBottom: #51c291 2px solid;
-    --borderColor: #2C2C3A;
-    --navbgColor: hsla(0, 0%, 7%, .8);
-    --navBorder: 1px solid #1c1c1e;
-    --sectionbgColor: #1c1c1e;
-    --sectionbgColor2: #1c1c1e;
-    --sectionBorder: none;
-    --sectiontabBorder: none;
-    --sectionnodeBorder: #3d3d41 1px solid;
-    --cbilineColor: #2d2d2d 1px solid;
-    --tabbgColor: #1c1c1e;
-    --tabmenuBorderLR: none;
-    --tabmenubgColor: none;
-    --tabmenuBottom: #2d2d2d 1px solid;
-    --tabmenuRadius: 6px 6px 0 0;
-    --inputbgColor: #2f2f2f;
-    --inputtextColor: #fefefe;
-    --inputBorder: 1px solid #4d4d4d;
-    --mainleftbgColor: #000;
-    --bttextColor: #fefefe;
-    --badgebgColor: #fefefe;
-    --badgeBorder: #3d3d40 1px solid;
-    --progressbarColor: #6d6d6d;
-    --progressbar: #5ea69b;
-    --progressbartxtColor: #fefefe;
-    /* --logo: url('/luci-static/design/images/logod.png');
-    --mlogo: url('/luci-static/design/images/mlogod.png'); */
-    --logo_color: #fefefe;
-    --alertColor: #ffffff;
-    --alertBackground: rgb(30 30 30);
-    --modelBackground: #1c1c1e;
-    --scrollbarColor:#4a4a4a;
-  }
+    :root {
+        /* —— 主色提一档亮度保对比 —— */
+        --color-accent-400: #6ee7b7;
+        --color-accent-500: #34d399;
+        --color-accent-600: #10b981;
+        --color-accent-500-12: rgb(52 211 153 / 12%);
+        --color-accent-500-35: rgb(52 211 153 / 40%);
+
+        /* —— 分层灰阶（不用纯黑） —— */
+        --color-bg:           #0a0a0b;
+        --color-surface-0:    #18181b;
+        --color-surface-1:    #27272a;
+        --color-surface-2:    #3f3f46;
+
+        --color-text:         #fafafa;
+        --color-text-muted:   #a1a1aa;
+        --color-text-subtle:  #71717a;
+        --color-text-onAccent:#ffffff;
+
+        --color-border-subtle:  #27272a;
+        --color-border-default: #3f3f46;
+        --color-border-strong:  #52525b;
+
+        /* —— 语义色深色版（更亮） —— */
+        --color-success: #34d399;
+        --color-warning: #fbbf24;
+        --color-danger:  #f87171;
+        --color-info:    #60a5fa;
+
+        --color-success-bg: rgb(52 211 153 / 12%);
+        --color-warning-bg: rgb(251 191 36 / 12%);
+        --color-danger-bg:  rgb(248 113 113 / 12%);
+        --color-info-bg:    rgb(96 165 250 / 12%);
+
+        /* —— 阴影改 1px 边框（深色下阴影不可见） —— */
+        --shadow-xs: none;
+        --shadow-sm: 0 0 0 1px rgb(255 255 255 / 5%);
+        --shadow-md: 0 0 0 1px rgb(255 255 255 / 6%);
+        --shadow-lg: 0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px rgb(0 0 0 / 50%);
+
+        /* —— Legacy alias 重新指向新 token（自动级联） —— */
+        --navbgColor: rgb(24 24 27 / 80%);
+    }
 }
 
-@font-face {
-    font-family: 'icomoon';
-    src: url('../fonts/font.eot');
-    src: url('../fonts/font.eot') format('embedded-opentype'),
-    url('../fonts/font.ttf') format('truetype'),
-    url('../fonts/font.woff') format('woff'),
-    url('../fonts/font.svg') format('svg');
-    font-weight: normal;
-    font-style: normal;
+/* ═════════════════════════════════════════════════════════════════════════
+ * §4 ACCESSIBILITY — 用户偏好支持
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --motion-fast: 0ms;
+        --motion-normal: 0ms;
+        --motion-slow: 0ms;
+    }
 }
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * §5 DEFENSIVE BASELINE — 多语言 / 硬件 / 旧浏览器兜底
+ * 详见 doc/styling-progress.md "Phase 5 防御层"
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+/* —— 5.1 长文字溢出兜底（德语 / 俄语 / 极长 hostname）—— */
+.brand,
+.cbi-value-title,
+.tile-label,
+.nav-item,
+[data-title] {
+    overflow-wrap: break-word;
+    word-break: break-word;
+    hyphens: auto;
+}
+
+/* —— 5.2 单行截断（菜单 / 底栏 tab）—— */
+header > .fill > .container > .brand,
+.main > .main-left > .nav > .slide > a,
+.main > .main-left > .nav > li > a {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* —— 5.3 CJK 特殊处理：禁用 letter-spacing 与 uppercase —— */
+:lang(zh), :lang(zh-CN), :lang(zh-TW), :lang(ja), :lang(ko) {
+    letter-spacing: 0;
+}
+:lang(zh) .cbi-button,
+:lang(zh) .btn,
+:lang(zh) h1, :lang(zh) h2, :lang(zh) h3,
+:lang(ja) .cbi-button,
+:lang(ja) .btn {
+    text-transform: none;
+}
+
+/* —— 5.4 数字等宽（CPU / 温度 / 流量等数据展示）—— */
+.tile-value,
+[data-indicator] strong,
+.cbi-progressbar::after,
+.dt td.mono,
+code, pre {
+    font-variant-numeric: tabular-nums;
+}
+
+/* —— 5.5 backdrop-filter 兜底（嵌入式 webview 不支持时降级到不透明）—— */
+@supports not (backdrop-filter: blur(10px)) {
+    .navbar {
+        background-color: var(--color-surface-0) !important;
+    }
+}
+
+/* —— 5.6 :focus-visible 兜底（老 Safari < 15.4 不支持 → 用 :focus）—— */
+@supports not selector(:focus-visible) {
+    .cbi-button:focus,
+    .btn:focus,
+    input:focus,
+    select:focus {
+        outline: none;
+        box-shadow: var(--shadow-focus);
+    }
+}
+
+/* —— 5.7 极长 hostname 截断 + tooltip 兜底 —— */
+.mock-brand,
+header > .fill > .container > .brand {
+    max-width: 240px;
+}
+
+/* —— 5.8 数据 tile / sparkline 缺数据时的占位 —— */
+.tile-value:empty::before,
+.tile-meta:empty::before {
+    content: '—';
+    color: var(--color-text-subtle);
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * §6 SVG ICON UTILITY
+ * 用法：<svg class="svg-icon"><use href="/luci-static/design/icons.svg#i-sun"/></svg>
+ * 大小由 font-size 控制；颜色继承 currentColor
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+.svg-icon {
+    width: 1em;
+    height: 1em;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex-shrink: 0;
+    vertical-align: -0.125em;
+}
+.svg-icon-sm { font-size: 14px; }
+.svg-icon-md { font-size: 18px; }
+.svg-icon-lg { font-size: 24px; }
+.svg-icon-xl { font-size: 32px; }
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * §7 THEME TOGGLE BUTTON
+ * 顶栏右侧的明/暗/自动切换。三态：auto / light / dark
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition:
+        background-color var(--motion-fast) var(--ease-out),
+        color var(--motion-fast) var(--ease-out);
+}
+.theme-toggle:hover {
+    background-color: var(--color-surface-1);
+    color: var(--color-text);
+}
+.theme-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+}
+.theme-toggle svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* 用户偏好覆盖：html[data-theme="dark|light"] 强制对应模式 */
+html[data-theme="light"] {
+    /* 强制 light，即使系统偏好 dark 也用 light */
+    color-scheme: light;
+}
+html[data-theme="dark"] {
+    color-scheme: dark;
+    /* 把 prefers-color-scheme: dark 的所有 token 在这里也覆盖一遍 */
+    --color-accent-400: #6ee7b7;
+    --color-accent-500: #34d399;
+    --color-accent-600: #10b981;
+    --color-accent-500-12: rgb(52 211 153 / 12%);
+    --color-accent-500-35: rgb(52 211 153 / 40%);
+
+    --color-bg:           #0a0a0b;
+    --color-surface-0:    #18181b;
+    --color-surface-1:    #27272a;
+    --color-surface-2:    #3f3f46;
+
+    --color-text:         #fafafa;
+    --color-text-muted:   #a1a1aa;
+    --color-text-subtle:  #71717a;
+    --color-text-onAccent:#ffffff;
+
+    --color-border-subtle:  #27272a;
+    --color-border-default: #3f3f46;
+    --color-border-strong:  #52525b;
+
+    --color-success: #34d399;
+    --color-warning: #fbbf24;
+    --color-danger:  #f87171;
+    --color-info:    #60a5fa;
+
+    --color-success-bg: rgb(52 211 153 / 12%);
+    --color-warning-bg: rgb(251 191 36 / 12%);
+    --color-danger-bg:  rgb(248 113 113 / 12%);
+    --color-info-bg:    rgb(96 165 250 / 12%);
+
+    --shadow-xs: none;
+    --shadow-sm: 0 0 0 1px rgb(255 255 255 / 5%);
+    --shadow-md: 0 0 0 1px rgb(255 255 255 / 6%);
+    --shadow-lg: 0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px rgb(0 0 0 / 50%);
+
+    --navbgColor: rgb(24 24 27 / 80%);
+}
+/* light 模式覆盖 prefers-color-scheme: dark（强制亮色） */
+html[data-theme="light"] {
+    --color-accent-400: #34d399;
+    --color-accent-500: #10b981;
+    --color-accent-600: #059669;
+    --color-accent-500-12: rgb(16 185 129 / 12%);
+    --color-accent-500-35: rgb(16 185 129 / 35%);
+
+    --color-bg:           #fafafa;
+    --color-surface-0:    #ffffff;
+    --color-surface-1:    #f4f4f5;
+    --color-surface-2:    #e4e4e7;
+
+    --color-text:         #18181b;
+    --color-text-muted:   #52525b;
+    --color-text-subtle:  #a1a1aa;
+
+    --color-border-subtle:  #e4e4e7;
+    --color-border-default: #d4d4d8;
+    --color-border-strong:  #a1a1aa;
+
+    --color-success: #10b981;
+    --color-warning: #f59e0b;
+    --color-danger:  #ef4444;
+    --color-info:    #3b82f6;
+
+    --color-success-bg: #d1fae5;
+    --color-warning-bg: #fef3c7;
+    --color-danger-bg:  #fee2e2;
+    --color-info-bg:    #dbeafe;
+
+    --shadow-xs: 0 1px 2px rgb(0 0 0 / 4%);
+    --shadow-sm: 0 2px 4px rgb(0 0 0 / 5%);
+    --shadow-md: 0 4px 12px rgb(0 0 0 / 6%), 0 1px 2px rgb(0 0 0 / 4%);
+    --shadow-lg: 0 12px 32px rgb(0 0 0 / 10%), 0 2px 4px rgb(0 0 0 / 4%);
+
+    --navbgColor: rgb(255 255 255 / 80%);
+}
+
+/* 显示状态：默认显示 auto 的 monitor 图标；切到 light/dark 时切换 */
+.theme-toggle .icon-auto,
+.theme-toggle .icon-light,
+.theme-toggle .icon-dark { display: none; }
+html:not([data-theme]) .theme-toggle .icon-auto,
+html[data-theme="auto"] .theme-toggle .icon-auto { display: block; }
+html[data-theme="light"] .theme-toggle .icon-light { display: block; }
+html[data-theme="dark"]  .theme-toggle .icon-dark  { display: block; }
+
+/* icomoon font removed 2026-05-22 — 仅为 1 个汉堡菜单图标加载 4 个文件
+ * (font.eot/.ttf/.woff/.svg = ~8 KB)；现在用 CSS 绘制 3 条线代替。
+ * 详见 doc/styling-progress.md Step 12 */
 
 @font-face {
     font-family: 'design';
@@ -109,23 +473,44 @@
          url('../fonts/iconfont-Regular.ttf') format('truetype');
 }
 
-@font-face {
-    font-family: 'Cocon-Regular-Font';
-    src: url('../fonts/Cocon-Regular-Font.otf') format('opentype');
-}
+/* Cocon-Regular-Font removed 2026-05-22 — 1970s 装饰字体与现代 dashboard 风格冲突
+ * 详见 doc/claude_style.md §3.1。brand 改用系统字体 + semibold 字重区分。 */
 
+/* Scrollbar — 极细，hover 才明显 */
 ::-webkit-scrollbar {
-    width: 4px;
+    width: 8px;
+    height: 8px;
 }
-
 ::-webkit-scrollbar-track {
-  box-shadow: inset 0 0 0px rgba(240, 240, 240, .5);
-  background-color: rgb(255 255 255 / 0%);
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: var(--color-border-default);
+    border-radius: var(--radius-pill);
+    border: 2px solid var(--color-bg);
+    transition: background var(--motion-fast) var(--ease-out);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--color-border-strong);
+}
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-default) transparent;
 }
 
-::-webkit-scrollbar-thumb {
-    background: var(--scrollbarColor) ;
-    border-radius: 10px;
+/* ═══════════════════════════════════════════════════════════════════════
+ * GLOBAL FOCUS RING — 所有 interactive 元素键盘焦点可见
+ * 详见 doc/claude_style.md §9.1
+ * ─────────────────────────────────────────────────────────────────────── */
+
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+    border-radius: var(--radius-md);
 }
 
 html {
@@ -233,14 +618,16 @@ html {
 }
 
 html, body {
-    margin: 0px;
-    padding: 0px;
+    margin: 0;
+    padding: 0;
     height: 100%;
-    font-family: -apple-system, 'Microsoft Yahei' !important;
-    font-size: 0.92rem;
-    line-height: 150%;
-    background-color: var(--bg);
-    color:var(--textColor);
+    font-family: var(--font-sans) !important;
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 select {
@@ -256,47 +643,66 @@ select {
     background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABGCAYAAAA6hjFpAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDcuMS1jMDAwIDc5LmRhYmFjYmIsIDIwMjEvMDQvMTQtMDA6Mzk6NDQgICAgICAgICI+IDxyZGY6UkRGIHhtbG5zOnJkZj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+IDxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiIHhtbG5zOnhtcE1NPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvbW0vIiB4bWxuczpzdFJlZj0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL3NUeXBlL1Jlc291cmNlUmVmIyIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bXBNTTpEb2N1bWVudElEPSJ4bXAuZGlkOjhDNzA0QUE0NjE2QTExRUNCMjJFQkQyRkIyNURDNjE3IiB4bXBNTTpJbnN0YW5jZUlEPSJ4bXAuaWlkOjhDNzA0QUEzNjE2QTExRUNCMjJFQkQyRkIyNURDNjE3IiB4bXA6Q3JlYXRvclRvb2w9IkFkb2JlIFBob3Rvc2hvcCAyMi41IChNYWNpbnRvc2gpIj4gPHhtcE1NOkRlcml2ZWRGcm9tIHN0UmVmOmluc3RhbmNlSUQ9InhtcC5paWQ6QzNBNTYzNTY2MTUxMTFFQ0IyMkVCRDJGQjI1REM2MTciIHN0UmVmOmRvY3VtZW50SUQ9InhtcC5kaWQ6QzNBNTYzNTc2MTUxMTFFQ0IyMkVCRDJGQjI1REM2MTciLz4gPC9yZGY6RGVzY3JpcHRpb24+IDwvcmRmOlJERj4gPC94OnhtcG1ldGE+IDw/eHBhY2tldCBlbmQ9InIiPz6YjzxlAAACsklEQVR42uyaXUsVURSG51T0U/obfUvhhYF0U0HQhZQVIWVJCAkiSUXfRRcaBFbXQVBBRCASFCJBpQQipw+RREkpCa9aG95gs0DMOp6Z7TwvvAxnzczaa6/nzDnzVTndfSVDxdE6WgAQBBCAIIAABAEEIAggAEEAQQABCAIIQBBAAIIAAhAEEAQQgCCAAAStGSAbzA/N+wvSiwPmB6or16bkoY2afLN5r+q4l2MfDpr7zetV2z7zYpmOkAHByNSE0IxDOdUSxr2rOjLVNVC2n6z77hsYmtFnbqlzHS0aN+7DouorFZBH+ibGUCrmO+YjdaqhVeNVHIxm1Ve6P/XH5ibzLwfllvn4Ko8d8t90MEIde1RXaU97n6oJCw7KNXPbKo3ZpvwxjAXV8YTrkCx7piPFQ7lsbq/xWO3K62E0qQ4uDKXn5kbzTxe/YO6o0Rgdypc5GI0anyt1p5fm3eYfLn7e3PmfuTuVJ1YYZ5fG5Up9CQ2qSfMu3m3u+secXdo/1rzGGeTWyfIaUrPmXPycuWeFuXq0X6w55R8q4NwLe3PxlXmn+buLnzX3/mWOXm0fK+RrUP4MICvTG/MO86yLnzFfWmbfi9ou1qzyvS7wnAt/+31YTZxx8ZPmq+709c/pcoifcvEZ5Rku+HyTeB4yYt5unnbxE+YbEZSwvK54rGntP5LAXJN5QPXWvNX8zcWPmm9rHmF5zK0P22/T/hlAaqv35i3mKRc/bB7VMtaUIL5LaI7JPcIdVZMnXXyT+zyp7T4kNr8kn6mPqdlfllj/VevHEpxbsi85fNTP1ycX/2zerPUZQOqrcUGp6nNVMMYTnlPyrwFNCMILLScSn0++r7zUSFVdZ6wJ8aIcQBBAAIIAAhAEEIAggAAEAQQBBCAIIABBAAEIAghAEEAQQJLQbwEGAK/reX2gh5gQAAAAAElFTkSuQmCC');
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * INPUTS — token-based with accent focus ring
+ * 详见 doc/claude_style.md §5.2
+ * ─────────────────────────────────────────────────────────────────────── */
+
 select,
 input {
-    color: var(--inputtextColor);
-    padding: 5px 10px;
-    font-size: 0.92rem;
-    font-family: -apple-system, 'Microsoft Yahei', sans-serif, Helvetica, Arial, sans-serif;
-    border: var(--inputBorder);
-    background-color: var(--inputbgColor);
-    transition: color 150ms ease, border-color 150ms ease, opacity 150ms ease;
-    -webkit-transition: color 150ms ease, border-color 150ms ease, opacity 150ms ease;
-    outline-style: none;
+    color: var(--color-text);
+    padding: var(--space-2) var(--space-3);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    background-color: var(--color-surface-1);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    outline: none;
     vertical-align: middle;
-    border-radius: 8px;
-    margin: 3px 3px 3px 0;
-    height: 2.8rem;
-    line-height: 2.8rem;
+    margin: var(--space-1) var(--space-1) var(--space-1) 0;
+    min-height: 40px;
     max-width: 550px;
-    
+    transition:
+        border-color var(--motion-fast) var(--ease-out),
+        background-color var(--motion-fast) var(--ease-out),
+        box-shadow var(--motion-fast) var(--ease-out);
+}
+select::placeholder,
+input::placeholder {
+    color: var(--color-text-subtle);
+}
+select:hover,
+input:hover {
+    border-color: var(--color-border-strong);
 }
 
+/* 强调色 focus ring 替换原来的紫色 #948FE1 */
 select:not([multiple="multiple"]):focus,
 input:focus {
-    border-color: #948FE1;
-    box-shadow:0 0 6px #948FE1;
-    -webkit-box-shadow:0 0 6px #948FE1;
-    -moz-box-shadow:0 0 6px #948FE1;
+    border-color: var(--color-accent-500);
+    background-color: var(--color-surface-0);
+    box-shadow: var(--shadow-focus);
 }
 
 select,
 .cbi-dropdown {
-	width: inherit;
-	cursor: default;
+    width: inherit;
+    cursor: default;
 }
 
 select:not([multiple="multiple"]):focus,
 input:not(.cbi-button):focus,
 .cbi-dropdown:focus {
-    border-color: #948FE1;
-    box-shadow:0 0 6px #948FE1;
-    -webkit-box-shadow:0 0 6px #948FE1;
-    -moz-box-shadow:0 0 6px #948FE1;
+    border-color: var(--color-accent-500);
+    box-shadow: var(--shadow-focus);
+}
+
+input.cbi-input-invalid {
+    border-color: var(--color-danger);
+}
+input.cbi-input-invalid:focus {
+    box-shadow: 0 0 0 3px rgb(239 68 68 / 35%);
 }
 
 .cbi-dropdown,
@@ -398,32 +804,58 @@ small {
     height: calc(100% - 4rem);
 }
 
+/* ───────────────────────────────────────────────────────────────────────
+ * Loading state — skeleton with subtle shimmer instead of spinning icon
+ * The original LuCI markup is reused; we just restyle it. */
 .main > .loading {
     position: fixed;
-    width: 100%;
-    height: 100%;
-    z-index: 1000;
-    display: block;
-    background-color: var(--bgwhite);
-    top: 0;
+    inset: 0;
+    z-index: var(--z-overlay);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 96px;
+    background-color: var(--color-bg);
 }
 
 .main > .loading > span {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+    width: min(720px, 90vw);
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
     text-align: center;
-    margin-top: 2rem;
-    color: var(--textColor);
-    font-size: 1rem;
 }
 
-.main > .loading > span > .loading-img:before {
-    content: "\e603";
-}
+/* Hide the legacy icon-font spinner glyph */
+.main > .loading > span > .loading-img:before { content: ''; }
 
+/* Replace it with a stack of pulsing skeleton bars */
 .main > .loading > span > .loading-img {
-    animation: anim-rotate 2s infinite linear;
-    margin-right: 0.2rem;
-    display: inline-block;
+    display: block;
+    width: 100%;
+    height: 280px;
+    margin: var(--space-3) 0;
+    background:
+        /* row 1: header bar */
+        linear-gradient(var(--color-surface-1), var(--color-surface-1)) 0 0 / 60% 28px no-repeat,
+        /* row 2: subheading */
+        linear-gradient(var(--color-surface-1), var(--color-surface-1)) 0 44px / 40% 16px no-repeat,
+        /* row 3: card */
+        linear-gradient(var(--color-surface-1), var(--color-surface-1)) 0 84px / 100% 80px no-repeat,
+        /* row 4: card */
+        linear-gradient(var(--color-surface-1), var(--color-surface-1)) 0 184px / 100% 80px no-repeat;
+    background-color: transparent;
+    border-radius: var(--radius-md);
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
 }
 
 @keyframes anim-rotate {
@@ -503,23 +935,35 @@ header > .fill > .container > #logo > img {
 }
 
 header > .fill > .container > .brand {
-    font-size: 25px;
-    font-family: "Cocon-Regular-Font";
-    /*font-weight:bold;*/
-    line-height:60px;
-    /*color: white;*/
-    color: var(--logo_color);
-    cursor: default;
-    /*background: #51c291;*/
-    display:block;
-    width:17rem;
-    /* padding-left: 30px; */
-    height:60px;
-    text-align:center;
-    float:left;
-    font-weight:900;
-    letter-spacing:1px;
-    margin-left: 10px;
+    font-family: var(--font-sans);
+    font-size: var(--text-lg);
+    font-weight: var(--weight-semibold);
+    line-height: 56px;
+    letter-spacing: -0.01em;
+    color: var(--color-text);
+    display: block;
+    width: 17rem;
+    height: 56px;
+    text-align: center;
+    float: left;
+    margin-left: var(--space-3);
+    cursor: pointer;
+    transition: color var(--motion-fast) var(--ease-out);
+}
+header > .fill > .container > .brand:hover {
+    color: var(--color-accent-600);
+}
+/* Brand 前面加一个 accent dot 作为身份识别 */
+header > .fill > .container > .brand::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-accent-500);
+    margin-right: var(--space-2);
+    vertical-align: middle;
+    transform: translateY(-1px);
 }
 
 header > .fill > .container > a[class="brand"]:after {
@@ -569,50 +1013,74 @@ header > .fill > .container > .status > * {
 	display: flex;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * SEMANTIC COLORS — danger / warning / success 不再混用同色
+ * 详见 doc/claude_style.md §4.2
+ * ─────────────────────────────────────────────────────────────────────── */
+
 .danger {
-	background-color: #ff7d60 !important;
+    background-color: var(--color-danger) !important;
+    color: #fff;
 }
 
 .warning {
-    background-color: #FF7D60 !important;
-    color: #FFF;
+    background-color: var(--color-warning) !important;
+    color: #fff;
 }
 
 .success {
-	background-color: #5cb85c !important;
+    background-color: var(--color-success) !important;
+    color: #fff;
 }
 
 .notice,
 [data-indicator]:not([data-style="inactive"]) {
-	color: var(--activeColor);
+    color: var(--color-accent-600);
 }
 
 .notice,
 [data-indicator]:not([data-style="active"]) {
-	color: var(--progressbarColor);
+    color: var(--color-text-subtle);
 }
 
 span[data-indicator="uci-changes"] {
-    font-size: .8rem;
-	transition: all .3s;
+    font-size: var(--text-xs);
+    transition: all var(--motion-normal) var(--ease-out);
 }
 
 .error {
-    color: red;
+    color: var(--color-danger);
 }
 
+/* Alert messages — 用语义浅底色 + 强调字色，而非醒目深色 */
 .alert,
 .alert-message {
-	font-weight: bold;
-	margin-bottom: 1em;
-	padding: 1rem;
-	border: 0;
-	border-radius: 3px !important;
-	color: #ffffff;
-	background-color: #5c5c5c;
-	box-shadow: 0 2px 2px 0 rgba(0, 0, 0, .16), 0 0 2px 0 rgba(0, 0, 0, .12);
-	text-shadow: 1px 1px rgba(0, 0, 0, .1);
-	background-color: var(--alertBackground);
+    font-weight: var(--weight-medium);
+    margin-bottom: var(--space-4);
+    padding: var(--space-4) var(--space-5);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    color: var(--color-text);
+    background-color: var(--color-surface-1);
+    box-shadow: var(--shadow-xs);
+    text-shadow: none;
+}
+.alert-message.warning {
+    background-color: var(--color-warning-bg);
+    border-color: rgb(245 158 11 / 25%);
+    color: var(--color-warning);
+}
+.alert-message.danger,
+.alert-message.error {
+    background-color: var(--color-danger-bg);
+    border-color: rgb(239 68 68 / 25%);
+    color: var(--color-danger);
+}
+.alert-message.success,
+.alert-message.notice {
+    background-color: var(--color-success-bg);
+    border-color: rgb(16 185 129 / 25%);
+    color: var(--color-success);
 }
 
 .alert-message > h4 {
@@ -879,32 +1347,43 @@ li {
 }
 
 
+/* Headings — 靠字重和字号建立层级，颜色用 text。强调色省给主操作 */
 h1 {
-    color: var(--activeColor);
-    font-size: 20px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #eee;
+    color: var(--color-text);
+    font-size: var(--text-2xl);
+    font-weight: var(--weight-semibold);
+    line-height: var(--leading-tight);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--color-border-subtle);
+    margin-bottom: var(--space-4);
 }
 
 h2 {
-    color: var(--activeColor);
-    padding: 0 12px 6px 12px;
-    text-transform: capitalize;
+    color: var(--color-text);
+    font-size: var(--text-xl);
+    font-weight: var(--weight-semibold);
+    line-height: var(--leading-tight);
+    padding: 0 var(--space-3) var(--space-2);
+    text-transform: none;
 }
 
 h3 {
-    font-size: 1.2rem;
-    color: var(--activeColor);
-    font-weight:bold;
-    padding: 0 12px 10px 12px;
+    color: var(--color-text);
+    font-size: var(--text-lg);
+    font-weight: var(--weight-semibold);
+    line-height: var(--leading-tight);
+    padding: 0 var(--space-3) var(--space-2);
 }
 
- div.cbi-section{
-	 border: var(--sectionBorder);
-	 margin-bottom: 20px;
-	 border-radius: 8px;
-	 margin-top: 5px;
- }
+/* ═══════════════════════════════════════════════════════════════════════
+ * CARDS / SECTIONS — 卡片化，统一阴影 + 边框 + 圆角
+ * 详见 doc/claude_style.md §5.3
+ * ─────────────────────────────────────────────────────────────────────── */
+
+div.cbi-section {
+    margin: var(--space-3) 0 var(--space-4);
+    border-radius: var(--radius-lg);
+}
 
 .cbi-section,
 .cbi-section-error,
@@ -914,20 +1393,20 @@ h3 {
 #cbi-wireless > .cbi-section-node,
 #cbi-wireless > #wifi_assoclist_table,
 [data-tab-title],
-/* [data-page^="admin-system-admin"]:not(.node-main-login) .cbi-map:not(#cbi-dropbear), */
 [data-page="admin-system-opkg"] #maincontent > .container {
-   /* margin: 10px 0 0 0; */
-   padding: 10px;
-   font-weight: normal;
+   padding: var(--space-5);
+   font-weight: var(--weight-normal);
    font-style: normal;
-   line-height: 1;
-   font-family: inherit;
+   line-height: var(--leading-normal);
+   font-family: var(--font-sans);
    text-align: left;
    min-width: inherit;
    overflow-x: auto;
    overflow-y: hidden;
-   background-color: var(--sectionbgColor);
-   border-radius: 8px;
+   background-color: var(--color-surface-0);
+   border: 1px solid var(--color-border-subtle);
+   border-radius: var(--radius-lg);
+   box-shadow: var(--shadow-sm);
    -webkit-overflow-scrolling: touch;
 }
 
@@ -1125,75 +1604,92 @@ td > table > tbody > tr > td,
 	border: 0;
 }
 
-/* button style */
+/* ═══════════════════════════════════════════════════════════════════════
+ * BUTTONS — 重构为 token-based 5 类语义按钮
+ * 详见 doc/claude_style.md §5.1
+ * ─────────────────────────────────────────────────────────────────────── */
 
-.cbi-button, .btn {
+.cbi-button,
+.btn {
     -webkit-appearance: none;
-    text-transform: uppercase;
-    color: #fff;
-    background-color: #337ab7;
-    transition: all 0.2s ease-in-out;
-    display: inline-block;
-    border: none;
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    min-height: 36px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    line-height: var(--leading-tight);
+    /* 默认 = secondary（中性按钮，最常出现） */
+    background-color: var(--color-surface-0);
+    color: var(--color-text);
+    border-color: var(--color-border-default);
     cursor: pointer;
-    -ms-touch-action: manipulation;
-    touch-action: manipulation;
-    background-image: none;
     text-align: center;
-    white-space: nowrap;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    user-select: none;
-    width: auto !important;
-    min-width: 80px;
-    padding: 0px 8px 0px 8px;
-    /* max-width: 160px; */
-    height: 35px;
-    line-height: 35px;
-    border-radius: 8px;
-}
-
-
-
-.cbi-button:hover,
-.cbi-button:focus,
-.cbi-button:active {
-    color: #fff;
-    outline: 0;
     text-decoration: none;
-    background-color: rgb(106,101,214);
+    text-transform: none;             /* 去掉 UPPERCASE，2014 风格 */
+    white-space: nowrap;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    transition:
+        background-color var(--motion-fast) var(--ease-out),
+        border-color var(--motion-fast) var(--ease-out),
+        color var(--motion-fast) var(--ease-out),
+        box-shadow var(--motion-fast) var(--ease-out),
+        transform var(--motion-fast) var(--ease-out);
 }
 
 .cbi-button:hover,
-.cbi-button:focus {
-    box-shadow: 0 1px 1px rgba(0,0,0,.05);
+.btn:hover {
+    background-color: var(--color-surface-1);
+    border-color: var(--color-border-strong);
+    color: var(--color-text);
 }
 
-.cbi-button:active {
-    box-shadow: 0 1px 1px rgba(0,0,0,.05);
+.cbi-button:focus-visible,
+.btn:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
 }
 
-.cbi-button:disabled {
+.cbi-button:active,
+.btn:active {
+    transform: translateY(0);
+}
+
+.cbi-button:disabled,
+.btn:disabled {
     cursor: not-allowed;
     pointer-events: none;
-    opacity: 0.60;
-    box-shadow: none;
+    opacity: 0.5;
 }
 
-.cbi-button-reset,
-.cbi-input-remove {
-    color: #fff !important;
-    background-color: #617486 !important;
+/* —— Primary（主操作）—— 整屏最多 1-2 个 */
+.cbi-input-apply,
+.cbi-button-apply,
+.cbi-button-edit,
+.cbi-button-positive,
+.cbi-button.cbi-button-positive {
+    background-color: var(--color-accent-500) !important;
+    color: var(--color-text-onAccent) !important;
+    border-color: transparent !important;
+}
+.cbi-input-apply:hover,
+.cbi-button-apply:hover,
+.cbi-button-edit:hover,
+.cbi-button-positive:hover {
+    background-color: var(--color-accent-600) !important;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
 }
 
-.cbi-button-reset:hover,
-.cbi-input-remove:hover,
-.cbi-button-remove:hover{
-    color: #fff !important;
-    background-color: rgb(83,100,115) !important;
-}
-
+/* —— Action / Save / Find / Reload（次主操作，蓝调）—— */
 .cbi-button-link,
 .cbi-input-find,
 .cbi-input-save,
@@ -1201,12 +1697,12 @@ td > table > tbody > tr > td,
 .cbi-button-save,
 .cbi-button-find,
 .cbi-input-reload,
-.cbi-button-reload {
-    color: var(--bttextColor);
-    background-color: rgb(0,171,232) !important;
-    border-color: rgb(0,171,232) !important;
+.cbi-button-reload,
+.cbi-button-action {
+    background-color: var(--color-info) !important;
+    color: var(--color-text-onAccent) !important;
+    border-color: transparent !important;
 }
-
 .cbi-button-link:hover,
 .cbi-input-find:hover,
 .cbi-input-save:hover,
@@ -1214,17 +1710,37 @@ td > table > tbody > tr > td,
 .cbi-button-save:hover,
 .cbi-button-find:hover,
 .cbi-input-reload:hover,
-.cbi-button-reload:hover{
-    color: #fff !important;
-    background-color: #337ab7 !important;
-    border-color: #337ab7 !important;
+.cbi-button-reload:hover,
+.cbi-button-action:hover {
+    background-color: #2563eb !important;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
 }
 
-.cbi-input-apply,
-.cbi-button-apply,
-.cbi-button-edit {
+/* —— Danger / Reset / Remove（危险操作）—— */
+.cbi-button-reset,
+.cbi-input-remove,
+.cbi-button-remove,
+.cbi-input-reset,
+.cbi-button-negative {
+    background-color: var(--color-danger) !important;
     color: #fff !important;
-    background-color: var(--activeColor);
+    border-color: transparent !important;
+}
+.cbi-button-reset:hover,
+.cbi-input-remove:hover,
+.cbi-button-remove:hover,
+.cbi-input-reset:hover,
+.cbi-button-negative:hover {
+    background-color: #dc2626 !important;
+}
+
+[data-page="admin-status-iptables"] .right {
+    margin-bottom: var(--space-3) !important;
+    margin-top: var(--space-3) !important;
+}
+.cbi-button:not(select) {
+    -webkit-appearance: none !important;
 }
 
 [data-page="admin-status-iptables"] .right {
@@ -1235,11 +1751,10 @@ td > table > tbody > tr > td,
     -webkit-appearance: none !important;
 }
 
-.cbi-input-reset,
-.cbi-button-remove,
-.cbi-button-neutral.down{
-    color: #fff !important;
-    background: #617486;
+/* .cbi-input-reset/.cbi-button-remove 已在上面的 Danger 类里处理 */
+.cbi-button-neutral.down {
+    background-color: var(--color-surface-2) !important;
+    color: var(--color-text-muted) !important;
 }
 
 
@@ -1796,43 +2311,43 @@ td > table > tbody > tr > td,
 	width: auto;
 }
 
-/* progressbar */
-/* progressbar */
+/* ───────────────────────────────────────────────────────────────────────
+ * Progress bar — 细高度 + token-based
+ * 详见 doc/claude_style.md §5.7 */
 .cbi-progressbar {
     position: relative !important;
     min-width: 11rem !important;
-    height: 1.5rem !important;
-    margin: 0 0 !important;
-    /* border-color: var(--progressbarColor) !important; */
-    background-color:var(--progressbarColor) !important;
-    border-radius: 5px !important;
+    height: 24px !important;
+    margin: 0 !important;
+    background-color: var(--color-surface-2) !important;
+    border-radius: var(--radius-pill) !important;
     overflow: hidden !important;
 }
 
-.cbi-progressbar>div {
+.cbi-progressbar > div {
     width: 0;
     height: 100% !important;
-    transition: width .25s ease-in !important;
-    color: var(--progressbartxtColor) !important;
-    background: var(--progressbar) !important;
+    transition: width var(--motion-normal) var(--ease-out) !important;
+    color: var(--color-text-onAccent) !important;
+    background: var(--color-accent-500) !important;
+    border-radius: inherit;
 }
 
 .cbi-progressbar::after {
-    /* font-weight: bold; */
-    /* font-family: monospace; */
-    font-size: 0.75rem !important;
-    font-size-adjust: .38 !important;
-    line-height: 1.5rem !important;
+    font-size: var(--text-xs) !important;
+    font-weight: var(--weight-medium);
+    font-variant-numeric: tabular-nums;
+    line-height: 24px !important;
     position: absolute !important;
-    top: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    left: 0 !important;
+    inset: 0 !important;
     overflow: hidden !important;
     content: attr(title) !important;
     text-align: center !important;
     white-space: pre !important;
     text-overflow: ellipsis !important;
+    color: var(--color-text);
+    mix-blend-mode: difference;     /* 数字在浅/深进度条上都可读 */
+    filter: invert(1);
 }
 
 #modal_overlay {
@@ -2371,16 +2886,20 @@ span[data-tooltip] .label {
 
 .label,
 [data-indicator] {
-	/* font-size: .8rem; */
-	font-weight: bold;
-	padding: .3rem .8rem;
-	white-space: nowrap;
-	text-decoration: none;
-	text-transform: uppercase;
-	/* color: #fff !important; */
-	border-radius: 3px;
-    background-color: var(--bgwhite);
-	text-shadow: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 2px var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    line-height: 1.5;
+    white-space: nowrap;
+    text-decoration: none;
+    text-transform: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--color-surface-1);
+    color: var(--color-text-muted);
+    text-shadow: none;
 }
 
 label > input[type="checkbox"],
@@ -2443,25 +2962,37 @@ input[name="nslookup"] {
 	width: 80%;
 }
 
-/* fix Main Login */
+/* ═══════════════════════════════════════════════════════════════════════
+ * LOGIN PAGE — 重设计
+ * 详见 doc/claude_style.md §8.1
+ *
+ * LuCI 的登录页用同一个 sysauth view，body 上加 .node-main-login class。
+ * 我们用 CSS 把它从"纯黑空白"重塑成"带卡片 + 品牌 + 渐变背景"。
+ * ─────────────────────────────────────────────────────────────────────── */
 
 .node-main-login {
     text-align: center;
-    background-color: var(--bgwhite) !important;
-}
-.node-main-login .cbi-section-node > .cbi-value:nth-of-type(2n) {
-    background: none;
-}
-.node-main-login h2 {
-    font-size: 1.5rem;
+    background-color: var(--color-bg) !important;
+    position: relative;
+    overflow: hidden;
 }
 
-.node-main-login header {
-    display: none;
+/* 背景：两个柔和的强调色径向辉光 */
+.node-main-login::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+        radial-gradient(circle at 20% 25%,
+            var(--color-accent-500-12) 0%, transparent 45%),
+        radial-gradient(circle at 80% 75%,
+            var(--color-accent-500-12) 0%, transparent 50%);
 }
-.node-main-login .navbar {
-    display: none;
-}
+
+.node-main-login header,
+.node-main-login .navbar,
 .node-main-login > .main > .main-left {
     display: none;
 }
@@ -2470,64 +3001,148 @@ input[name="nslookup"] {
     width: 100%;
 }
 
-.node-main-login > .main div.cbi-section {
-    /* padding: 0px !important; */
-    margin-bottom: 1rem;
-    display: inline;
-    background: none;
-    border: none;
-    box-shadow: none;
-    overflow: hidden;
+.node-main-login > .main #maincontent {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    height: auto;
+    padding: var(--space-5);
+    position: relative;
+    z-index: 1;
 }
 
-.node-main-login > .main label.cbi-value-title {
+.node-main-login > .main #maincontent > .container {
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto;
+    padding: 0;
+}
+
+/* 登录卡片本体 */
+.node-main-login > .main div.cbi-section,
+.node-main-login > .main .cbi-section {
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    padding: var(--space-6) var(--space-5);
+    margin: 0;
+    display: block;
+    text-align: left;
+    overflow: visible;
+}
+
+/* "需要授权"标题 */
+.node-main-login h2 {
+    font-size: var(--text-xl);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+    text-align: center;
+    padding: 0;
+    margin: 0 0 var(--space-1);
+}
+
+/* "请输入用户名和密码" 副标题 */
+.node-main-login .cbi-map-descr,
+.node-main-login .cbi-section-descr {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    text-align: center;
+    margin: 0 0 var(--space-5);
+    padding: 0;
+}
+
+/* 在卡片顶部用伪元素加一个 logo 圆角方块 */
+.node-main-login > .main div.cbi-section::before {
+    content: '';
+    display: block;
+    width: 56px;
+    height: 56px;
+    margin: 0 auto var(--space-4);
+    background-color: var(--color-accent-500);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    /* 中间放一个盾牌图标（白色描线，inline SVG via mask）*/
+    -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z'/><path d='m9 12 2 2 4-4'/></svg>");
+    -webkit-mask-size: 28px;
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z'/><path d='m9 12 2 2 4-4'/></svg>");
+    mask-size: 28px;
+    mask-position: center;
+    mask-repeat: no-repeat;
+    /* 由 background 描出盾牌图案：先填充强调色，再用白色 mask 切出图标
+     * Mask 字段限制：旧 Android WebView 可能不显示图标但 logo 块仍可见 */
+}
+
+/* 表单行 */
+.node-main-login > .main .cbi-value {
+    display: block;
+    border: none;
+    padding: 0;
+    margin: 0 0 var(--space-3);
+}
+
+.node-main-login > .main label.cbi-value-title,
+.node-main-login > .main .cbi-value-title {
+    display: block !important;
+    width: auto !important;
+    padding: 0 0 var(--space-1) !important;
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
+    text-transform: none;
+    letter-spacing: 0.04em;
+    text-align: left;
+}
+
+.node-main-login > .main .cbi-value > * {
+    display: block !important;
+}
+
+.node-main-login > .main .cbi-input-text,
+.node-main-login > .main input[type="password"] {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    margin: 0;
+    background: var(--color-surface-1);
+    border: 1px solid var(--color-border-default);
+}
+
+/* 登录按钮 = primary 全宽 */
+.node-main-login .cbi-page-actions {
+    text-align: center;
+    margin-top: var(--space-5);
+}
+.node-main-login .cbi-page-actions .cbi-button,
+.node-main-login .cbi-page-actions input[type="submit"] {
+    width: 100%;
+    min-height: 44px;
+    background-color: var(--color-accent-500) !important;
+    color: var(--color-text-onAccent) !important;
+    border: 0 !important;
+    font-size: var(--text-base);
+    font-weight: var(--weight-medium);
+}
+.node-main-login .cbi-page-actions .cbi-button:hover,
+.node-main-login .cbi-page-actions input[type="submit"]:hover {
+    background-color: var(--color-accent-600) !important;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+/* 隐藏 LuCI 默认的"复位"按钮（登录页要复位什么？） */
+.node-main-login .cbi-page-actions input[type="reset"],
+.node-main-login .cbi-page-actions .cbi-button-reset {
     display: none !important;
 }
 
-.node-main-login > .main .cbi-section {
-    margin-top: 10px !important;
-}
-
-.node-main-login > .main div.cbi-section .cbi-value-title {
-    padding: 10px 0 10px 5px !important;
-}
-
-.node-main-login > .main .cbi-value {
-    border: none;
-}
-
-.node-main-login > .main .cbi-value-title {
-    width: 7rem;
-}
-
-.node-main-login > .main #maincontent {
-    display: flex;
-    height: 100%;
-    text-align: center;
-    align-items: center;
-    align-content: center;
-    justify-content: center;
-}
-
-/* .node-main-login > .main .container {
-    background-image: var(--logo);
-    background-repeat: no-repeat;
-    background-size: 300px auto;
-    width: 300px;
-    padding: 80px 0 0 0;
-} */
-
-.node-main-login > .main .cbi-value > * {
-    display: inline-block !important;
-}
-
-/* .node-main-login > .main .cbi-input-user,
-.node-main-login > .main .cbi-input-password {
-    min-width: 15rem;
-} */
-
-.node-main-login > .main .cbi-input-text {
-    min-width: 15rem;
+/* 错误提示放到卡片内 */
+.node-main-login .alert-message {
+    margin-bottom: var(--space-4);
 }
 
 .node-main-login footer {
@@ -2884,13 +3499,22 @@ input[name="nslookup"] {
         padding: 17px 27px;
     }
 
+    /* Hamburger menu drawn in pure CSS — 3 horizontal lines via gradients
+     * (replaces icomoon \e20e). 22×16 box centered in 50×50 button. */
     .showSide:before {
-        content: "\e20e";
-        font-size: 1.7rem;
-	font-family: 'icomoon';
-        line-height: 1;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
+        content: '';
+        display: block;
+        width: 22px;
+        height: 16px;
+        background:
+            linear-gradient(currentColor, currentColor) top    / 100% 2px no-repeat,
+            linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat,
+            linear-gradient(currentColor, currentColor) bottom / 100% 2px no-repeat;
+        color: var(--color-text);
+        transition: color var(--motion-fast) var(--ease-out);
+    }
+    .showSide:hover:before {
+        color: var(--color-accent-600);
     }
 
     #maincontent > .container {
@@ -3444,11 +4068,74 @@ td.cbi-button, .cbi-button-apply,
     white-space: nowrap;
 }
 
-/* fix node-admin-status-overview color */
+/* ═══════════════════════════════════════════════════════════════════════
+ * OVERVIEW DASHBOARD — 把 LuCI 原生 overview 卡片化布局
+ * 详见 doc/claude_style.md §8.2
+ *
+ * LuCI 自带的 status/overview 在 #view 下渲染多个 .cbi-section（系统 / 内存 /
+ * 接口 / DHCP / 等）。这里用 CSS Grid 让它们自动两栏排布，让信息密度上去。
+ * ─────────────────────────────────────────────────────────────────────── */
+
 .node-admin-status-overview h3 {
-    color: unset !important;
+    color: var(--color-text);
+    font-weight: var(--weight-semibold);
+    font-size: var(--text-lg);
+    padding: 0 0 var(--space-3);
+    margin: 0;
 }
-/* fix node-admin-status-overview */
+
 .node-admin-status-overview > .main #view td:nth-child(2) {
     white-space: normal;
+}
+
+/* Grid 容器：所有 .cbi-section 兄弟节点 */
+.node-admin-status-overview #view {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: var(--space-4);
+    align-items: start;
+}
+
+/* 第一个 cbi-section（系统信息）通常重要，占满整行 */
+.node-admin-status-overview #view > .cbi-section:first-of-type {
+    grid-column: 1 / -1;
+}
+
+/* cbi-section 卡片本身（基础 token 已应用，这里仅微调） */
+.node-admin-status-overview #view > .cbi-section {
+    margin: 0;
+    transition: transform var(--motion-fast) var(--ease-out),
+                box-shadow var(--motion-fast) var(--ease-out);
+}
+.node-admin-status-overview #view > .cbi-section:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+/* 表格内的"label : value"对齐 */
+.node-admin-status-overview #view table > tbody > tr > td:first-child,
+.node-admin-status-overview #view .table > .tbody > .tr > .td:first-child {
+    color: var(--color-text-muted);
+    font-weight: var(--weight-medium);
+    font-size: var(--text-sm);
+    width: 40%;
+}
+
+.node-admin-status-overview #view table > tbody > tr > td:nth-child(2),
+.node-admin-status-overview #view .table > .tbody > .tr > .td:nth-child(2) {
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+}
+
+/* 内存 / 缓存等进度条样式上的微调 */
+.node-admin-status-overview .cbi-progressbar {
+    margin-top: var(--space-1) !important;
+}
+
+/* 在小屏上单栏 */
+@media (max-width: 768px) {
+    .node-admin-status-overview #view {
+        grid-template-columns: 1fr;
+    }
 }
