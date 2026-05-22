@@ -247,88 +247,163 @@ setInterval(async () => {
 
 ## 2. Tier A — 高实用度
 
-### A1 · WAN / 互联网状态 Hero 卡片
+### A1 · WAN / 互联网状态 Hero 卡片（**面向全球用户重新设计**）
 
 **Why：** 用户打开管理面板，**首要问题**是"我的网是好的吗？"。把这个问题做成首屏最大的一张卡片。
 
-**视觉：**
+**🌍 全球用户考虑：**
+原方案用第三方 API 自动查 ISP（"China Telecom"），有 3 个问题：
+1. **隐私**：用户公网 IP 离开路由器到第三方服务
+2. **可达性**：部分地区/国家网络无法访问 ipapi.co 类服务
+3. **本地化**：ISP 名永远是英文（不会显示"中国电信"或"Deutsche Telekom"）
+
+**默认 = 零第三方依赖，全靠 LuCI 自己知道的数据：**
 
 ```
-╔══════════════════════════════════════════════════════════╗
-║ 🌐 互联网 · 在线                                          ║
-║                                                          ║
-║  公网 IP    203.0.113.45        延迟到 1.1.1.1            ║
-║  运营商     China Telecom        ●●●●○ 14ms              ║
-║                                                          ║
-║  ↑ 92 Mbps    ↓ 487 Mbps        最近 24h 稳定            ║
-║  ────────────                   ▁▂▃▃▂▅▇▆▅▄▃ 平均 14ms   ║
-╚══════════════════════════════════════════════════════════╝
+┌──────────────────────────────────────────────────────────┐
+│ 🌐 互联网 · 在线              延迟到网关 ●●●●○ 1.2ms      │
+│                                                          │
+│  公网 IP    203.0.113.45      WAN 接口                   │
+│  连接方式   PPPoE             pppoe-wan · 1 Gbps         │
+│                                                          │
+│  ↑ 12 Mbps   ↓ 487 Mbps       已连续在线 9d 14h          │
+│  ─────────                    [ 立即测速 (LAN) → ]      │
+└──────────────────────────────────────────────────────────┘
 ```
 
-**实现：**
-- 公网 IP：`ubus call network.interface.wan status` → `.address`
-- ISP：可调用 `https://ipapi.co/{ip}/json` 或本地 GeoIP（隐私模式选项）
-- 延迟：浏览器 `fetch('//1.1.1.1', {mode: 'no-cors'})` 测时间差
-- 上下行：从 `/proc/net/dev` 取 wan 接口字节差分
-- 历史：和 Sparkline 共享数据源
+**所有显示项 100% 本地获取：**
 
-| 工时 | ~100 行 JS + ~80 行 CSS（3-4 小时） |
-| 风险 | 低-中（ipapi 外部依赖可选）|
+| 字段 | 来源 | 全球可用？ |
+|---|---|---|
+| 在线状态 | `ubus call network.interface.wan status` `.up` | ✅ |
+| 公网 IP | 同上 `.ipv4-address[0].address` | ✅ |
+| 连接方式 | `.proto`（pppoe / dhcp / static / wireguard） | ✅ |
+| WAN 接口 + 速率 | `ethtool ${ifname}` 或 `/sys/class/net/${ifname}/speed` | ✅ |
+| 延迟到网关 | 浏览器 `fetch('/luci-static/design/ping.cgi')` 测毫秒 | ✅ |
+| 实时上下行 | `/proc/net/dev` 差分（5s 轮询） | ✅ |
+| 在线时长 | `network.interface.wan.uptime` | ✅ |
+
+**ISP 显示作为可选功能，opt-in：**
+
+UCI 配置：
+
+```sh
+uci set luci-theme-design.appearance.show_isp='1'
+uci set luci-theme-design.appearance.isp_provider='ipapi.co'   # or ip-api.com, ipinfo.io
+uci commit luci-theme-design
+```
+
+启用后：
+1. 第一次显示前弹 modal：「将发送您的公网 IP `203.0.113.45` 至 `ipapi.co` 查询运营商信息，是否继续？」
+2. 用户同意后查询，结果缓存 1 小时（避免 rate limit）
+3. 用户可随时关闭这个开关
+
+**默认 = OFF**。这样全球用户**不会因为打开主题而泄露 IP**，喜欢看 ISP 信息的中国用户可以主动开。
+
+**i18n：** ISP provider 列表里包含支持本地化的服务（`ip-api.com` 返回的 `org` 字段对国内 ISP 也有中文）。
+
+| 工时 | ~120 行 JS + ~80 行 CSS（3-4 小时，含 ISP 同意 modal） |
+| 风险 | 极低（默认无外部依赖） |
+| 隐私 | 默认 100% 本地；ISP 功能 opt-in + 显式同意 |
 
 ---
 
-### A2 · 设备列表智能图标
+### A2 · 设备列表（紧凑单行 + 智能图标）
 
-**Why：** DHCP 客户端 / 无线客户端表格里，`a4:c4:94:6c:8f:33` 谁知道是什么设备。智能图标根据 hostname / MAC OUI 推断。
+**Why：** DHCP 客户端 / 无线客户端表格里 `a4:c4:94:6c:8f:33` 谁知道是什么设备。
 
-**视觉：**
+**关键决定：紧凑布局**
+原方案多列表格占太多垂直空间，10 个设备就要滚动。**重新设计为单行 + 点击展开详情**。
+
+**单行视觉（每行约 40px 高）：**
 
 ```
-设备                  IP              连接          状态
-─────────────────────────────────────────────────────────
-🖥 MacBook-Pro        192.168.1.100   Wi-Fi 5GHz   ●在线  -41 dBm
-📱 iPhone-John        192.168.1.105   Wi-Fi 5GHz   ●在线  -52 dBm
-📺 LG-WebOS-TV        192.168.1.110   有线         ●在线  1 Gbps
-🌡 SmartThermostat    192.168.1.122   Wi-Fi 2.4G   8h ago
-🎮 Switch-Nintendo    192.168.1.130   Wi-Fi 5GHz   ●在线
-📷 Doorbell-Cam       192.168.1.150   Wi-Fi 2.4G   ●在线
-🖨 HP-LaserJet        192.168.1.200   有线         离线 3d
+🖥 MacBook-Pro                     .100   ●●●●  -41dBm   3h
+📱 iPhone-John                     .105   ●●●○  -52dBm   现在
+📺 LG-TV                           .110   有线  1Gbps    1h
+🌡 SmartThermostat                 .122   ●○○○  -78dBm   8h
+🎮 Switch                          .130   ●●●●  -48dBm   30m
+📷 Doorbell-Cam                    .150   ●●○○  -65dBm   现在
+🖨 HP-LaserJet (灰)                .200   有线           3d
 ```
+
+**点击一行展开详情：**
+
+```
+🖥 MacBook-Pro                                          ▲
+   ╭───────────────────────────────────────────────╮
+   │ 完整 IP   192.168.1.100      MAC  3C:22:FB:8A:1B:42  │
+   │ 厂商      Apple (OUI 3C:22:FB)                 │
+   │ 信号      ●●●● -41 dBm (优)                    │
+   │ 连接      Wi-Fi 5GHz · 信道 149 · 80MHz        │
+   │ 协商速率  866 Mbps                              │
+   │ 本次会话流量  ↓ 1.2 GB  ↑ 142 MB · 持续 3h 22m │
+   │                                                 │
+   │ [ 改名 ] [ 加入白名单 ] [ 阻止 ] [ 限速 ]      │
+   ╰───────────────────────────────────────────────╯
+```
+
+**数据源最佳实现：**
+
+| 优先级 | 信号 | 推断什么 | 可靠度 |
+|---|---|---|---|
+| ① | hostname 关键词 | 设备**类型** | 80%+ |
+| ② | MAC OUI prefix | 设备**厂商** | >99% |
+| ③ | 连接方式（有线/2.4/5G） | 形态线索 | 100% |
+
+**hostname 是关键**：`iPhone-John` → 一眼能看出 iPhone。MAC OUI 只能猜厂商（同一个 Apple OUI 可能是 iPhone / Mac / iPad / AppleTV / HomePod / Apple Watch，分不出）。
 
 **实现：**
 
 ```javascript
 const DEVICE_TYPES = {
     // hostname 关键词 → icon
-    'macbook|imac|mac-mini':       { icon: 'monitor',    type: '电脑' },
-    'iphone|ipad':                 { icon: 'smartphone', type: '苹果设备' },
-    'android|pixel|samsung':       { icon: 'smartphone', type: '安卓设备' },
-    'tv|chromecast|appletv|roku':  { icon: 'tv',         type: '电视' },
-    'switch|nintendo|playstation': { icon: 'gamepad-2',  type: '游戏机' },
-    'thermostat|hue|nest|aqara':   { icon: 'thermometer',type: 'IoT' },
-    'camera|cam|doorbell':         { icon: 'camera',     type: '摄像头' },
-    'printer|laserjet|brother':    { icon: 'printer',    type: '打印机' },
-    'echo|alexa|homepod':          { icon: 'mic',        type: '智能音箱' },
+    'macbook|imac|mac-?mini':       { icon: 'laptop',     type: '电脑' },
+    'iphone':                       { icon: 'smartphone', type: '手机' },
+    'ipad':                         { icon: 'tablet',     type: '平板' },
+    'android|pixel|samsung-galaxy': { icon: 'smartphone', type: '安卓设备' },
+    'tv|bravia|webos|chromecast':   { icon: 'tv',         type: '电视' },
+    'switch|nintendo|ps5|xbox':     { icon: 'gamepad',    type: '游戏机' },
+    'thermostat|nest|hue|aqara':    { icon: 'thermo',     type: 'IoT' },
+    'camera|cam|doorbell|ring':     { icon: 'camera',     type: '摄像头' },
+    'printer|laserjet|brother':     { icon: 'printer',    type: '打印机' },
+    'echo|alexa|homepod':           { icon: 'mic',        type: '智能音箱' },
 };
 
-// MAC OUI prefix → 厂商
+// 精选的 200 个常见 OUI prefix（vendor only，不暗示设备类型）
 const OUI = {
-    '3C:22:FB': 'Apple',    'A4:C4:94': 'Samsung',
-    'B8:27:EB': 'Raspberry Pi',  '00:1A:11': 'Google',
-    // ...精选 200 个常见
+    '3C:22:FB': 'Apple',           'A4:C4:94': 'Samsung',
+    'B8:27:EB': 'Raspberry Pi',    '00:1A:11': 'Google',
+    'DC:A6:32': 'Espressif IoT',   '04:03:D6': 'Nintendo',
+    // ...
 };
 
 function inferDevice(client) {
-    // 1. 先看 hostname 关键词
-    // 2. 再看 MAC OUI
-    // 3. 最后看连接方式（有线 vs 无线 vs 2.4/5GHz）
-    return { icon, type };
+    // 1. hostname 关键词（首选）
+    for (const [pattern, info] of Object.entries(DEVICE_TYPES)) {
+        if (new RegExp(pattern, 'i').test(client.hostname || '')) {
+            return { ...info, vendor: ouiVendor(client.mac) };
+        }
+    }
+    // 2. MAC OUI 兜底（只能给厂商，类型给"未知设备"）
+    const vendor = ouiVendor(client.mac);
+    return { icon: 'device-generic', type: vendor ? `${vendor} 设备` : '未知设备', vendor };
 }
 ```
 
-| 工时 | ~50 行 JS + 200 项 OUI/hostname 表（4-5 小时含数据收集） |
+**信号强度展示：**
+
+bars + dBm 数字双重信息。颜色：
+- ≥ -50 dBm → 4 格全绿（优）
+- -50 ~ -65 → 3 格绿（良好）
+- -65 ~ -75 → 2 格橙（一般）
+- < -75 → 1 格红（弱）
+
+| 工时 | ~80 行 JS + ~120 行 CSS + 200 项 OUI 表（4-5 小时） |
 | 风险 | 低 |
-| 数据来源 | 已有 `dhcp.leases` + `iwinfo.assoclist` |
+| 数据来源 | `dhcp.leases` + `iwinfo.assoclist` + 内置 OUI 数据 |
+
+**Bonus：** 用户可以**手动给设备改名**（存 UCI），下次显示就用自定义名。比如把 `android-1234567890` 改成 `老婆的手机`。
 
 ---
 
@@ -361,34 +436,118 @@ function inferDevice(client) {
 
 ---
 
-### A4 · PWA 安装引导
+### A5 · Wi-Fi / LAN 链路测速（**新增 · 替换原 WAN Speedtest**）
 
-**Why：** 我们已经有了正确的 manifest.json，但用户不知道可以"添加到主屏幕"。
+**Why：** 用户抱怨"Wi-Fi 慢"时，原本无法判断是 Wi-Fi 慢还是 WAN 慢。这个功能测的是**浏览器 ↔ 路由器**的实际连接质量——直接反映用户当前 Wi-Fi 体验。
+
+**与 WAN 测速的区别：**
+
+| 测速类型 | 测什么 | 实现位置 |
+|---|---|---|
+| **WAN Speedtest**（不做） | 路由器到公网测速服务器 | 需要装外部包（librespeed 等） |
+| **LAN / Wi-Fi 测速**（要做） | 浏览器到路由器 | 主题自带 CGI + JS，零依赖 |
 
 **视觉：**
 
 ```
-第一次访问时，底部低调出现：
-
-┌─────────────────────────────────────────────────┐
-│ 💾 把 OpenWrt 添加到主屏幕，下次直接打开           │
-│                                  [稍后] [安装]   │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│ 📡 Wi-Fi 链路测试                                 │
+│                                                  │
+│  ↓ 下载  487.2 Mbps          ↑ 上传  92.4 Mbps   │
+│  ╭────────╮                  ╭────────╮          │
+│  │ ▓▓▓▓▓▓ │ 86% of theory   │ ▓▓     │ 92 Mbps  │
+│  ╰────────╯                  ╰────────╯          │
+│                                                  │
+│  延迟  2.1 ms      抖动  0.3 ms     丢包  0%     │
+│                                                  │
+│  📶 信号 ●●●●○ -41 dBm · 信道 149 · 5GHz 80MHz   │
+│  📊 理论上限 ~600 Mbps（实测占 86%）              │
+│                                                  │
+│  [ 重新测试 ]   [ 对比 2.4G vs 5G ]              │
+└──────────────────────────────────────────────────┘
 ```
 
-**实现：**
+**实用场景：**
+- 抱怨"Wi-Fi 慢" → 测一下证明是不是 Wi-Fi 的事（vs WAN）
+- 比较"我在卧室 vs 客厅" → 拿着手机走一圈测
+- 比较"2.4G vs 5G" → 切 SSID 后再测
+- 验证"刚调过功率 / 换了天线 / 改了信道"有没有效果
+
+**实现路径：**
+
+#### 浏览器侧 JS
 
 ```javascript
-window.addEventListener('beforeinstallprompt', e => {
-    e.preventDefault();
-    if (localStorage.getItem('pwa-dismissed')) return;
-    showInstallBanner(e);
-});
+async function runSpeedtest() {
+    // 1. 延迟测试（10 次取中位数）
+    const pings = [];
+    for (let i = 0; i < 10; i++) {
+        const t0 = performance.now();
+        await fetch('/luci-static/design/speedtest/ping?t=' + Date.now());
+        pings.push(performance.now() - t0);
+    }
+    const latency = median(pings);
+    const jitter = stddev(pings);
+
+    // 2. 下载测试（拉一个大文件，测时间）
+    const downloadStart = performance.now();
+    const resp = await fetch('/luci-static/design/speedtest/download?bytes=20000000');
+    const blob = await resp.blob();
+    const downloadMs = performance.now() - downloadStart;
+    const downloadMbps = (blob.size * 8 / 1e6) / (downloadMs / 1000);
+
+    // 3. 上传测试（POST 大 blob）
+    const uploadBlob = new Blob([new Uint8Array(10_000_000)]);
+    const uploadStart = performance.now();
+    await fetch('/luci-static/design/speedtest/upload', {
+        method: 'POST', body: uploadBlob
+    });
+    const uploadMs = performance.now() - uploadStart;
+    const uploadMbps = (10 * 8) / (uploadMs / 1000);
+
+    return { latency, jitter, downloadMbps, uploadMbps };
+}
 ```
 
-| 工时 | ~30 行 JS + ~40 行 CSS（1-2 小时） |
-| 风险 | 极低 |
-| 兼容性 | Chrome / Edge / Android。iOS Safari 不支持 `beforeinstallprompt`，需要 fallback 提示"点击分享按钮" |
+#### 服务器侧 CGI（主题包含）
+
+```sh
+# htdocs/luci-static/design/speedtest/ping.cgi
+#!/bin/sh
+echo "Content-Type: text/plain"
+echo ""
+echo "pong"
+```
+
+```sh
+# htdocs/luci-static/design/speedtest/download.cgi
+#!/bin/sh
+echo "Content-Type: application/octet-stream"
+echo ""
+BYTES=${QUERY_STRING:-1000000}
+# 用 /dev/urandom 防止中间路由器/浏览器缓存
+dd if=/dev/urandom bs=$BYTES count=1 2>/dev/null
+```
+
+```sh
+# htdocs/luci-static/design/speedtest/upload.cgi
+#!/bin/sh
+echo "Content-Type: text/plain"
+echo ""
+# 读 stdin 但丢弃，只测速度
+dd of=/dev/null 2>/dev/null
+echo "ok"
+```
+
+**Bonus 功能：**
+- **理论上限对比**：根据当前 wireless mode（802.11ac 80MHz 等）算理论速率，告诉用户"你的链路实测占理论 86%"
+- **2.4G vs 5G 对比模式**：用户先连 5G 测一次，切到 2.4G 再测，对比两次结果
+- **历史记录**：最近 10 次测试用 localStorage 存，看趋势
+
+| 工时 | ~150 行 JS + ~80 行 CSS + 3 个 CGI 脚本（5-6 小时） |
+| 风险 | 低（纯前端 + 自带 CGI） |
+| 依赖 | 0 外部依赖 |
+| 兼容性 | 全浏览器；CGI 在 OpenWrt 上 100% 可用 |
 
 ---
 
@@ -584,102 +743,114 @@ if (location.search.includes('debug=pseudo-long')) {
 
 ---
 
-## 5. Tier D — 大胆但争议
+## 5. Tier D — 流量分析
 
-> 这些是"如果我们想做开源界没人做过的事"的方向。**不建议优先做**，但值得讨论。
+> 之前的 D1 (WAN Speedtest) 和 D3 (AI 助手) 已**删除**——前者超出主题边界（需外部包），后者完全跑偏。
+>
+> 剩下的 D2 流量地图**扩展为完整的流量分析模块**。
 
-### D1 · 内置 Speedtest
+### D2 · 流量分析（实时 + 历史累计）
 
-```
-[ 立即测速 ] 点击后：
+**Why：**
+- 实时："谁在用我的带宽？"
+- 历史："过去 24 小时谁用得最多？"——用于发现"为啥昨晚网那么卡（哦原来 LG-TV 看了 4 小时 Netflix）"
 
-   ↓ 488.2 Mbps
-   ↑ 92.4 Mbps
-   延迟 14ms · 抖动 2ms
-   服务器：China Telecom Shanghai
+**两个 Tab + 时段切换：**
 
-   [实时图表] [上次结果] [测速历史]
-```
-
-**实现：** 接入 [librespeed](https://github.com/librespeed/speedtest) 或者用浏览器原生 `fetch` 大文件测速。
-
-**坑：** "测速"会消耗带宽，普通家用网络上跑速度测试一次几百 MB。需要明确告知用户。
-
-| 工时 | ~6-8 小时（含 backend） |
-| 风险 | 中（需安装额外包） |
-
----
-
-### D2 · 实时流量地图（Top N 设备带宽火焰图）
+#### Tab 1: 实时（当前那一秒）
 
 ```
-现在 LAN 流量构成：
+现在 LAN 流量构成                    ⚪ 实时 · 自动 2s 刷新
 
-iPhone-John  ████████████████ 124 Mbps  ↓
-MacBook-Pro  ████████ 56 Mbps           ↓
-LG-WebOS-TV  ████ 23 Mbps               ↓
-其他 (8 个)  ██ 8 Mbps
-─────────────────────────────────
-总计         211 Mbps
+📱 iPhone-John      ████████████████  124 Mbps  ↓
+🖥 MacBook-Pro      ████████          56 Mbps   ↓
+📺 LG-WebOS-TV      ████              23 Mbps   ↓
+🌡 IoT (5 个)       ▌                 0.8 Mbps
+─────────────────────────────────────────────
+总计                                  211 Mbps
+峰值（过去 1 分钟）                    348 Mbps · 7s ago
 ```
 
-**实现：** 需要 `nlbw` 或 `collectd-mod-iptables` 数据源。如果用户没装，显示"安装统计模块以查看流量构成"。
-
-**冒着 LuCI 主题边界**——理论上是"主题"不该有的功能。
-
-| 工时 | 8-10 小时 |
-| 风险 | 高（依赖外部包 + 设计复杂） |
-
----
-
-### D3 · AI 助手按钮
+#### Tab 2: 累计（用户选择时段）
 
 ```
-顶栏 🤖 按钮 → 弹出对话窗：
+累计流量      [ 1h ] [ 6h ] [ 12h ] [✓ 24h ]   ←时段切换
 
-╭─────────────────────────────────────────╮
-│ 🤖 路由器助手                            │
-├─────────────────────────────────────────┤
-│ > 为什么 5GHz 信号弱？                   │
-│                                         │
-│ 我看了你当前的配置：                      │
-│ • 信道 36（拥挤）→ 建议改为 149          │
-│ • 发射功率 17 dBm（偏低）→ 建议 20      │
-│ • 信道宽度 80MHz（合理）                 │
-│                                         │
-│ [ 自动优化 ]   [ 仅显示建议 ]           │
-╰─────────────────────────────────────────╯
+📱 iPhone-John      ████████████████  48.2 GB
+                    ↓ 45.0 GB  ↑ 3.2 GB
+
+🖥 MacBook-Pro      ████████          28.7 GB
+                    ↓ 26.1 GB  ↑ 2.6 GB
+
+📺 LG-TV            ████              12.5 GB
+                    ↓ 12.5 GB  ↑ 0.0 GB  (Netflix?)
+
+🌡 IoT (5 个)       ▎                 0.8 GB
+
+─────────────────────────────────────────────
+总计                                  92.1 GB ↓ + 6.2 GB ↑
+峰值                                  487 Mbps · 昨晚 21:34
+
+[ 导出 CSV ]   [ 设置流量警报 ]
 ```
 
-**实现：** 用户提供自己的 OpenAI / Claude / Gemini API key（本地存 `localStorage`），主题在浏览器侧组装 prompt + 调 API。**配置数据从不离开浏览器**（隐私友好）。
+**实现：**
 
-**这会让这个主题在 GitHub Trending 上拿到 10k+ stars。** 但也**完全跑偏 LuCI 主题边界**。
+#### 实时 Tab
+- 数据源：`/proc/net/dev` per-IP 流量需要 `iptables` accounting 或 `nlbw`
+- **没 nlbw 时降级**：显示 `/proc/net/dev` 接口总流量（没法分用户）+ 提示"安装 nlbw 解锁分用户流量"
 
-| 工时 | 8-12 小时 |
-| 风险 | 高（产品定位 / 隐私争议 / API 成本） |
-| 收益 | 病毒级传播潜力 |
+#### 历史 Tab
+- **必须装 `luci-app-nlbw`**（OpenWrt 标准带宽统计包）
+- nlbw 提供 24h+ 历史，可按小时聚合
+- 时段切换 = 改 nlbw 查询参数
+
+#### 没装 nlbw 时
+
+```
+┌──────────────────────────────────────────────┐
+│ 📊 流量分析需要 nlbw                          │
+│                                              │
+│  安装 nlbw 后可以看到：                       │
+│  • 实时分用户带宽占用                         │
+│  • 过去 24h / 7 天累计流量排行                │
+│  • 单设备每小时使用图                         │
+│                                              │
+│  [ 打开软件包管理 → opkg ]                   │
+└──────────────────────────────────────────────┘
+```
+
+**Bonus 功能：**
+- **导出 CSV**：把累计数据导出，自己拿去分析
+- **流量警报**：设备超过 X GB / 小时时 toast 提醒（"iPhone-John 1 小时用了 8 GB，可能在看 4K 视频"）
+- **设备时间线**：点设备名展开，看它**过去 24h 每小时**的曲线（哪几个小时最忙）
+
+| 工时 | 实时 Tab ~80 行 + 历史 Tab ~150 行 + 没 nlbw 占位 ~30 行 = **8-10 小时** |
+| 风险 | 中（重度依赖 nlbw） |
+| 依赖 | 主功能需 `luci-app-nlbw` |
 
 ---
 
 ## 6. 实施建议
 
-### 推荐顺序
+### 推荐顺序（**v2 修订后**）
 
 **第一波（必做，~1 个工作日 8h）：**
 1. **S1 Cmd+K** → 立刻把 LuCI 的最大痛点（找东西）解决
 2. **S2 Toast** → 替换 modal，让每次保存都顺滑
 3. **S3 Sparkline** → 让首页"活"起来
 
-**第二波（值得做，~2 个工作日 16h）：**
-4. **A1 WAN Hero** → 答好"网通不通"
-5. **A2 智能设备图标** → 让客户端列表有意义
-6. **B4 Diff Viewer** → 配置变更安全感
+**第二波（值得做，~2 个工作日 14h）：**
+4. **A1 WAN Hero**（全球友好版，无 ISP 默认） → 答好"网通不通"
+5. **A2 紧凑设备列表 + 点击展开** → 让客户端列表有意义
+6. **A5 Wi-Fi / LAN 测速**（新增） → 用户能自己验证 Wi-Fi 质量
+7. **B4 Diff Viewer** → 配置变更安全感
 
-**第三波（看时间，~2 个工作日 16h）：**
-7. **A3 快速操作面板**
-8. **A4 PWA 安装引导**
+**第三波（看时间，~2 个工作日 14h）：**
+8. **A3 快速操作面板**
 9. **B1 Bottom Sheet**
 10. **B2 Pull-to-Refresh**
+11. **D2 流量分析**（实时 + 1/6/12/24h 累计，需 nlbw）
 
 **长期工程优化（独立 PR）：**
 - C1 CSS 拆分
@@ -687,11 +858,13 @@ LG-WebOS-TV  ████ 23 Mbps               ↓
 - C3 i18n 压测
 - C4 Lighthouse CI
 
-**讨论后再定（**不一定要做**）：**
+**已删除（曾在 v1 提案中）：**
+- ~~A4 PWA 安装引导~~ — 用户反馈不需要
+- ~~D1 WAN Speedtest~~ — 超出主题边界（应作为外部包）
+- ~~D3 AI 助手~~ — 跑偏
+
+**讨论后再定：**
 - B3 健康分（可能做作）
-- D1 Speedtest（超出主题边界）
-- D2 流量地图（依赖额外包）
-- D3 AI 助手（完全跑偏，但极有冲击力）
 
 ---
 

@@ -715,6 +715,132 @@ button { font-family: inherit; cursor: pointer; }
 .signal-bars.weak span:nth-child(1),
 .signal-bars.weak span:nth-child(2) { background: var(--warning); }
 
+/* —— Compact device list (single row, click to expand) —— */
+.dl-header {
+	display: grid;
+	grid-template-columns: 32px 1fr 60px 130px 80px 24px;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-4);
+	background: var(--surface-1);
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	font-weight: var(--weight-semibold);
+	text-transform: uppercase;
+	letter-spacing: .05em;
+	border-bottom: 1px solid var(--border-subtle);
+}
+.dl-header > span:first-child { grid-column: 1 / 3; }
+
+.dl-row {
+	border-bottom: 1px solid var(--border-subtle);
+	cursor: pointer;
+	transition: background var(--motion-fast) var(--ease-out);
+}
+.dl-row:last-child { border-bottom: 0; }
+.dl-row:hover { background: var(--surface-1); }
+.dl-row.expanded { background: var(--surface-1); }
+.dl-summary {
+	display: grid;
+	grid-template-columns: 32px 1fr 60px 130px 80px 24px;
+	gap: var(--space-3);
+	align-items: center;
+	padding: var(--space-2) var(--space-4);
+	min-height: 44px;
+}
+.dl-icon {
+	width: 32px; height: 32px;
+	display: flex; align-items: center; justify-content: center;
+	background: var(--surface-1);
+	border-radius: var(--radius-sm);
+}
+.dl-row:hover .dl-icon, .dl-row.expanded .dl-icon { background: var(--accent-500-12); }
+.dl-name {
+	font-weight: var(--weight-medium);
+	color: var(--text);
+	font-size: var(--text-sm);
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dl-ip {
+	font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+}
+.dl-sig {
+	display: flex; align-items: center; gap: var(--space-2);
+	font-size: var(--text-xs);
+	font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+	color: var(--text-muted);
+}
+.dl-sig .db { color: var(--text-subtle); }
+.dl-wired {
+	display: inline-flex; align-items: center;
+	padding: 2px var(--space-2);
+	font-size: 11px;
+	background: var(--surface-2);
+	border-radius: var(--radius-sm);
+	color: var(--text-muted);
+}
+.dl-seen {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+.dl-chev {
+	color: var(--text-subtle);
+	font-size: 14px;
+	transition: transform var(--motion-fast) var(--ease-out);
+}
+.dl-row.expanded .dl-chev { transform: rotate(180deg); }
+
+.dl-expand {
+	max-height: 0;
+	overflow: hidden;
+	transition: max-height var(--motion-normal) var(--ease-out);
+	background: var(--surface-0);
+}
+.dl-row.expanded .dl-expand { max-height: 320px; }
+
+.dl-detail-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: var(--space-3) var(--space-5);
+	padding: var(--space-4) var(--space-4) var(--space-3) calc(var(--space-4) + 32px + var(--space-3));
+}
+.dl-detail-grid > div { font-size: var(--text-xs); }
+.dl-detail-grid dt {
+	color: var(--text-subtle);
+	text-transform: uppercase;
+	letter-spacing: .04em;
+	margin-bottom: 2px;
+}
+.dl-detail-grid dd { color: var(--text); }
+.dl-detail-grid dd.mono {
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+}
+.dl-actions {
+	display: flex;
+	gap: var(--space-2);
+	flex-wrap: wrap;
+	padding: 0 var(--space-4) var(--space-4) calc(var(--space-4) + 32px + var(--space-3));
+}
+
+@media (max-width: 640px) {
+	.dl-header { display: none; }
+	.dl-summary {
+		grid-template-columns: 32px 1fr auto 24px;
+		grid-template-rows: auto auto;
+	}
+	.dl-summary .dl-name { grid-column: 2 / 3; }
+	.dl-summary .dl-ip { grid-column: 2; grid-row: 2; font-size: 11px; }
+	.dl-summary .dl-sig { grid-column: 3; grid-row: 1; }
+	.dl-summary .dl-seen { grid-column: 3; grid-row: 2; font-size: 11px; }
+	.dl-summary .dl-chev { grid-column: 4; grid-row: 1 / 3; }
+	.dl-detail-grid { padding-left: var(--space-4); }
+	.dl-actions { padding-left: var(--space-4); }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
  *  A3 — Quick Actions Popover
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -772,34 +898,147 @@ button { font-family: inherit; cursor: pointer; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- *  A4 — PWA Install Banner
+ *  A5 — Wi-Fi / LAN Speedtest
  * ═══════════════════════════════════════════════════════════════════════════ */
-.pwa-banner {
-	display: flex; align-items: center; gap: var(--space-3);
-	padding: var(--space-3) var(--space-4);
-	background: var(--surface-0);
-	border: 1px solid var(--border-subtle);
-	border-radius: var(--radius-md);
-	box-shadow: var(--shadow-md);
+.speedtest-v2 {
+	padding: var(--space-6);
 }
-.pwa-banner-icon {
-	width: 40px; height: 40px;
-	background: var(--accent-500);
-	color: white;
-	border-radius: var(--radius-md);
-	display: flex; align-items: center; justify-content: center;
-	flex-shrink: 0;
+.st-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--space-5);
+	margin-bottom: var(--space-5);
 }
-.pwa-banner-body { flex: 1; }
-.pwa-banner-title {
-	font-size: var(--text-sm);
-	font-weight: var(--weight-semibold);
+@media (max-width: 640px) {
+	.st-grid { grid-template-columns: 1fr; }
 }
-.pwa-banner-desc {
+.st-gauge {
+	text-align: center;
+	padding: var(--space-3);
+	background: var(--surface-1);
+	border-radius: var(--radius-lg);
+}
+.st-gauge-label {
 	font-size: var(--text-xs);
 	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: .05em;
+	font-weight: var(--weight-medium);
+	margin-bottom: var(--space-2);
 }
-.pwa-banner-actions { display: flex; gap: var(--space-2); }
+.st-gauge svg {
+	width: 100%;
+	max-width: 220px;
+	height: auto;
+	margin-bottom: var(--space-1);
+}
+.st-track { stroke: var(--surface-2); }
+.st-bar {
+	stroke: var(--accent-500);
+	transition: stroke-dashoffset .4s var(--ease-out);
+}
+.st-upload .st-bar { stroke: var(--info); }
+.st-value {
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+}
+.st-value .num {
+	font-size: var(--text-3xl);
+	font-weight: var(--weight-bold);
+	color: var(--text);
+}
+.st-download .st-value .num { color: var(--accent-600); }
+.st-upload .st-value .num { color: var(--info); }
+.st-value .unit {
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+}
+
+.st-stats {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: var(--space-4);
+	padding: var(--space-4);
+	background: var(--surface-1);
+	border-radius: var(--radius-md);
+	margin-bottom: var(--space-4);
+}
+.st-stat { text-align: center; }
+.st-stat-label {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: .05em;
+	margin-bottom: var(--space-1);
+}
+.st-stat-value {
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+}
+.st-stat-value .num {
+	font-size: var(--text-xl);
+	font-weight: var(--weight-semibold);
+	color: var(--text);
+}
+.st-stat-value .unit {
+	color: var(--text-muted);
+	font-size: var(--text-xs);
+}
+
+.st-context {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-3);
+	background: var(--accent-500-12);
+	border-radius: var(--radius-md);
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin-bottom: var(--space-4);
+}
+.st-context strong { color: var(--text); }
+
+.st-result-summary {
+	display: none;
+	padding: var(--space-3);
+	background: var(--surface-1);
+	border-left: 3px solid var(--accent-500);
+	border-radius: var(--radius-md);
+	font-size: var(--text-sm);
+	margin-bottom: var(--space-4);
+}
+.st-result-summary.shown { display: block; animation: slideup-fade .3s var(--ease-out); }
+
+.st-actions {
+	display: flex;
+	gap: var(--space-2);
+	margin-bottom: var(--space-3);
+}
+
+.st-progress {
+	opacity: 0;
+	transition: opacity var(--motion-fast) var(--ease-out);
+}
+.st-progress.active { opacity: 1; }
+.st-progress-phase {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin-bottom: var(--space-1);
+	font-family: var(--font-mono);
+}
+.st-progress-bar {
+	height: 4px;
+	background: var(--surface-2);
+	border-radius: var(--radius-pill);
+	overflow: hidden;
+}
+.st-progress-bar > div {
+	height: 100%;
+	background: var(--accent-500);
+	width: 0%;
+	border-radius: inherit;
+	transition: width .15s linear;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
  *  B1 — Bottom Sheet (mobile)
@@ -978,68 +1217,143 @@ button { font-family: inherit; cursor: pointer; }
 }
 .diff-warning svg { flex-shrink: 0; }
 
+/* (Old Speedtest / AI Assistant CSS removed — features dropped from proposal) */
+
 /* ═══════════════════════════════════════════════════════════════════════════
- *  Tier D — Speedtest + AI Assistant teasers
+ *  D — Traffic analytics (live + historical)
  * ═══════════════════════════════════════════════════════════════════════════ */
-.speedtest-card {
-	text-align: center;
-	padding: var(--space-6);
+.traffic-tabs {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-3) var(--space-4);
+	background: var(--surface-1);
+	border-bottom: 1px solid var(--border-subtle);
 }
-.speedtest-circles {
-	display: flex; justify-content: center; gap: var(--space-7);
-	margin: var(--space-5) 0;
+.traffic-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	background: transparent;
+	border: 0;
+	padding: var(--space-1) var(--space-3);
+	border-radius: var(--radius-md);
+	font-size: var(--text-sm);
+	font-weight: var(--weight-medium);
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: all var(--motion-fast) var(--ease-out);
 }
-.speedtest-stat {
-	display: flex; flex-direction: column; align-items: center;
+.traffic-tab:hover { background: var(--surface-2); color: var(--text); }
+.traffic-tab.active { background: var(--surface-0); color: var(--text); box-shadow: var(--shadow-xs); }
+.live-dot {
+	width: 8px; height: 8px;
+	background: var(--success);
+	border-radius: 50%;
+	animation: live-pulse 1.6s ease-in-out infinite;
 }
-.speedtest-stat .num {
-	font-size: var(--text-3xl);
-	font-weight: var(--weight-bold);
-	color: var(--accent-500);
-	font-variant-numeric: tabular-nums;
-	font-family: var(--font-mono);
+@keyframes live-pulse {
+	0%, 100% { opacity: 1; transform: scale(1); }
+	50%      { opacity: .5; transform: scale(.8); }
 }
-.speedtest-stat .label {
-	font-size: var(--text-xs); color: var(--text-muted);
-	text-transform: uppercase; letter-spacing: .04em;
+.period-pills {
+	display: flex;
+	gap: var(--space-1);
+	background: var(--surface-2);
+	padding: 2px;
+	border-radius: var(--radius-md);
+}
+.period-pill {
+	background: transparent;
+	border: 0;
+	padding: 4px var(--space-2);
+	font-size: var(--text-xs);
+	font-weight: var(--weight-medium);
+	color: var(--text-muted);
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	transition: all var(--motion-fast) var(--ease-out);
+}
+.period-pill:hover { color: var(--text); }
+.period-pill.active {
+	background: var(--surface-0);
+	color: var(--text);
+	box-shadow: var(--shadow-xs);
 }
 
-.ai-assistant {
-	border-left: 3px solid var(--accent-500);
-	padding-left: var(--space-4);
-	background: var(--accent-500-12);
-	padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5);
-	border-radius: 0 var(--radius-md) var(--radius-md) 0;
-}
-.ai-assistant .q {
+.traffic-pane { padding: var(--space-4) var(--space-5); }
+.traffic-meta {
+	display: flex;
+	justify-content: space-between;
+	font-size: var(--text-sm);
 	color: var(--text-muted);
+	margin-bottom: var(--space-3);
+	padding-bottom: var(--space-3);
+	border-bottom: 1px solid var(--border-subtle);
+}
+.traffic-meta strong { color: var(--text); }
+
+.tm-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+}
+.tm-row {
+	display: grid;
+	grid-template-columns: 24px 140px 1fr 100px;
+	align-items: center;
+	gap: var(--space-3);
 	font-size: var(--text-sm);
-	margin-bottom: var(--space-2);
 }
-.ai-assistant .q::before {
-	content: '> ';
-	color: var(--accent-600);
-	font-family: var(--font-mono);
-}
-.ai-assistant .a {
-	font-size: var(--text-sm);
-	line-height: 1.6;
-}
-.ai-assistant ul {
-	margin: var(--space-2) 0 var(--space-2) var(--space-4);
-	padding: 0;
-}
-.ai-assistant li {
-	font-size: var(--text-sm);
+.tm-name {
 	color: var(--text);
-	margin-bottom: var(--space-1);
-	list-style: none;
-	position: relative;
+	font-weight: var(--weight-medium);
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ai-assistant li::before {
-	content: '•';
-	position: absolute; left: -16px;
-	color: var(--accent-500);
+.tm-bar-wrap {
+	height: 10px;
+	background: var(--surface-2);
+	border-radius: var(--radius-pill);
+	overflow: hidden;
+}
+.tm-bar {
+	height: 100%;
+	background: var(--accent-500);
+	border-radius: inherit;
+	transition: width var(--motion-normal) var(--ease-out);
+}
+.tm-val {
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	font-size: var(--text-sm);
+	text-align: right;
+	color: var(--text);
+	font-weight: var(--weight-medium);
+}
+.tm-row .tm-subval {
+	display: block;
+	font-size: 11px;
+	color: var(--text-subtle);
+	font-weight: var(--weight-normal);
+}
+
+.traffic-footer {
+	margin-top: var(--space-4);
+	padding-top: var(--space-3);
+	border-top: 1px solid var(--border-subtle);
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+@media (max-width: 640px) {
+	.tm-row {
+		grid-template-columns: 24px 1fr 80px;
+		grid-template-rows: auto auto;
+	}
+	.tm-row .tm-name { grid-column: 2 / 3; grid-row: 1; }
+	.tm-row .tm-bar-wrap { grid-column: 2 / 3; grid-row: 2; }
+	.tm-row .tm-val { grid-column: 3; grid-row: 1 / 3; align-self: center; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1271,14 +1585,14 @@ html[data-theme="dark"] .intro-note strong { color: var(--accent-400); }
 	<a href="#s1">S1 · ⌘K 命令面板</a>
 	<a href="#s2">S2 · Toast 通知</a>
 	<a href="#s3">S3 · Live Tiles</a>
-	<a href="#a1">A1 · WAN Hero</a>
-	<a href="#a2">A2 · 智能设备列表</a>
+	<a href="#a1">A1 · WAN Hero（全球版）</a>
+	<a href="#a2">A2 · 紧凑设备列表</a>
 	<a href="#a3">A3 · 快速操作</a>
-	<a href="#a4">A4 · PWA 安装</a>
+	<a href="#a5">A5 · Wi-Fi 测速</a>
 	<a href="#b1">B1 · Bottom Sheet</a>
 	<a href="#b3">B3 · 健康分</a>
 	<a href="#b4">B4 · Diff Viewer</a>
-	<a href="#d">D · Tier D 预告</a>
+	<a href="#d">D · 流量分析</a>
 </nav>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
@@ -1381,18 +1695,19 @@ html[data-theme="dark"] .intro-note strong { color: var(--accent-400); }
 	</div>
 </section>
 
-<!-- A1 · WAN Hero ──────────────────────────────────────────────────────── -->
+<!-- A1 · WAN Hero（全球友好版本，无 ISP 默认） ─────────────────────────── -->
 <section class="section" id="a1">
 	<div class="section-title">
 		<span class="tier A">A1</span>
-		<span>WAN / 互联网状态 Hero 卡片</span>
+		<span>WAN / 互联网状态 Hero 卡片（全球版）</span>
 	</div>
 	<div class="section-desc">
-		首屏的第一个问题永远是"我的网通不通"。Hero 卡片用最大的篇幅回答它。
+		首屏第一个问题永远是"我的网通不通"。<strong>默认不发任何数据到第三方</strong>——所有显示项 100% 由路由器本地提供。
+		ISP 显示作为可选项（点下面按钮看 opt-in 流程）。
 	</div>
 	<div class="wan-hero">
 		<div class="wan-hero-status">互联网 · 在线</div>
-		<div class="wan-hero-tagline">最后检查：2 秒前 · 已连续在线 9d 14h 22m</div>
+		<div class="wan-hero-tagline">连续在线 9d 14h 22m · 最后检查 2 秒前</div>
 
 		<div class="wan-hero-grid">
 			<div class="wan-hero-stat big">
@@ -1400,12 +1715,12 @@ html[data-theme="dark"] .intro-note strong { color: var(--accent-400); }
 				<dd>203.0.113.45</dd>
 			</div>
 			<div class="wan-hero-stat big">
-				<dt>运营商</dt>
-				<dd>China Telecom</dd>
+				<dt>连接方式</dt>
+				<dd>PPPoE</dd>
 			</div>
 			<div class="wan-hero-stat">
-				<dt>延迟到 1.1.1.1</dt>
-				<dd><span class="latency-bars"><span></span><span></span><span></span><span></span><span></span></span> 14 ms</dd>
+				<dt>延迟到网关</dt>
+				<dd><span class="latency-bars"><span></span><span></span><span></span><span></span><span></span></span> 1.2 ms</dd>
 			</div>
 			<div class="wan-hero-stat">
 				<dt>WAN 接口</dt>
@@ -1416,98 +1731,195 @@ html[data-theme="dark"] .intro-note strong { color: var(--accent-400); }
 		<div class="wan-hero-throughput">
 			<div><span class="arrow">↑</span> <span class="val">12</span> <span class="unit">Mbps 上传</span></div>
 			<div><span class="arrow">↓</span> <span class="val">487</span> <span class="unit">Mbps 下载</span></div>
-			<div style="margin-left:auto"><button class="btn btn-sm">立即测速 →</button></div>
+			<div style="margin-left:auto;display:flex;gap:var(--space-2)">
+				<button class="btn btn-sm" onclick="document.getElementById('a5').scrollIntoView({behavior:'smooth'})">Wi-Fi 测速 →</button>
+				<button class="btn btn-sm" onclick="showIspOptIn()" title="可选：通过第三方查询 ISP">显示 ISP…</button>
+			</div>
+		</div>
+	</div>
+
+	<div style="margin-top:var(--space-3);padding:var(--space-3);background:var(--surface-1);border-radius:var(--radius-md);font-size:var(--text-xs);color:var(--text-muted);display:flex;gap:var(--space-2);align-items:flex-start">
+		<svg class="svg-icon" style="font-size:14px;color:var(--info);flex-shrink:0;margin-top:2px"><use href="#i-info"/></svg>
+		<div>
+			<strong style="color:var(--text)">隐私设计</strong>：上面所有信息（IP、连接方式、延迟、上下行）<strong>100% 由路由器本地获取</strong>。
+			不调用任何第三方服务，公网 IP 不会离开路由器。
+			ISP 显示（China Telecom / Deutsche Telekom 等）是<strong>可选功能</strong>，需用户主动开启并明确同意。
 		</div>
 	</div>
 </section>
 
-<!-- A2 · Smart Device List ─────────────────────────────────────────────── -->
+<!-- A2 · Smart Device List（紧凑单行 + 点击展开） ────────────────────── -->
 <section class="section" id="a2">
 	<div class="section-title">
 		<span class="tier A">A2</span>
-		<span>智能设备列表</span>
+		<span>紧凑设备列表（点击展开详情）</span>
 	</div>
 	<div class="section-desc">
-		根据 hostname / MAC OUI 推断设备类型，自动配图标。不再面对 <code class="code-inline">a4:c4:94:6c:8f:33</code> 猜是什么设备。
+		单行 40px 高，hover 高亮，点击行展开详情。Hostname 推断设备类型，MAC OUI 推断厂商。<strong>点任意一行试试</strong>。
 	</div>
 	<div class="card" style="padding:0;overflow:hidden">
-		<table class="device-list">
-			<thead><tr>
-				<th>设备</th><th>IP</th><th>连接</th><th>信号</th><th>状态</th>
-			</tr></thead>
-			<tbody>
-				<tr>
-					<td><div class="device-cell">
-						<div class="device-icon online"><svg class="svg-icon" style="font-size:18px"><use href="#i-laptop"/></svg></div>
-						<div><div class="name">MacBook-Pro</div><div class="meta">Apple · 3C:22:FB:8A:1B:42</div></div>
-					</div></td>
-					<td><span class="ip">192.168.1.100</span></td>
-					<td>Wi-Fi 5GHz</td>
-					<td><div class="signal"><div class="signal-bars"><span></span><span></span><span></span><span></span></div> -41 dBm</div></td>
-					<td><span style="color:var(--success)">●</span> 在线</td>
-				</tr>
-				<tr>
-					<td><div class="device-cell">
-						<div class="device-icon online"><svg class="svg-icon" style="font-size:18px"><use href="#i-smartphone"/></svg></div>
-						<div><div class="name">iPhone-John</div><div class="meta">Apple · A4:C4:94:6C:8F:33</div></div>
-					</div></td>
-					<td><span class="ip">192.168.1.105</span></td>
-					<td>Wi-Fi 5GHz</td>
-					<td><div class="signal"><div class="signal-bars medium"><span></span><span></span><span></span><span></span></div> -52 dBm</div></td>
-					<td><span style="color:var(--success)">●</span> 在线</td>
-				</tr>
-				<tr>
-					<td><div class="device-cell">
-						<div class="device-icon online"><svg class="svg-icon" style="font-size:18px"><use href="#i-tv"/></svg></div>
-						<div><div class="name">LG-WebOS-TV</div><div class="meta">LG Electronics · 50:55:27:11:22:33</div></div>
-					</div></td>
-					<td><span class="ip">192.168.1.110</span></td>
-					<td>有线 1 Gbps</td>
-					<td>—</td>
-					<td><span style="color:var(--success)">●</span> 在线</td>
-				</tr>
-				<tr>
-					<td><div class="device-cell">
-						<div class="device-icon"><svg class="svg-icon" style="font-size:18px"><use href="#i-thermo"/></svg></div>
-						<div><div class="name">SmartThermostat-7B</div><div class="meta">Espressif IoT · DC:A6:32:01:23:45</div></div>
-					</div></td>
-					<td><span class="ip">192.168.1.122</span></td>
-					<td>Wi-Fi 2.4GHz</td>
-					<td><div class="signal"><div class="signal-bars weak"><span></span><span></span><span></span><span></span></div> -78 dBm</div></td>
-					<td><span style="color:var(--text-subtle)">●</span> 8 小时前</td>
-				</tr>
-				<tr>
-					<td><div class="device-cell">
-						<div class="device-icon online"><svg class="svg-icon" style="font-size:18px"><use href="#i-gamepad"/></svg></div>
-						<div><div class="name">Switch-Nintendo</div><div class="meta">Nintendo · 04:03:D6:78:99:AB</div></div>
-					</div></td>
-					<td><span class="ip">192.168.1.130</span></td>
-					<td>Wi-Fi 5GHz</td>
-					<td><div class="signal"><div class="signal-bars"><span></span><span></span><span></span><span></span></div> -48 dBm</div></td>
-					<td><span style="color:var(--success)">●</span> 在线</td>
-				</tr>
-				<tr>
-					<td><div class="device-cell">
-						<div class="device-icon online"><svg class="svg-icon" style="font-size:18px"><use href="#i-camera"/></svg></div>
-						<div><div class="name">Doorbell-Cam</div><div class="meta">Hangzhou Hikvision · 28:57:BE:CD:EF:01</div></div>
-					</div></td>
-					<td><span class="ip">192.168.1.150</span></td>
-					<td>Wi-Fi 2.4GHz</td>
-					<td><div class="signal"><div class="signal-bars medium"><span></span><span></span><span></span><span></span></div> -65 dBm</div></td>
-					<td><span style="color:var(--success)">●</span> 在线</td>
-				</tr>
-				<tr>
-					<td><div class="device-cell">
-						<div class="device-icon"><svg class="svg-icon" style="font-size:18px"><use href="#i-printer"/></svg></div>
-						<div><div class="name">HP-LaserJet</div><div class="meta">HP Inc · 00:11:22:33:44:55</div></div>
-					</div></td>
-					<td><span class="ip">192.168.1.200</span></td>
-					<td>有线</td>
-					<td>—</td>
-					<td><span style="color:var(--text-subtle)">●</span> 3 天前</td>
-				</tr>
-			</tbody>
-		</table>
+		<div class="dl-header">
+			<span class="dl-c-name">设备</span>
+			<span class="dl-c-ip">IP</span>
+			<span class="dl-c-sig">信号</span>
+			<span class="dl-c-seen">上次见到</span>
+		</div>
+		<div class="dl-row" data-id="0" onclick="toggleDeviceRow(this)">
+			<div class="dl-summary">
+				<span class="dl-icon"><svg class="svg-icon" style="font-size:16px;color:var(--accent-600)"><use href="#i-laptop"/></svg></span>
+				<span class="dl-name">MacBook-Pro</span>
+				<span class="dl-ip">.100</span>
+				<span class="dl-sig"><span class="signal-bars"><span></span><span></span><span></span><span></span></span><span class="db">-41dBm</span></span>
+				<span class="dl-seen">3 小时</span>
+				<svg class="dl-chev svg-icon"><use href="#i-arrow-down"/></svg>
+			</div>
+			<div class="dl-expand">
+				<div class="dl-detail-grid">
+					<div><dt>完整 IP</dt><dd class="mono">192.168.1.100</dd></div>
+					<div><dt>MAC 地址</dt><dd class="mono">3C:22:FB:8A:1B:42</dd></div>
+					<div><dt>厂商 (OUI)</dt><dd>Apple (3C:22:FB)</dd></div>
+					<div><dt>连接</dt><dd>Wi-Fi 5GHz · 信道 149 · 80MHz</dd></div>
+					<div><dt>协商速率</dt><dd>866 Mbps</dd></div>
+					<div><dt>本次会话流量</dt><dd>↓ 1.2 GB · ↑ 142 MB</dd></div>
+				</div>
+				<div class="dl-actions">
+					<button class="btn btn-sm">改名</button>
+					<button class="btn btn-sm">加入白名单</button>
+					<button class="btn btn-sm">限速</button>
+					<button class="btn btn-sm btn-danger">阻止</button>
+				</div>
+			</div>
+		</div>
+
+		<div class="dl-row" data-id="1" onclick="toggleDeviceRow(this)">
+			<div class="dl-summary">
+				<span class="dl-icon"><svg class="svg-icon" style="font-size:16px;color:var(--accent-600)"><use href="#i-smartphone"/></svg></span>
+				<span class="dl-name">iPhone-John</span>
+				<span class="dl-ip">.105</span>
+				<span class="dl-sig"><span class="signal-bars medium"><span></span><span></span><span></span><span></span></span><span class="db">-52dBm</span></span>
+				<span class="dl-seen" style="color:var(--success)">现在</span>
+				<svg class="dl-chev svg-icon"><use href="#i-arrow-down"/></svg>
+			</div>
+			<div class="dl-expand">
+				<div class="dl-detail-grid">
+					<div><dt>完整 IP</dt><dd class="mono">192.168.1.105</dd></div>
+					<div><dt>MAC 地址</dt><dd class="mono">A4:C4:94:6C:8F:33</dd></div>
+					<div><dt>厂商 (OUI)</dt><dd>Apple (A4:C4:94)</dd></div>
+					<div><dt>连接</dt><dd>Wi-Fi 5GHz · 信道 149</dd></div>
+					<div><dt>协商速率</dt><dd>433 Mbps</dd></div>
+					<div><dt>本次会话流量</dt><dd>↓ 456 MB · ↑ 12 MB</dd></div>
+				</div>
+				<div class="dl-actions">
+					<button class="btn btn-sm">改名</button>
+					<button class="btn btn-sm">限速</button>
+					<button class="btn btn-sm btn-danger">阻止</button>
+				</div>
+			</div>
+		</div>
+
+		<div class="dl-row" data-id="2" onclick="toggleDeviceRow(this)">
+			<div class="dl-summary">
+				<span class="dl-icon"><svg class="svg-icon" style="font-size:16px;color:var(--accent-600)"><use href="#i-tv"/></svg></span>
+				<span class="dl-name">LG-TV</span>
+				<span class="dl-ip">.110</span>
+				<span class="dl-sig"><span class="dl-wired">有线 1G</span></span>
+				<span class="dl-seen">1 小时</span>
+				<svg class="dl-chev svg-icon"><use href="#i-arrow-down"/></svg>
+			</div>
+			<div class="dl-expand">
+				<div class="dl-detail-grid">
+					<div><dt>完整 IP</dt><dd class="mono">192.168.1.110</dd></div>
+					<div><dt>MAC 地址</dt><dd class="mono">50:55:27:11:22:33</dd></div>
+					<div><dt>厂商 (OUI)</dt><dd>LG Electronics</dd></div>
+					<div><dt>连接</dt><dd>有线 · 1 Gbps · eth0</dd></div>
+					<div><dt>本次会话流量</dt><dd>↓ 4.8 GB · ↑ 32 MB (Netflix?)</dd></div>
+				</div>
+				<div class="dl-actions">
+					<button class="btn btn-sm">改名</button>
+					<button class="btn btn-sm">限速</button>
+				</div>
+			</div>
+		</div>
+
+		<div class="dl-row" data-id="3" onclick="toggleDeviceRow(this)">
+			<div class="dl-summary">
+				<span class="dl-icon"><svg class="svg-icon" style="font-size:16px"><use href="#i-thermo"/></svg></span>
+				<span class="dl-name">SmartThermostat</span>
+				<span class="dl-ip">.122</span>
+				<span class="dl-sig"><span class="signal-bars weak"><span></span><span></span><span></span><span></span></span><span class="db">-78dBm</span></span>
+				<span class="dl-seen" style="color:var(--text-subtle)">8 小时</span>
+				<svg class="dl-chev svg-icon"><use href="#i-arrow-down"/></svg>
+			</div>
+			<div class="dl-expand">
+				<div class="dl-detail-grid">
+					<div><dt>完整 IP</dt><dd class="mono">192.168.1.122</dd></div>
+					<div><dt>MAC 地址</dt><dd class="mono">DC:A6:32:01:23:45</dd></div>
+					<div><dt>厂商 (OUI)</dt><dd>Espressif IoT</dd></div>
+					<div><dt>连接</dt><dd>Wi-Fi 2.4GHz · 信道 11</dd></div>
+					<div><dt>信号建议</dt><dd style="color:var(--warning)">⚠ 信号偏弱，建议增加 2.4G 中继</dd></div>
+				</div>
+				<div class="dl-actions">
+					<button class="btn btn-sm">改名</button>
+					<button class="btn btn-sm">查看日志</button>
+				</div>
+			</div>
+		</div>
+
+		<div class="dl-row" data-id="4" onclick="toggleDeviceRow(this)">
+			<div class="dl-summary">
+				<span class="dl-icon"><svg class="svg-icon" style="font-size:16px;color:var(--accent-600)"><use href="#i-gamepad"/></svg></span>
+				<span class="dl-name">Switch</span>
+				<span class="dl-ip">.130</span>
+				<span class="dl-sig"><span class="signal-bars"><span></span><span></span><span></span><span></span></span><span class="db">-48dBm</span></span>
+				<span class="dl-seen">30 分钟</span>
+				<svg class="dl-chev svg-icon"><use href="#i-arrow-down"/></svg>
+			</div>
+			<div class="dl-expand">
+				<div class="dl-detail-grid">
+					<div><dt>完整 IP</dt><dd class="mono">192.168.1.130</dd></div>
+					<div><dt>MAC 地址</dt><dd class="mono">04:03:D6:78:99:AB</dd></div>
+					<div><dt>厂商 (OUI)</dt><dd>Nintendo</dd></div>
+					<div><dt>连接</dt><dd>Wi-Fi 5GHz · 信道 149</dd></div>
+				</div>
+			</div>
+		</div>
+
+		<div class="dl-row" data-id="5" onclick="toggleDeviceRow(this)">
+			<div class="dl-summary">
+				<span class="dl-icon"><svg class="svg-icon" style="font-size:16px;color:var(--accent-600)"><use href="#i-camera"/></svg></span>
+				<span class="dl-name">Doorbell-Cam</span>
+				<span class="dl-ip">.150</span>
+				<span class="dl-sig"><span class="signal-bars medium"><span></span><span></span><span></span><span></span></span><span class="db">-65dBm</span></span>
+				<span class="dl-seen" style="color:var(--success)">现在</span>
+				<svg class="dl-chev svg-icon"><use href="#i-arrow-down"/></svg>
+			</div>
+			<div class="dl-expand">
+				<div class="dl-detail-grid">
+					<div><dt>完整 IP</dt><dd class="mono">192.168.1.150</dd></div>
+					<div><dt>MAC 地址</dt><dd class="mono">28:57:BE:CD:EF:01</dd></div>
+					<div><dt>厂商 (OUI)</dt><dd>Hangzhou Hikvision</dd></div>
+				</div>
+			</div>
+		</div>
+
+		<div class="dl-row" data-id="6" onclick="toggleDeviceRow(this)">
+			<div class="dl-summary" style="opacity:.55">
+				<span class="dl-icon"><svg class="svg-icon" style="font-size:16px"><use href="#i-printer"/></svg></span>
+				<span class="dl-name">HP-LaserJet</span>
+				<span class="dl-ip">.200</span>
+				<span class="dl-sig"><span class="dl-wired">有线</span></span>
+				<span class="dl-seen" style="color:var(--text-subtle)">3 天</span>
+				<svg class="dl-chev svg-icon"><use href="#i-arrow-down"/></svg>
+			</div>
+			<div class="dl-expand">
+				<div class="dl-detail-grid">
+					<div><dt>完整 IP</dt><dd class="mono">192.168.1.200</dd></div>
+					<div><dt>MAC 地址</dt><dd class="mono">00:11:22:33:44:55</dd></div>
+					<div><dt>厂商 (OUI)</dt><dd>HP Inc.</dd></div>
+					<div><dt>状态</dt><dd style="color:var(--text-subtle)">3 天前离线 · 可能已关机</dd></div>
+				</div>
+			</div>
+		</div>
 	</div>
 </section>
 
@@ -1548,26 +1960,72 @@ html[data-theme="dark"] .intro-note strong { color: var(--accent-400); }
 	</div>
 </section>
 
-<!-- A4 · PWA Install ───────────────────────────────────────────────────── -->
-<section class="section" id="a4">
+<!-- A5 · Wi-Fi / LAN Speedtest ─────────────────────────────────────────── -->
+<section class="section" id="a5">
 	<div class="section-title">
-		<span class="tier A">A4</span>
-		<span>PWA 安装引导</span>
+		<span class="tier A">A5</span>
+		<span>Wi-Fi / LAN 链路测速</span>
 	</div>
 	<div class="section-desc">
-		首次访问的低调引导。已经有 <code class="code-inline">manifest.json</code>，但需要主动告诉用户。
+		测的是<strong>浏览器到路由器</strong>的实际连接质量——不是 WAN 测速。
+		用来证明"Wi-Fi 慢"是真的，或者比较 2.4G vs 5G、不同房间的实际表现。
+		<strong>点下面开始测试</strong>，约 5 秒。
 	</div>
-	<div class="pwa-banner">
-		<div class="pwa-banner-icon">
-			<svg class="svg-icon" style="font-size:22px"><use href="#i-download"/></svg>
+	<div class="card speedtest-v2">
+		<div class="st-grid">
+			<div class="st-gauge st-download">
+				<div class="st-gauge-label">下载</div>
+				<svg viewBox="0 0 200 110">
+					<path class="st-track" d="M 20,100 A 80,80 0 0 1 180,100" fill="none" stroke-width="10" stroke-linecap="round"/>
+					<path class="st-bar" d="M 20,100 A 80,80 0 0 1 180,100" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="251" stroke-dashoffset="251"/>
+				</svg>
+				<div class="st-value"><span class="num">—</span> <span class="unit">Mbps</span></div>
+			</div>
+
+			<div class="st-gauge st-upload">
+				<div class="st-gauge-label">上传</div>
+				<svg viewBox="0 0 200 110">
+					<path class="st-track" d="M 20,100 A 80,80 0 0 1 180,100" fill="none" stroke-width="10" stroke-linecap="round"/>
+					<path class="st-bar" d="M 20,100 A 80,80 0 0 1 180,100" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="251" stroke-dashoffset="251"/>
+				</svg>
+				<div class="st-value"><span class="num">—</span> <span class="unit">Mbps</span></div>
+			</div>
 		</div>
-		<div class="pwa-banner-body">
-			<div class="pwa-banner-title">把 OpenWrt 添加到主屏幕</div>
-			<div class="pwa-banner-desc">下次直接点击图标打开，无需输入 IP</div>
+
+		<div class="st-stats">
+			<div class="st-stat">
+				<div class="st-stat-label">延迟</div>
+				<div class="st-stat-value"><span class="num">—</span> <span class="unit">ms</span></div>
+			</div>
+			<div class="st-stat">
+				<div class="st-stat-label">抖动</div>
+				<div class="st-stat-value"><span class="num">—</span> <span class="unit">ms</span></div>
+			</div>
+			<div class="st-stat">
+				<div class="st-stat-label">丢包</div>
+				<div class="st-stat-value"><span class="num">—</span> <span class="unit">%</span></div>
+			</div>
 		</div>
-		<div class="pwa-banner-actions">
-			<button class="btn btn-sm" onclick="this.closest('.pwa-banner').style.display='none'">稍后</button>
-			<button class="btn btn-primary btn-sm" onclick="toast.success('已添加到主屏幕（模拟）')">安装</button>
+
+		<div class="st-context">
+			<svg class="svg-icon" style="font-size:14px;color:var(--text-subtle)"><use href="#i-wifi"/></svg>
+			信号 <strong>●●●●○ -41 dBm</strong> · 信道 149 · 5GHz 80MHz · 理论上限 ~600 Mbps
+		</div>
+
+		<div class="st-result-summary" id="st-summary"></div>
+
+		<div class="st-actions">
+			<button class="btn btn-primary" id="st-start" onclick="runSpeedtest()">
+				<svg class="svg-icon"><use href="#i-zap"/></svg> 开始测试
+			</button>
+			<button class="btn" id="st-compare" disabled>
+				对比 2.4G vs 5G
+			</button>
+		</div>
+
+		<div class="st-progress" id="st-progress">
+			<div class="st-progress-phase" id="st-phase">等待开始…</div>
+			<div class="st-progress-bar"><div id="st-bar"></div></div>
 		</div>
 	</div>
 </section>
@@ -1702,103 +2160,100 @@ html[data-theme="dark"] .intro-note strong { color: var(--accent-400); }
 	</div>
 </section>
 
-<!-- Tier D Teaser ──────────────────────────────────────────────────────── -->
+<!-- D · 流量分析（实时 + 历史累计）─────────────────────────────────── -->
 <section class="section" id="d">
 	<div class="section-title">
 		<span class="tier" style="background:var(--text-subtle)">D</span>
-		<span>Tier D 预告（争议性 / 大胆方向）</span>
+		<span>流量分析（实时 + 历史累计）</span>
 	</div>
 	<div class="section-desc">
-		不一定要做，但值得讨论。
+		<strong>谁在用我的带宽？</strong>（实时）+ <strong>过去 N 小时谁用得最多？</strong>（累计）。
+		点 tab 切换，点时段切换历史范围。需要 <code class="code-inline">luci-app-nlbw</code> 才能拿到分用户数据。
 	</div>
 
-	<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4)">
-		<div class="card speedtest-card">
-			<div style="display:flex;align-items:center;justify-content:center;gap:var(--space-2);margin-bottom:var(--space-3);font-weight:var(--weight-semibold)">
-				<svg class="svg-icon" style="font-size:18px;color:var(--accent-500)"><use href="#i-zap"/></svg> 内置 Speedtest
+	<div class="card" style="padding:0;overflow:hidden">
+		<div class="traffic-tabs">
+			<button class="traffic-tab active" data-tab="live" onclick="switchTrafficTab('live')">
+				<span class="live-dot"></span> 实时
+			</button>
+			<button class="traffic-tab" data-tab="hist" onclick="switchTrafficTab('hist')">累计</button>
+			<div class="spacer" style="flex:1"></div>
+			<div class="period-pills" id="period-pills" style="display:none">
+				<button class="period-pill" data-period="1h" onclick="setPeriod('1h')">1h</button>
+				<button class="period-pill" data-period="6h" onclick="setPeriod('6h')">6h</button>
+				<button class="period-pill" data-period="12h" onclick="setPeriod('12h')">12h</button>
+				<button class="period-pill active" data-period="24h" onclick="setPeriod('24h')">24h</button>
 			</div>
-			<div class="speedtest-circles">
-				<div class="speedtest-stat">
-					<div class="num">488.2</div>
-					<div class="label">↓ Mbps</div>
-				</div>
-				<div class="speedtest-stat">
-					<div class="num">92.4</div>
-					<div class="label">↑ Mbps</div>
-				</div>
-			</div>
-			<div style="font-size:var(--text-xs);color:var(--text-subtle)">延迟 14ms · 抖动 2ms · China Telecom Shanghai</div>
-			<button class="btn btn-primary" style="margin-top:var(--space-4)">重新测试</button>
 		</div>
 
-		<div class="card">
-			<div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);font-weight:var(--weight-semibold)">
-				<svg class="svg-icon" style="font-size:18px;color:var(--accent-500)"><use href="#i-sparkles"/></svg> AI 路由器助手
+		<!-- LIVE TAB -->
+		<div class="traffic-pane" id="pane-live">
+			<div class="traffic-meta">
+				<span>每 2 秒自动刷新 · 当前总计 <strong id="live-total">211 Mbps</strong></span>
+				<span style="color:var(--text-subtle)">峰值（过去 1 分钟）348 Mbps · 7s 前</span>
 			</div>
-			<div class="ai-assistant">
-				<div class="q">为什么 5GHz 信号弱？</div>
-				<div class="a">
-					我查看了你当前的无线配置：
-					<ul>
-						<li>信道 36 在你所在区域很拥挤（4 个邻居在用）</li>
-						<li>发射功率 17 dBm 偏低</li>
-						<li>建议改为信道 149 + 功率 20 dBm</li>
-					</ul>
+			<div class="tm-list" id="tm-list-live">
+				<div class="tm-row">
+					<svg class="svg-icon" style="font-size:16px;color:var(--accent-600)"><use href="#i-smartphone"/></svg>
+					<span class="tm-name">iPhone-John</span>
+					<div class="tm-bar-wrap"><div class="tm-bar" style="width:62%"></div></div>
+					<span class="tm-val">124 Mbps</span>
+				</div>
+				<div class="tm-row">
+					<svg class="svg-icon" style="font-size:16px;color:var(--accent-600)"><use href="#i-laptop"/></svg>
+					<span class="tm-name">MacBook-Pro</span>
+					<div class="tm-bar-wrap"><div class="tm-bar" style="width:28%"></div></div>
+					<span class="tm-val">56 Mbps</span>
+				</div>
+				<div class="tm-row">
+					<svg class="svg-icon" style="font-size:16px;color:var(--accent-600)"><use href="#i-tv"/></svg>
+					<span class="tm-name">LG-TV</span>
+					<div class="tm-bar-wrap"><div class="tm-bar" style="width:11%"></div></div>
+					<span class="tm-val">23 Mbps</span>
+				</div>
+				<div class="tm-row">
+					<svg class="svg-icon" style="font-size:16px"><use href="#i-package"/></svg>
+					<span class="tm-name" style="color:var(--text-muted)">其他 5 个设备</span>
+					<div class="tm-bar-wrap"><div class="tm-bar" style="width:4%;background:var(--text-subtle)"></div></div>
+					<span class="tm-val" style="color:var(--text-muted)">8 Mbps</span>
 				</div>
 			</div>
-			<div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
-				<button class="btn btn-primary btn-sm">自动优化</button>
-				<button class="btn btn-sm">仅查看建议</button>
-			</div>
-			<p style="font-size:var(--text-xs);color:var(--text-subtle);margin-top:var(--space-3)">
-				配置数据从不离开浏览器，使用你自己的 API key
-			</p>
 		</div>
 
-		<div class="card">
-			<div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);font-weight:var(--weight-semibold)">
-				<svg class="svg-icon" style="font-size:18px;color:var(--accent-500)"><use href="#i-activity"/></svg> 实时流量地图
+		<!-- HIST TAB -->
+		<div class="traffic-pane" id="pane-hist" style="display:none">
+			<div class="traffic-meta">
+				<span>过去 <strong id="hist-period">24 小时</strong> · 总计 <strong id="hist-total">98.3 GB</strong></span>
+				<span style="color:var(--text-subtle)">峰值 487 Mbps · 昨晚 21:34</span>
 			</div>
-			<p style="font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-3)">现在 LAN 流量构成：</p>
-			<div style="display:flex;flex-direction:column;gap:var(--space-2);font-size:var(--text-sm)">
-				<div style="display:flex;align-items:center;gap:var(--space-2)">
-					<svg class="svg-icon" style="font-size:14px"><use href="#i-smartphone"/></svg>
-					<span style="flex:0 0 80px">iPhone-John</span>
-					<div style="flex:1;height:8px;background:var(--surface-2);border-radius:var(--radius-pill);overflow:hidden">
-						<div style="width:62%;height:100%;background:var(--accent-500)"></div>
-					</div>
-					<span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:var(--text-xs)">124 Mbps</span>
+			<div class="tm-list" id="tm-list-hist">
+				<!-- 由 JS 根据时段填充 -->
+			</div>
+			<div class="traffic-footer">
+				<div style="font-size:var(--text-xs);color:var(--text-subtle)">
+					↓ <span id="total-down">92.1 GB</span> · ↑ <span id="total-up">6.2 GB</span>
 				</div>
-				<div style="display:flex;align-items:center;gap:var(--space-2)">
-					<svg class="svg-icon" style="font-size:14px"><use href="#i-laptop"/></svg>
-					<span style="flex:0 0 80px">MacBook-Pro</span>
-					<div style="flex:1;height:8px;background:var(--surface-2);border-radius:var(--radius-pill);overflow:hidden">
-						<div style="width:28%;height:100%;background:var(--accent-500)"></div>
-					</div>
-					<span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:var(--text-xs)">56 Mbps</span>
-				</div>
-				<div style="display:flex;align-items:center;gap:var(--space-2)">
-					<svg class="svg-icon" style="font-size:14px"><use href="#i-tv"/></svg>
-					<span style="flex:0 0 80px">LG-TV</span>
-					<div style="flex:1;height:8px;background:var(--surface-2);border-radius:var(--radius-pill);overflow:hidden">
-						<div style="width:11%;height:100%;background:var(--accent-500)"></div>
-					</div>
-					<span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:var(--text-xs)">23 Mbps</span>
-				</div>
-				<div style="display:flex;align-items:center;gap:var(--space-2)">
-					<svg class="svg-icon" style="font-size:14px"><use href="#i-package"/></svg>
-					<span style="flex:0 0 80px">其他 8 个</span>
-					<div style="flex:1;height:8px;background:var(--surface-2);border-radius:var(--radius-pill);overflow:hidden">
-						<div style="width:4%;height:100%;background:var(--accent-500)"></div>
-					</div>
-					<span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:var(--text-xs)">8 Mbps</span>
+				<div style="display:flex;gap:var(--space-2)">
+					<button class="btn btn-sm">导出 CSV</button>
+					<button class="btn btn-sm">设置流量警报</button>
 				</div>
 			</div>
-			<p style="font-size:var(--text-xs);color:var(--text-subtle);margin-top:var(--space-3)">
-				需要 <code class="code-inline">nlbw</code> 或 <code class="code-inline">collectd-mod-iptables</code>
+		</div>
+
+		<!-- 没装 nlbw 时的占位（不显示，仅留作示例） -->
+		<div class="traffic-pane" id="pane-nonlbw" style="display:none;padding:var(--space-6);text-align:center">
+			<svg class="svg-icon" style="font-size:32px;color:var(--text-subtle)"><use href="#i-activity"/></svg>
+			<h3 style="margin:var(--space-3) 0 var(--space-1)">需要 nlbw 才能查看流量分析</h3>
+			<p style="color:var(--text-muted);font-size:var(--text-sm);margin-bottom:var(--space-4);max-width:380px;margin-left:auto;margin-right:auto">
+				安装 <code class="code-inline">luci-app-nlbw</code> 后可以查看实时 + 24h 累计流量、每设备每小时使用图、流量警报等
 			</p>
+			<button class="btn btn-primary">打开软件包管理 → opkg</button>
 		</div>
 	</div>
+
+	<p style="margin-top:var(--space-3);font-size:var(--text-xs);color:var(--text-subtle);text-align:center">
+		注：此页 demo 是模拟数据。生产环境数据来自 <code class="code-inline">nlbw_json</code> ubus 调用。
+	</p>
 </section>
 
 <div class="card" style="text-align:center;margin-bottom:var(--space-7)">
@@ -2164,6 +2619,278 @@ document.addEventListener('click', e => {
 		qaPop.style.display = 'none';
 	}
 });
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * A2 — Device list expand/collapse
+ * ═══════════════════════════════════════════════════════════════════════ */
+window.toggleDeviceRow = function (row) {
+	row.classList.toggle('expanded');
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * A1 — ISP opt-in flow
+ * ═══════════════════════════════════════════════════════════════════════ */
+window.showIspOptIn = function () {
+	const confirmed = confirm(
+		'此功能将把你的公网 IP 发送至第三方服务 (ipapi.co) 以查询运营商信息。\n\n' +
+		'⚠️ 隐私提示：\n' +
+		'• 你的公网 IP 将离开路由器\n' +
+		'• 仅在你同意后发送一次，结果缓存 1 小时\n' +
+		'• 可在 设置 → 主题 中随时关闭\n\n' +
+		'是否继续？'
+	);
+	if (confirmed) {
+		toast.info('已查询', { msg: 'ISP: China Telecom · ASN: AS4134', duration: 4000 });
+	} else {
+		toast.info('已取消，ISP 信息不会显示');
+	}
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * A5 — Wi-Fi Speedtest (simulated)
+ * ═══════════════════════════════════════════════════════════════════════ */
+const ST_TARGETS = {
+	download: 487.2,
+	upload:   92.4,
+	latency:  2.1,
+	jitter:   0.3,
+	loss:     0,
+};
+
+window.runSpeedtest = async function () {
+	const startBtn = document.getElementById('st-start');
+	startBtn.disabled = true;
+	startBtn.innerHTML = '<svg class="svg-icon"><use href="#i-loader"/></svg> 测试中…';
+
+	const phase = document.getElementById('st-phase');
+	const bar   = document.getElementById('st-bar');
+	const prog  = document.getElementById('st-progress');
+	prog.classList.add('active');
+
+	// Reset UI
+	document.querySelectorAll('.st-gauge .st-bar').forEach(el => el.setAttribute('stroke-dashoffset', '251'));
+	document.querySelectorAll('.st-gauge .num').forEach(el => el.textContent = '0');
+	document.querySelectorAll('.st-stat .num').forEach(el => el.textContent = '—');
+	document.getElementById('st-summary').classList.remove('shown');
+
+	// Phase 1: ping (1s)
+	phase.textContent = '◌ 测延迟…';
+	await animateBar(bar, 0, 20, 800);
+	await sleep(200);
+	animateNum(document.querySelector('.st-stats .st-stat:nth-child(1) .num'), 0, ST_TARGETS.latency, 400, 1);
+	animateNum(document.querySelector('.st-stats .st-stat:nth-child(2) .num'), 0, ST_TARGETS.jitter, 400, 1);
+	animateNum(document.querySelector('.st-stats .st-stat:nth-child(3) .num'), 0, ST_TARGETS.loss, 400, 0);
+
+	// Phase 2: download (2s)
+	phase.textContent = '↓ 测下载…';
+	const dlGauge = document.querySelector('.st-download');
+	const dlBar = dlGauge.querySelector('.st-bar');
+	const dlNum = dlGauge.querySelector('.num');
+	await Promise.all([
+		animateBar(bar, 20, 65, 2000),
+		animateGauge(dlBar, dlNum, ST_TARGETS.download, 2000),
+	]);
+
+	// Phase 3: upload (2s)
+	phase.textContent = '↑ 测上传…';
+	const ulGauge = document.querySelector('.st-upload');
+	const ulBar = ulGauge.querySelector('.st-bar');
+	const ulNum = ulGauge.querySelector('.num');
+	await Promise.all([
+		animateBar(bar, 65, 100, 1800),
+		animateGauge(ulBar, ulNum, ST_TARGETS.upload, 1800),
+	]);
+
+	phase.textContent = '✓ 测试完成';
+
+	// Show summary
+	const summary = document.getElementById('st-summary');
+	const pct = Math.round((ST_TARGETS.download / 600) * 100);
+	summary.innerHTML = `
+		📊 你的链路实测 <strong>${ST_TARGETS.download} Mbps</strong>，占理论 ${pct}%（5GHz 80MHz 理论 ~600 Mbps）<br>
+		<span style="color:var(--text-muted);font-size:var(--text-xs)">延迟 ${ST_TARGETS.latency}ms · 抖动 ${ST_TARGETS.jitter}ms · 丢包 ${ST_TARGETS.loss}% · 信号 -41dBm</span>
+	`;
+	summary.classList.add('shown');
+
+	startBtn.disabled = false;
+	startBtn.innerHTML = '<svg class="svg-icon"><use href="#i-zap"/></svg> 重新测试';
+	document.getElementById('st-compare').disabled = false;
+
+	toast.success('Wi-Fi 测试完成', { msg: `${ST_TARGETS.download} Mbps ↓ / ${ST_TARGETS.upload} Mbps ↑` });
+
+	setTimeout(() => prog.classList.remove('active'), 1200);
+};
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function animateBar(el, from, to, duration) {
+	return new Promise(resolve => {
+		const start = performance.now();
+		function step(now) {
+			const t = Math.min(1, (now - start) / duration);
+			const v = from + (to - from) * t;
+			el.style.width = v + '%';
+			if (t < 1) requestAnimationFrame(step);
+			else resolve();
+		}
+		requestAnimationFrame(step);
+	});
+}
+
+function animateNum(el, from, to, duration, decimals = 0) {
+	return new Promise(resolve => {
+		const start = performance.now();
+		function step(now) {
+			const t = Math.min(1, (now - start) / duration);
+			const eased = 1 - Math.pow(1 - t, 3);
+			const v = from + (to - from) * eased;
+			el.textContent = v.toFixed(decimals);
+			if (t < 1) requestAnimationFrame(step);
+			else resolve();
+		}
+		requestAnimationFrame(step);
+	});
+}
+
+function animateGauge(barEl, numEl, target, duration) {
+	const arcLen = 251;
+	const maxVal = 600; // theoretical max for visual scale
+	return new Promise(resolve => {
+		const start = performance.now();
+		function step(now) {
+			const t = Math.min(1, (now - start) / duration);
+			const eased = 1 - Math.pow(1 - t, 2.5);
+			const v = target * eased;
+			numEl.textContent = v.toFixed(1);
+			const fraction = Math.min(v / maxVal, 1);
+			barEl.setAttribute('stroke-dashoffset', arcLen * (1 - fraction));
+			if (t < 1) requestAnimationFrame(step);
+			else resolve();
+		}
+		requestAnimationFrame(step);
+	});
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * D — Traffic analytics tab + period switcher
+ * ═══════════════════════════════════════════════════════════════════════ */
+window.switchTrafficTab = function (tab) {
+	document.querySelectorAll('.traffic-tab').forEach(t =>
+		t.classList.toggle('active', t.dataset.tab === tab));
+	document.getElementById('pane-live').style.display = tab === 'live' ? 'block' : 'none';
+	document.getElementById('pane-hist').style.display = tab === 'hist' ? 'block' : 'none';
+	document.getElementById('period-pills').style.display = tab === 'hist' ? 'flex' : 'none';
+	if (tab === 'hist') renderHistTraffic('24h');
+};
+
+const TRAFFIC_BY_PERIOD = {
+	'1h': {
+		label: '1 小时',
+		total: '4.7 GB',
+		down: '4.4 GB',
+		up: '0.3 GB',
+		devices: [
+			{ icon: 'i-smartphone', name: 'iPhone-John',    down: 2800, up: 180, total: '2.98 GB' },
+			{ icon: 'i-laptop',     name: 'MacBook-Pro',    down: 1100, up: 90,  total: '1.19 GB' },
+			{ icon: 'i-tv',         name: 'LG-TV',          down: 480,  up: 5,   total: '485 MB'  },
+			{ icon: 'i-package',    name: '其他 5 个',       down: 32,   up: 8,   total: '40 MB'   },
+		],
+	},
+	'6h': {
+		label: '6 小时',
+		total: '23.8 GB',
+		down: '22.5 GB',
+		up: '1.3 GB',
+		devices: [
+			{ icon: 'i-smartphone', name: 'iPhone-John',    down: 11200, up: 720, total: '11.92 GB' },
+			{ icon: 'i-laptop',     name: 'MacBook-Pro',    down: 6800,  up: 480, total: '7.28 GB'  },
+			{ icon: 'i-tv',         name: 'LG-TV',          down: 4100,  up: 23,  total: '4.12 GB'  },
+			{ icon: 'i-package',    name: '其他 5 个',       down: 380,   up: 95,  total: '475 MB'   },
+		],
+	},
+	'12h': {
+		label: '12 小时',
+		total: '48.6 GB',
+		down: '45.8 GB',
+		up: '2.8 GB',
+		devices: [
+			{ icon: 'i-smartphone', name: 'iPhone-John',    down: 23800, up: 1500, total: '25.3 GB'  },
+			{ icon: 'i-laptop',     name: 'MacBook-Pro',    down: 13500, up: 1200, total: '14.7 GB'  },
+			{ icon: 'i-tv',         name: 'LG-TV',          down: 7800,  up: 48,   total: '7.85 GB'  },
+			{ icon: 'i-package',    name: '其他 5 个',       down: 720,   up: 220,  total: '940 MB'   },
+		],
+	},
+	'24h': {
+		label: '24 小时',
+		total: '98.3 GB',
+		down: '92.1 GB',
+		up: '6.2 GB',
+		devices: [
+			{ icon: 'i-smartphone', name: 'iPhone-John',    down: 45000, up: 3200, total: '48.2 GB',
+			  note: '↓ 主要：YouTube · Instagram · Spotify' },
+			{ icon: 'i-laptop',     name: 'MacBook-Pro',    down: 26100, up: 2600, total: '28.7 GB',
+			  note: '↓ 主要：Cloud sync · macOS 更新' },
+			{ icon: 'i-tv',         name: 'LG-TV',          down: 12500, up: 0,    total: '12.5 GB',
+			  note: '↓ Netflix（昨晚 19:00-23:00）' },
+			{ icon: 'i-gamepad',    name: 'Switch',         down: 5800,  up: 80,   total: '5.88 GB' },
+			{ icon: 'i-camera',     name: 'Doorbell-Cam',   down: 1900,  up: 220,  total: '2.12 GB',
+			  note: '↑ 24/7 推流' },
+			{ icon: 'i-package',    name: '其他 3 个',       down: 800,   up: 100,  total: '900 MB'  },
+		],
+	},
+};
+
+window.setPeriod = function (period) {
+	document.querySelectorAll('.period-pill').forEach(p =>
+		p.classList.toggle('active', p.dataset.period === period));
+	renderHistTraffic(period);
+};
+
+function renderHistTraffic(period) {
+	const data = TRAFFIC_BY_PERIOD[period];
+	document.getElementById('hist-period').textContent = data.label;
+	document.getElementById('hist-total').textContent = data.total;
+	document.getElementById('total-down').textContent = data.down;
+	document.getElementById('total-up').textContent = data.up;
+
+	const max = Math.max(...data.devices.map(d => d.down + d.up));
+	const list = document.getElementById('tm-list-hist');
+	list.innerHTML = data.devices.map(d => {
+		const pct = ((d.down + d.up) / max) * 100;
+		return `<div class="tm-row">
+			<svg class="svg-icon" style="font-size:16px;color:var(--accent-600)"><use href="#${d.icon}"/></svg>
+			<span class="tm-name">${escapeHtml(d.name)}${d.note ? `<span class="tm-subval">${escapeHtml(d.note)}</span>` : ''}</span>
+			<div class="tm-bar-wrap"><div class="tm-bar" style="width:${pct}%"></div></div>
+			<span class="tm-val">${escapeHtml(d.total)}</span>
+		</div>`;
+	}).join('');
+}
+
+/* Live traffic animated update — 让实时 tab 的条形真的会动 */
+const liveData = [
+	{ name: 'iPhone-John',  current: 124, base: 124 },
+	{ name: 'MacBook-Pro',  current: 56,  base: 56  },
+	{ name: 'LG-TV',        current: 23,  base: 23  },
+	{ name: '其他',          current: 8,   base: 8   },
+];
+function tickLive() {
+	if (document.getElementById('pane-live').style.display === 'none') return;
+	const rows = document.querySelectorAll('#tm-list-live .tm-row');
+	liveData.forEach((d, i) => {
+		d.current = Math.max(0.5, d.base + (Math.random() - 0.5) * d.base * 0.4);
+	});
+	const max = Math.max(...liveData.map(d => d.current));
+	const total = liveData.reduce((a, d) => a + d.current, 0);
+	rows.forEach((row, i) => {
+		const bar = row.querySelector('.tm-bar');
+		const val = row.querySelector('.tm-val');
+		if (bar) bar.style.width = (liveData[i].current / max * 100) + '%';
+		if (val) val.textContent = liveData[i].current.toFixed(0) + ' Mbps';
+	});
+	const totalEl = document.getElementById('live-total');
+	if (totalEl) totalEl.textContent = Math.round(total) + ' Mbps';
+}
+setInterval(tickLive, 2000);
 
 /* Welcome toast */
 setTimeout(() => {
