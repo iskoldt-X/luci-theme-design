@@ -895,6 +895,151 @@ if (activeNode)
 
 ---
 
+## 10. v4 修订记录（部署后实地暴露的 bug）
+
+> 触发时间：2026-05-23
+> 触发场景：v3 完成后，第一次把 GitHub Actions 自动构建的 ipk 装到真实的 ImmortalWrt 24.10 路由器上
+> 性质：**与 v1-v3 完全不同**。v1/v2/v3 都是静态审计（gemini / codex / claude / codex 复盘），看 source code 找问题。v4 是**真实部署到 ImmortalWrt 设备 + 浏览器打开**才暴露的、所有静态审计都抓不到的 **build-pipeline-level bug**。
+
+### 10.1 现象
+
+opkg install 后访问 `/cgi-bin/luci/`：
+
+- navbar 的 5 个 PNG 图标（home / openclash / link / rank / user）**铺满全屏**——每个图标占视口 ~20% 宽 + 100% 高
+- `.navbar { position: fixed; bottom: 0; width: 100%; }` 完全没生效，navbar 紧贴 `<header>` 之后在文档流位置
+- 整个主视图卡在 "正在载入视图…"，`ui.instantiateView('status/index')` 没渲染
+- 顶栏 header 看起来**部分**正常（theme-toggle 按钮可见、brand 文字位置对）→ CSS **部分**生效
+
+### 10.2 调查路径
+
+1. 怀疑浏览器 cache（LuCI 的 `?v=luciversion` 不随 theme 升级变化） → 强刷无效，排除
+2. 怀疑 ipk 没装好 → ssh 路由器 `ls -la /www/luci-static/design/css/style.css` 显示文件存在，66375 字节
+3. 怀疑 file content 错误 → `head -5 style.css` 发现**部署后是单行 minified**（`wc -l` 返回 0），跟 source 的 4141 行不一致
+4. 比对 minified 输出 → 发现两个 broken 模式（见 10.3）
+
+**root cause**：ImmortalWrt 24.10 LuCI 包构建管线里的 CSS minifier 是 broken 的。这不是我们自己加的 minifier，是 luci.mk 自带的 build step。
+
+### 10.3 根因（minifier 两个 bug 叠加）
+
+#### Bug A — 截断现代 CSS Color 4 语法
+
+```css
+/* source 写法（CSS Colors Level 4，Chrome 65+ / Safari 12.1+ / Firefox 52+ 都支持） */
+.alert-message.warning {
+    border-color: rgb(245 158 11 / 25%);
+}
+
+/* minifier 输出 */
+.alert-message.warning{...;border-color:rgb(245}    /* ← 截到第一个数字 */
+```
+
+minifier 把空格当成 "multiple values" 分隔符，截断只保留第一个数字 + 错位结束。
+
+**source 命中**：50 处（shadow / alert border / focus ring / dark mode 边框 / accent alpha 派生 token）。
+
+#### Bug B — Custom property 名被不一致地 lowercased
+
+```css
+/* source（一致驼峰） */
+:root {
+    --color-text-onAccent: #FFF;
+}
+.cbi-button-apply {
+    color: var(--color-text-onAccent);
+}
+
+/* minifier 输出 */
+:root{--color-text-onaccent:#FFF}                       /* 定义 lowercase */
+.cbi-button-apply{color:var(--color-text-onAccent)}     /* 引用保留驼峰 */
+```
+
+CSS 自定义属性名是 **case-sensitive**——引用找不到定义，fallback to `unset`。
+
+**source 命中**：31 个 unique camelCase token（`--activeColor` / `--sectionBorder` / `--inputBorder` / `--navBorder` / `--navbgColor` / `--color-text-onAccent` / ...，全是 finalplan §2 / styling-progress §2 留下来的 legacy aliases），覆盖 92 处 `var()` 引用。
+
+#### 为什么 .navbar 整个崩了
+
+`.navbar { position: fixed; bottom: 0; width: 100%; ... }` 本身的语法是干净的，**应该**正常生效。但是：
+
+- `.navbar { border-top: var(--navBorder); background-color: var(--navbgColor); ... }` 通过 Bug B 让 `var(--navBorder)` / `var(--navbgColor)` 全部 unset
+- Bug A 在多处 `--shadow-*` token 截断造成 declaration 错位
+- CSS parser 的 error recovery 是 "skip 到下一个 `)`"，被截断的 `rgb(245}` 让 parser 跳过几个 rule block 才 resume
+- 综合结果是 `.navbar` 的 layout 规则**实际上没匹配上**
+
+最终：500×500 PNG 在没有 `width: 28px` 限制下按 native size 渲染 → 视觉灾难。
+
+### 10.4 修复
+
+`htdocs/luci-static/design/css/style.css` 单文件 atomic 替换（Python 脚本批量）：
+
+| 改动 | 数量 |
+|---|---|
+| `rgb(R G B / X%)` → `rgba(R, G, B, X/100)` | 50 处 |
+| `--camelCaseName` → `--lowercase-name` | 31 unique 名 × 92 处引用 |
+| 文件大小 | 95582 → 95738 bytes（+156，rgba 比 rgb 略长） |
+| 大括号平衡 | 585 / 585 维持 OK |
+| JS / HTML / Lua 模板里的 camelCase 引用 | 0 处（全部 token 只在 CSS 内部） |
+
+### 10.5 永久 CSS 写作约束（v4 之后所有 contributor 必读）
+
+LuCI 的 build pipeline 短期不会修这个 minifier，**未来给 style.css 加规则必须遵守**：
+
+| ❌ 不能用 | ✅ 改用 | 原因 |
+|---|---|---|
+| `rgb(R G B / A%)` — CSS Color 4 空格语法 | `rgba(R, G, B, A)` — 逗号语法 | Bug A 截断 |
+| `hsl(H S% L% / A%)` | `hsla(H, S%, L%, A)` | 同 Bug A |
+| `--camelCaseTokens` | `--lowercase-tokens`（kebab-case） | Bug B 不一致 lowercase |
+| `oklch()` / `lab()` / `lch()` / `color()` | 暂时也别用 | 保险起见，minifier 没测过新色彩函数 |
+
+这条约束**同步写进** [styling-progress.md](styling-progress.md) Step 21 总结，并加进 `.github/workflows/lint.yml` 作为 CI 强制规则（任何后续 PR 加回 minifier-unsafe 写法 → CI 直接拒绝）。
+
+### 10.6 教训：静态审计的边界
+
+**这次的 bug 所有静态防御都漏过了**：
+
+| 防御层 | 跑在哪 | 为什么没抓到 |
+|---|---|---|
+| gemini / codex / claude 三轮初次审计 | source code grep | 看不到 minifier 行为 |
+| finalplan v1/v2/v3 codex 复盘 | source code 静态推理 | 同上 |
+| `lint.yml`：brace / JS syntax / shellcheck / 禁 CJK / 禁 minifier-unsafe（**v4 加**） | source CSS | 跑在 source 上，**不经过 minifier** |
+| `build.yml`：跑 `make package/compile` 出 ipk | build pipeline 输出 | 验证 ipk 可 build + 大小合理，**没对比文件内容** |
+
+**只有真实部署到 ImmortalWrt 路由器 + 浏览器打开**才暴露。
+
+**教训**：无论静态 lint / audit 多严格，**production deploy 是最终验收**。不能靠 v4 之前的 31 项静态修复就以为完了；下次 LuCI 升级 / 别的固件分支 / 嵌入式 webview 升级，还可能暴露**新的 build-pipeline 兼容性问题**。
+
+### 10.7 未来加固（值得做但本轮未实施）
+
+| 项 | 工时 | 价值 | 状态 |
+|---|---|---|---|
+| C-future-1 · Build-time diff check：CI 解 ipk → diff minified CSS vs source → 非空白变化即 fail | ~2h | catch 未来 minifier 行为再变 | backlog |
+| C-future-2 · Visual regression：qemu 起 ImmortalWrt 装 ipk + Playwright 截关键页对比基准 | ~6-8h | catch 所有 visual regression，不止 minifier | backlog |
+| C-future-3 · Lint 禁 minifier-unsafe CSS 写法 | ~30 min | 防止 source 写回 camelCase / 现代 rgb() | **v4 已实施**（lint.yml） |
+
+C-future-3 是最便宜也最对症的，**v4 立即实施**。其他两项作为长期 backlog。
+
+### 10.8 v4 改动文件清单
+
+```
+htdocs/luci-static/design/css/style.css   ← 50 rgb→rgba + 31 token lowercase (~74 行变化)
+.github/workflows/lint.yml                ← +1 step：禁 minifier-unsafe CSS 写法
+doc/styling-progress.md                   ← +1 Step 21 章节 + 第三轮总结表
+doc/finalplan.md                          ← +§10 v4 修订记录（本节）
+```
+
+### 10.9 v4 累计教训
+
+| 轮次 | 关键贡献 |
+|---|---|
+| v1 | gemini + codex + claude 三家初次审计交叉验证，列出 8 项核心问题 |
+| v2 | codex 第二轮复盘抓出 P0/P1 分类不严谨；P2-6 jquery defer 会引入新崩溃；命名冲突；动态 PKG_RELEASE 在 tarball 失效 |
+| v3 | codex 第三轮复盘抓出 root URL Lean 兼容；jQuery 移除部署期插件兼容风险；renderTabMenu 重复 append；navbar 空位 |
+| **v4** | **真实部署到 ImmortalWrt 24.10 才暴露 LuCI build pipeline minifier 两个 bug；catch 31 个 camelCase token + 50 处现代 rgb() 都会被破坏；为未来 contributor 立下永久 CSS 写作约束 + CI 强制规则** |
+
+**整个改动周期里，gemini + codex + claude + codex 三轮复盘 + 真实部署 verification 五个阶段**，累计抓出 ~50 处问题，其中至少 3 处是会引入新 bug 的（v2-④ jquery defer、v3-① root URL、v4 minifier）。**前 4 个阶段是静态防御，第 5 个阶段是 production verification——前者不能替代后者。**
+
+---
+
 ## 附录 A：本次复核确认过的统计数据
 
 - `style.css`：3611 行 / 74 KB

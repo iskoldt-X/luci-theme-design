@@ -118,3 +118,42 @@ jobs:
               sys.exit(1)
           print('OK — no raw CJK in source files')
           PY
+
+      - name: Forbid minifier-unsafe CSS patterns
+        # See doc/finalplan.md §10 — the ImmortalWrt 24.10 LuCI build pipeline
+        # ships a broken CSS minifier that:
+        #   (A) truncates modern CSS Color 4 `rgb(R G B / A%)` / `hsl(...)`
+        #       space-separated syntax into `rgb(R}` (verified bug)
+        #   (B) lowercases custom property *definitions* but not `var()`
+        #       *references*, breaking case-sensitive --camelCase tokens
+        # This step blocks both patterns at PR time so the regression that
+        # killed v3's deploy (run 26312854285) can't sneak back in.
+        run: |
+          python3 <<'PY'
+          import re, sys, glob
+          fail_rgb = []
+          fail_tokens = []
+          for path in glob.glob('htdocs/**/*.css', recursive=True):
+              src = open(path).read()
+              # Bug A pattern: rgb(R G B / X%) or hsl(...) with space separator
+              for i, line in enumerate(src.split('\n'), 1):
+                  if re.search(r'(rgb|hsl)\(\s*[\d.]+\s+[\d.]+', line):
+                      fail_rgb.append(f'  {path}:{i}: {line.strip()[:80]}')
+              # Bug B pattern: --camelCase custom property names
+              for prop in set(re.findall(r'--[a-zA-Z0-9_-]+', src)):
+                  if any(c.isupper() for c in prop):
+                      fail_tokens.append(f'  {path}: {prop}')
+
+          if fail_rgb or fail_tokens:
+              print('FAIL — CSS uses patterns the LuCI 24.10 minifier breaks.')
+              print('See doc/finalplan.md §10 for full context.\n')
+              if fail_rgb:
+                  print('Modern CSS Color 4 syntax (use legacy rgba/hsla instead):')
+                  print('\n'.join(fail_rgb))
+                  print()
+              if fail_tokens:
+                  print('camelCase custom property names (use kebab-case lowercase):')
+                  print('\n'.join(sorted(set(fail_tokens))))
+              sys.exit(1)
+          print('OK — CSS is minifier-safe (no modern rgb()/hsl() with space syntax, no camelCase tokens)')
+          PY
