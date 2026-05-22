@@ -3,8 +3,45 @@
 'require ui';
 
 // Local helper: short alias for document.querySelector with null tolerance.
-// Named `qs` to avoid shadowing the global jQuery `$`.
 function qs(sel) { return document.querySelector(sel); }
+
+// Animation helpers that replace jQuery's slideUp / slideDown ("fast" = 200 ms).
+// Use max-height transitions so we don't need jQuery; cb runs at transition end.
+function slideUp(el, cb) {
+	if (!el) { if (cb) cb(); return; }
+	el.style.overflow = 'hidden';
+	el.style.maxHeight = el.scrollHeight + 'px';
+	void el.offsetHeight; // force reflow so the first max-height takes effect
+	el.style.transition = 'max-height 200ms ease';
+	el.style.maxHeight = '0px';
+	var done = function () {
+		el.removeEventListener('transitionend', done);
+		el.style.transition = '';
+		el.style.maxHeight = '';
+		el.style.overflow = '';
+		if (cb) cb();
+	};
+	el.addEventListener('transitionend', done);
+}
+
+function slideDown(el, cb) {
+	if (!el) { if (cb) cb(); return; }
+	el.style.overflow = 'hidden';
+	el.style.maxHeight = '0px';
+	el.style.display = 'block';
+	void el.offsetHeight;
+	el.style.transition = 'max-height 200ms ease';
+	el.style.maxHeight = el.scrollHeight + 'px';
+	var done = function () {
+		el.removeEventListener('transitionend', done);
+		el.style.transition = '';
+		el.style.maxHeight = '';
+		el.style.overflow = '';
+		el.style.display = '';
+		if (cb) cb();
+	};
+	el.addEventListener('transitionend', done);
+}
 
 return baseclass.extend({
 	__init__: function() {
@@ -57,25 +94,27 @@ return baseclass.extend({
 		var collapse = false;
 
 		document.querySelectorAll('.main .main-left .nav > li >ul.active').forEach(function (ul) {
-			$(ul).stop(true).slideUp("fast", function () {
+			slideUp(ul, function () {
 				ul.classList.remove('active');
-				ul.previousElementSibling.classList.remove('active');
+				if (ul.previousElementSibling)
+					ul.previousElementSibling.classList.remove('active');
 			});
 			if (!collapse && ul === slide_menu) {
 				collapse = true;
 			}
-
 		});
 
 		if (!slide_menu)
 			return;
-		
-		
+
 		if (!collapse) {
-			$(slide).find(".slide-menu").slideDown("fast",function(){
-				slide_menu.classList.add('active');
-				a.classList.add('active');
-			});
+			var submenu = slide.querySelector('.slide-menu');
+			if (submenu) {
+				slideDown(submenu, function () {
+					slide_menu.classList.add('active');
+					a.classList.add('active');
+				});
+			}
 			a.blur();
 		}
 		ev.preventDefault();

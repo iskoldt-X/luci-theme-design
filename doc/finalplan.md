@@ -12,40 +12,51 @@
 |---|---|---|---|
 | **P0** 必须立即修 | 2 | ✅ **全部完成** | ~11 min |
 | **P1** 优先修 | 9 | ✅ **全部完成** | ~85 min |
-| **P2** 代码味道 | 11 | ✅ **10/11 完成**（P2-6 jquery defer 与 P3-2 合并处理） | ~75 min |
-| **P3** 长期改善 | 7 | ⏳ 待办 | ~4.5 h |
+| **P2** 代码味道 | 11 | ✅ **全部完成**（P2-6 随 P3-2 一并完成） | ~75 min |
+| **P3** 长期改善 | 7 | ✅ **6/7 完成**（P3-3 CSS 拆分建议独立 PR） | ~2.5 h |
 
-**累计：21 项已修复 · 1 项延后 · 7 项 P3 待办**
+**累计：28 项已修复 · 1 项建议独立 PR · 0 项待办**
 
 ### 已消除的硬编码病灶（grep 自动验证）
 
 ```
-✅ DOMSubtreeModified 调用:    0 (代码已替换为 MutationObserver)
+✅ DOMSubtreeModified 调用:    0  (改 MutationObserver)
 ✅ eval() in style.js:          0
 ✅ openclash 硬编码 in JS:      0
-✅ /cgi-bin/luci/ in header:    0  (改用 <%=url(...)%>)
+✅ /cgi-bin/luci/ in header:    0  (改 <%=url(...)%>)
 ✅ cbi-samba-cfg010f89 死规则:  0
 ✅ gcm_sender_id 死字段:        0
 ✅ favicon.ico (PNG 伪装):      已删
 ✅ style copy.css 备份文件:    已删
+✅ jquery.min.js (96 KB):       已删 (P3-2)
 ✅ calc(0% + X) 诡异写法:       0
 ✅ background-color: none:       0
 ✅ HYk2gj 死字体:                0
 ✅ --sectionShaddow 拼错变量:   0
+✅ href="#" brand 链接:          0  (改 url('admin/status/overview'))
+✅ <span class="showSide">:      0  (改 <button> + aria-label)
+✅ ubuntu-20.04 in CI:           0  (升 ubuntu-24.04)
+✅ user-scalable=0:              0  (WCAG 1.4.4 修复)
 ```
 
-### 文件变更统计
+### 文件变更统计（两轮累计）
 
 ```
-htdocs/luci-static/design/css/style copy.css | 3353 lines DELETED
-htdocs/luci-static/design/css/style.css      |  167 lines net deletion
+.github/workflows/lint.yml                   |  +82 lines NEW (lint workflow)
+.github/workflows/release.yml                |  ubuntu-24.04 + sed PKG_RELEASE 自动化
+Makefile                                     |  Apache-2.0 + 注释指向 LICENSE
+README.md                                    |  License badge + uci-defaults 说明
+htdocs/luci-static/design/css/style.css      |  3611 → 3452 (净删 -159 行)
+htdocs/luci-static/design/css/style copy.css |  3353 lines DELETED
 htdocs/luci-static/design/favicon.ico        |  Bin (PNG 伪装) DELETED
-htdocs/luci-static/design/js/style.js        |   14 lines (was 28, IIFE removed)
-htdocs/luci-static/design/manifest.json      |  18 lines (was 25, GCM 字段删除)
-htdocs/luci-static/resources/menu-design.js  |  null active + qs() helper + 7 处 null 检查
-luasrc/view/themes/design/header.htm         |  导航栏 url() 化 + 删私有 meta + root 警告恢复
+htdocs/luci-static/design/js/jquery.min.js   |  96 KB DELETED (P3-2)
+htdocs/luci-static/design/js/style.js        |  28 → 14 行
+htdocs/luci-static/design/manifest.json      |  25 → 18 行
+htdocs/luci-static/resources/menu-design.js  |  null active + qs() + slideUp/slideDown 原生
+luasrc/view/themes/design/header.htm         |  url() 化 + a11y + 删私有 meta + 恢复警告
 
-净变化: 7 files changed, ~133 insertions(+), ~3650 deletions(-)
+总净变化: 12 files changed · -3700 lines · +200 lines
+ipk 体积预估: -171 KB (style copy.css + jquery.min.js)
 ```
 
 ### 关键修复一览
@@ -54,13 +65,20 @@ luasrc/view/themes/design/header.htm         |  导航栏 url() 化 + 删私有 
 |---|---|---|
 | MutationObserver 替代 DOMSubtreeModified | style.js | **消除潜在 TypeError 崩溃** |
 | 删除 75 KB style copy.css | css/ | ipk 包瘦身 |
+| 删除 96 KB jquery.min.js (P3-2) | js/ | ipk 包瘦身 + 安全面减少 |
 | null active class bug 修复 | menu-design.js | DOM class 正确 |
 | data-node-name 加入选择器 | menu-design.js + style.css | nlbw / wizard 图标恢复显示 |
 | 导航栏改用 url() + disp.lookup | header.htm | 反代场景可用 + openclash 缺失不再 404 |
 | 恢复 root 无密码警告 | header.htm | 安全 UX 恢复 |
-| menu-design 加 7 处 null 保护 | menu-design.js | 任何元素缺失不再连锁崩溃 |
+| showSide span → button + aria-label | header.htm + style.css | WCAG 可访问性合规 |
+| 去掉 user-scalable=0 | header.htm | WCAG 1.4.4 合规 |
+| menu-design 加 7 处 null 保护 + qs() helper | menu-design.js | 任何元素缺失不再连锁崩溃 |
+| 原生 slideUp/slideDown 替代 jQuery 动画 | menu-design.js | 去 jQuery 依赖 |
 | .node-main-login 60 行重复删除 | style.css | CSS 减少冗余 |
 | @media 替代 JS 改 box-shadow | style.css | 性能 + 去 1 处 jQuery 依赖 |
+| 新增 lint.yml workflow | .github/workflows/ | PR 触发 JS/JSON/sh/CSS/template 平衡检查 |
+| release.yml sed 自动化 PKG_RELEASE | .github/workflows/ | tag-based 发布版本号自动 |
+| CI ubuntu-20.04 → 24.04 | .github/workflows/ | 修复已 EOL 的 runner |
 
 ### 验证
 
@@ -69,7 +87,9 @@ $ node --check htdocs/luci-static/design/js/style.js          ✅
 $ node --check htdocs/luci-static/resources/menu-design.js   ✅
 $ python3 -c "import json; json.load(...)"  manifest.json     ✅
 $ sh -n root/etc/uci-defaults/30_luci-theme-design           ✅
+$ ruby -ryaml -e "..." lint.yml + release.yml                ✅
 $ CSS brace balance check                                     ✅ 527 pairs
+$ grep -c 'jquery|\$('                                        0
 ```
 
 ---
@@ -549,17 +569,17 @@ ul.appendChild(E('li', { 'class': liCls.length ? liCls.join(' ') : null }, [
 - [x] **commit 14** [header.htm](luasrc/view/themes/design/header.htm) 删 x5/UC/IE 私有 meta + 重排 icon links + favicon.ico 改用 PNG (P2-4, P2-5, P2-10) ✅
 - [x] **commit 15** style.css 删大段注释（modemenu 45 行 + IE hacks 14 行 + admin-system-admin 6 行）+ 整理 `@font-face design`（删 3 个死 url）+ 删 `div { font-family: HYk2gj }` (P2-7, P2-8, P2-9) ✅
 - [x] **commit 16** favicon.ico (PNG-伪装) 删除，header.htm 改用 image/png 类型直接引用 icon.png (P2-10) ✅
-- [ ] **commit (合并 P3-2 时一起做)** ~~P2-6 jquery defer~~ —— 暂不动，与去 jQuery 化合并处理
+- [x] **(随 P3-2 一起解决)** ~~P2-6 jquery defer~~ ✅ jquery 已彻底删除，脚本加载顺序问题自然消失
 
-### 第四波：P3（一周内有空再做）
+### 第四波：P3 — **已部分完成 2026-05-22**
 
-- [ ] LICENSE 文档统一 (P3-1)
-- [ ] 去 jQuery 化（同时解决 P2-6 加载顺序）(P3-2)
-- [ ] CSS 拆分 + stylelint (P3-3)
-- [ ] 可访问性补齐 (P3-4)
-- [ ] CI 升级（必做：ubuntu runner；可选：SDK matrix）+ lint workflow (P3-5)
-- [ ] Makefile + release.yml 联合处理版本号自动化 (P3-6)
-- [ ] README 补充 uci-defaults 说明 (P3-7)
+- [x] LICENSE 文档统一 (P3-1) ✅ README 顶部加 LICENSE badge + 说明；Makefile 注释改写为指向 LICENSE + 加 `PKG_LICENSE:=Apache-2.0`
+- [x] 去 jQuery 化 (P3-2) ✅ 删 jquery.min.js (96 KB)；menu-design.js 加 slideUp/slideDown 原生 helper（CSS max-height transition）；header.htm 删 jquery script 标签 + 顺手解决 P2-6 脚本加载顺序
+- [ ] CSS 拆分 + stylelint (P3-3) — **建议作为独立 PR**（重构风险中，需逐页面回归测试）
+- [x] 可访问性补齐 (P3-4) ✅ showSide `<span>`→`<button>` + aria-label；brand `href="#"`→`href="<%=url(...)%>"`；viewport 去掉 `user-scalable=0, maximum-scale=1` (WCAG 1.4.4)；CSS 加 button reset
+- [x] CI 升级 (P3-5) ✅ ubuntu-20.04 → ubuntu-24.04；新增 `.github/workflows/lint.yml` 跑 JS/JSON/shellcheck/CSS 平衡/template 标签平衡；SDK 保持 18.06.9 注释说明
+- [x] Makefile + release.yml 联合版本号自动化 (P3-6) ✅ Makefile 保持静态 `PKG_RELEASE`；release.yml build step 加 `sed` 替换为 `$(date +%Y%m%d)`
+- [x] README 补充 uci-defaults 说明 (P3-7) ✅ 加「安装注意」段落明示主题会覆盖用户当前主题设置
 
 ---
 

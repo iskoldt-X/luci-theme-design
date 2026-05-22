@@ -2394,6 +2394,14 @@ label[data-index][data-depends] {
 
 .showSide {
 	display: none;
+	/* Reset native <button> styling so .showSide stays visually identical
+	   after the <span>→<button> a11y migration. */
+	background: transparent;
+	border: 0;
+	padding: 0;
+	font: inherit;
+	color: inherit;
+	cursor: pointer;
 }
 
 .darkMask {

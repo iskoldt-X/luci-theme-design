@@ -2,7 +2,11 @@
 
 # luci-theme-design
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 **luci-theme-design**基于[luci-theme-neobird](https://github.com/thinktip/luci-theme-neobird)二次开发, 适用于lede For Lean's OpenWRT Only [lede](https://github.com/coolsnowwolf/lede)
+
+> 本项目以 **Apache License 2.0** 发布（见 [LICENSE](LICENSE)）。OpenWrt 包 Makefile 头部保留 GPL-2.0-or-later 模板（与 Apache 2.0 通过 GPLv3 兼容），仅作为 OpenWrt 包构建约定。部分继承自 luci-theme-material / luci-theme-neobird 的文件保留各自原始声明。
 
 - 修复安装package提示信息背景泛白
 - 优化菜单缩放
@@ -30,6 +34,10 @@
 - 修改和优化了很多插件显示，完善的icon图标，尽量视觉统一
 - 简洁的登录界面，底部导航栏，类App的沉浸式体验；
 - 适配深色模式，适配系统自动切换；
+
+## 安装注意
+
+本主题在首次安装时会通过 `root/etc/uci-defaults/30_luci-theme-design` 自动将 LuCI 当前主题切换为 Design（设置 `luci.main.mediaurlbase=/luci-static/design`）。这是 LuCI 主题包的常规行为，但请注意安装后会覆盖你原有的主题设置。如需切回，登录后到「系统 → 系统 → 语言和外观」选择其它主题即可。
 
 ## 体验Webapp方法
 
