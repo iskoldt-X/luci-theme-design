@@ -49,7 +49,7 @@ jobs:
   build:
     name: Build ipk
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -95,10 +95,19 @@ jobs:
       - name: Configure SDK feeds
         working-directory: sdk
         run: |
-          # Only the luci feed is needed — that's where luci.mk (the Makefile
-          # the theme include's) lives. Skipping `feeds update -a` saves ~2 min.
-          ./scripts/feeds update luci packages
-          ./scripts/feeds install -a -p luci
+          # Install ALL feeds (-a), not just luci. Even though luci-theme-design
+          # is noarch, OpenWrt's `make package/<x>/compile` will first build the
+          # staging of every transitive dependency. The chain here is:
+          #
+          #   luci-theme-design  → luci-base  → lucihttp  → needs lua.h
+          #
+          # `lua` lives in the `packages` feed, so installing only `luci` makes
+          # lucihttp fail with "lua.h: No such file or directory" (caught in
+          # https://github.com/iskoldt-X/luci-theme-design/actions/runs/26312436633).
+          #
+          # Same pattern as Actions-OpenWrt/build-immortalwrt-SSR-*.yml.
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
       - name: Stage theme into SDK
         run: |
@@ -131,8 +140,19 @@ jobs:
         run: |
           echo 'CONFIG_PACKAGE_luci-theme-design=y' >> .config
           make defconfig
-          # Parallel build first; fall back to single-thread + verbose on failure
-          # so the failing rule is easy to read in the action logs.
+
+          # Pre-fetch dependency source tarballs in parallel; clean up failed
+          # (truncated) downloads so the real build doesn't trip over them.
+          # This is the same robustness pattern as
+          # Actions-OpenWrt/build-immortalwrt-SSR-*.yml.
+          echo "::group::Pre-fetch sources"
+          make download -j8 2>&1 | tail -50 || true
+          find dl/ -size -1024c -print -delete 2>/dev/null || true
+          echo "::endgroup::"
+
+          # Parallel build of luci-theme-design and its dependency staging
+          # (lua → lucihttp → luci-base → theme). Single-thread + verbose fallback
+          # so the failing rule is readable in action logs.
           make package/luci-theme-design/compile V=s -j"$(nproc)" \
             || make package/luci-theme-design/compile V=s -j1
 
