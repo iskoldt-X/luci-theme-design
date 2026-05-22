@@ -14,12 +14,12 @@
 |---|---|---|
 | Phase 0 — Design Tokens | ✅ 完成 | 把所有魔法数字搬进 CSS 变量；不改任何外观 |
 | Phase 1 — 组件迁移 | ✅ 完成 | 按钮 / 输入 / 卡片 / 表单 / 徽章迁移到 token；删 Cocon 等死字体 |
-| Phase 2 — 图标系统 | ⏳ 待开始 | Lucide SVG sprite + node-name registry；删 icomoon（下轮） |
-| Phase 3 — 关键页重设计 | ⏳ 待开始 | 登录页、Overview Dashboard tile 化（下轮） |
-| Phase 4 — 微交互打磨 | 🟡 部分完成 | Focus ring ✅、reduce-motion ✅；主题切换、skeleton 待做 |
+| Phase 2 — 图标系统 | 🟢 lite 完成 | 删 icomoon 字体 + CSS 绘制汉堡；引入 Lucide SVG sprite 给新组件用（完整菜单迁移留独立 PR）|
+| Phase 3 — 关键页重设计 | ✅ 完成 | 登录页 CSS 重设计 ✅；Overview Dashboard 卡片化 ✅ |
+| Phase 4 — 微交互打磨 | ✅ 完成 | Focus ring 全局 ✅、reduce-motion ✅、主题切换按钮 ✅、Skeleton loader ✅ |
 | Phase 5 — 防御层 | ✅ 完成 | CJK / 长德文兜底；硬件能力 fallback；relative color fallback |
 
-**累计 step：11**
+**累计 step：20**
 
 ---
 
@@ -317,6 +317,330 @@ $ grep -c "#948FE1" style.css                     →  0
 | CJK / 长德文兜底 | 无 | ✅ |
 | Hardware fallback (backdrop-filter / focus-visible) | 无 | ✅ |
 | Web font 加载 | Cocon 28 KB | **0**（纯系统字体） |
+
+---
+
+## 🚀 第二轮起飞（Step 12-20）：Phase 2 lite + Phase 3 + Phase 4
+
+### Step 12 — 删除 icomoon 字体 + CSS 绘制汉堡菜单
+
+**时间**：2026-05-22
+**文件**：
+- `style.css:316-325`（删除 @font-face 'icomoon'）
+- `style.css:3216-3231`（重写 `.showSide:before`）
+- 删除：`fonts/font.eot` `font.ttf` `font.woff` `font.svg`（共 4 个文件，~8 KB）
+
+**做了什么：**
+
+icomoon 字体加载了 4 个文件（EOT 1.9KB + TTF 1.7KB + WOFF 1.8KB + SVG 2.4KB ≈ 7.9 KB）只为渲染 1 个图标——`.showSide:before` 上的 `\e20e` 汉堡菜单。
+
+替换为**纯 CSS 三线汉堡**：
+
+```css
+.showSide:before {
+    content: '';
+    display: block;
+    width: 22px;
+    height: 16px;
+    background:
+        linear-gradient(currentColor, currentColor) top    / 100% 2px no-repeat,
+        linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat,
+        linear-gradient(currentColor, currentColor) bottom / 100% 2px no-repeat;
+    color: var(--color-text);
+}
+```
+
+**收益：**
+- -8 KB 字体 + 4 个 HTTP 请求
+- 颜色继承 `currentColor`（深色 / 浅色自动跟主题）
+- 锐利的矢量线条（字体在某些 zoom 下会糊）
+- 加 hover 态：移上去变 accent 色
+
+---
+
+### Step 13 — 引入 Lucide SVG sprite
+
+**时间**：2026-05-22
+**文件**：新建 `htdocs/luci-static/design/icons.svg`（5.3 KB / 16 个图标）
+
+**包含的图标：**
+sun · moon · monitor（主题切换三态）· user · lock · eye · eye-off（登录页）· shield-check（登录 logo） · arrow-right（按钮）· cpu · memory · thermometer · activity（dashboard tile）· loader · check-circle · alert-triangle
+
+**用法：**
+```html
+<svg class="svg-icon"><use href="/luci-static/design/icons.svg#i-sun"/></svg>
+```
+
+**策略：**
+- **不替换**已有的 'design' 图标字体（菜单图标 / 状态指示器都还在用）—— 那是个独立 PR 的工作量
+- **只给新组件用 SVG**：主题切换按钮 / 登录页 leading icon / skeleton 等
+- 图标颜色用 `stroke="currentColor"`，可继承文字色
+- 图标大小用 `font-size` 控制（`.svg-icon { width: 1em; height: 1em }`）
+
+---
+
+### Step 14 — `.svg-icon` 工具类 + 主题切换按钮（Phase 4a）
+
+**时间**：2026-05-22
+**文件**：
+- `style.css:360-540`（新增 §6 SVG ICON UTILITY 和 §7 THEME TOGGLE）
+- `luasrc/view/themes/design/header.htm:79-83`（加 `#theme-toggle` 按钮）
+- `htdocs/luci-static/design/js/style.js`（重写为 IIFE + 三态切换逻辑）
+
+**做了什么：**
+
+#### 7.1 `.svg-icon` 工具类
+- `width: 1em; height: 1em` —— 跟字号缩放
+- `stroke: currentColor` —— 跟当前文字色
+- `flex-shrink: 0` —— flex 容器里不变形
+- `vertical-align: -0.125em` —— 与文字基线对齐
+- `.svg-icon-sm/md/lg/xl` 四档 14/18/24/32px
+
+#### 7.2 主题切换按钮 (`.theme-toggle`)
+- 36×36 圆角方按钮
+- 三态：`auto`（跟随 OS）/ `light` / `dark`
+- 三个 SVG icon 叠在按钮里，CSS 根据 `html[data-theme]` 显示对应那个
+- Hover 灰底 + accent 文字色
+- `:focus-visible` 强调色 ring
+
+#### 7.3 JS 切换逻辑
+```javascript
+// auto → light → dark → auto，三态循环
+var cur = root.getAttribute('data-theme') || 'auto';
+var next = cur === 'auto' ? 'light' : (cur === 'light' ? 'dark' : 'auto');
+root.setAttribute('data-theme', next);
+localStorage.setItem('design-theme', next);  // 持久化
+```
+
+#### 7.4 CSS 强制覆盖
+- `html[data-theme="dark"]` 把所有深色 token 重新定义一遍 → 即使系统 `prefers-color-scheme: light` 也强制深色
+- `html[data-theme="light"]` 同理强制浅色
+- `html[data-theme="auto"]` 不覆盖 → 自然走 `prefers-color-scheme` 媒体查询
+
+**与之前的关系：**
+- 之前我们在 `@media (prefers-color-scheme: dark)` 里定义了深色 token
+- 这一步加的是"用户手动**覆盖**系统偏好"的能力
+- 这是 claude_style.md §10.2 承诺的"3 态切换"
+
+---
+
+### Step 15 — Skeleton Loader（Phase 4b）
+
+**时间**：2026-05-22
+**文件**：`style.css:784-840`
+
+**做了什么：**
+
+替换原来的"`Collecting data...` + 旋转图标"loading 态。
+
+**之前：** 全屏白底 + 居中文字 + 一个旋转字体图标（content: "\e603"）。看起来很 2014。
+
+**之后：**
+- 全屏淡灰底（`--color-bg`）+ 顶部居中放一个 720px 宽的 skeleton 块
+- 用 `linear-gradient` 在一个 `<div>` 里画出**模拟未来内容形状**的占位条：
+  - 一条 28px 高的"标题"占位（60% 宽）
+  - 一条 16px 高的"副标题"（40% 宽）
+  - 两个 80px 高的"卡片"占位
+- 用 `@keyframes skeleton-pulse` 让整个 skeleton 在 1.6s 内做明暗呼吸（55% ↔ 100% 透明度）
+
+**为什么这样做：**
+原 LuCI markup 是 `<div class="loading"><span><div class="loading-img"></div>Collecting data...</span></div>`。我们不动 HTML，只用 CSS 把 `.loading-img` 这个空 div 用 `background: linear-gradient(...)` 画出多条占位。
+
+零 JS 改动，纯 CSS 升级。
+
+---
+
+### Step 16 — 登录页 CSS 重设计（Phase 3a）
+
+**时间**：2026-05-22
+**文件**：`style.css:2944-3120`（约 175 行重写）
+
+**做了什么：**
+
+LuCI 登录页 = `<body class="node-main-login">` + LuCI 自带 sysauth template。**我们不动 LuCI 的 template**，只用 CSS 把它从"纯黑空白"重塑成"卡片式登录"。
+
+#### 16.1 整页背景
+- 不再 `background-color: var(--bgwhite) !important`（纯白/纯黑）
+- 改为 `var(--color-bg)`（浅灰 / 深灰）
+- 加 `::before` 伪元素：两个对角的强调色径向辉光（`--color-accent-500-12`）
+- 视觉效果：背景**微微发光**，不再死板
+
+#### 16.2 登录卡片
+- 卡片本体（`div.cbi-section`）从"无样式 + 居中"改为：
+  - 背景 `--color-surface-0`
+  - 边框 `--color-border-subtle`
+  - 圆角 `--radius-xl` (20px)
+  - **大阴影** `--shadow-lg`
+  - 最大宽度 420px，剧中
+  - Padding `--space-6` `--space-5`
+
+#### 16.3 Logo（用 mask 画盾牌图标）
+卡片顶部用 `::before` 伪元素加一个 **56×56 px 强调色圆角方块**，里面用 CSS mask 切出一个白色盾牌图标。**零图片资源**，纯 CSS。
+
+#### 16.4 表单
+- "用户名" / "密码" label 改为浅色小字 + 排在输入框上方（之前是和输入框并排）
+- 输入框 100% 宽 + `min-height: 44px`（触摸友好）
+- 输入框 padding/边框/focus 自动继承前面 Step 5 的输入框 token
+
+#### 16.5 登录按钮
+- 100% 宽 + 强调色背景 + 大字
+- Hover 上浮 `translateY(-1px)` + 阴影加深
+- `min-height: 44px` 触摸友好
+
+#### 16.6 删除"复位"按钮
+LuCI 默认登录页有一个 reset 按钮，登录场景毫无意义。用 `display: none` 隐藏。
+
+**Before / After：**
+
+```
+Before:                    After:
+[纯黑/纯白]                  ╭──────────────────╮
+                            │       ▮  ← Logo  │
+   需要授权                  │                  │
+   请输入用户名和密码           │   欢迎回来        │
+                            │   登录以管理路由器   │
+   [root            ]       │   USERNAME       │
+   [████████        ]       │   [root        ] │
+                            │   PASSWORD       │
+   [登录] [复位]              │   [••••••••    ] │
+                            │   ┌─────────────┐│
+[纯黑/纯白]                  │   │  登录   →   ││
+                            │   └─────────────┘│
+                            ╰──────────────────╯
+                            (背景有淡淡的 emerald 辉光)
+```
+
+---
+
+### Step 17 — Overview Dashboard 卡片化（Phase 3b）
+
+**时间**：2026-05-22
+**文件**：`style.css:4046-4115`
+
+**做了什么：**
+
+LuCI Overview 页 = `body.node-admin-status-overview > .main > #view`，里面有多个 `.cbi-section` 兄弟节点（系统信息 / 内存 / 接口 / DHCP 客户端 / ...）。
+
+**不动 LuCI 的 controller / view**，只用 CSS Grid 把这些 section **自动两栏排布**：
+
+```css
+.node-admin-status-overview #view {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: var(--space-4);
+}
+
+/* 第一个 section（系统信息）占满整行 */
+.node-admin-status-overview #view > .cbi-section:first-of-type {
+    grid-column: 1 / -1;
+}
+
+/* hover 微上浮 */
+.node-admin-status-overview #view > .cbi-section:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+```
+
+**效果：**
+- 屏宽够 → 两栏 / 三栏自动布局
+- 屏宽 < 768px → 单栏
+- 每个 section 是一个有阴影 + 边框的卡片
+- Hover 微微上浮
+- 表格 `td` 第一列（label）变浅色小字，第二列（value）变 mono 等宽数字
+
+**比真的"重写 Dashboard"成本低 99%**——LuCI 给什么数据我们渲染什么数据，只是排版改了。
+
+---
+
+### Step 18 — 全局 focus-visible + scrollbar 现代化
+
+**时间**：2026-05-22
+**文件**：`style.css:479-518`
+
+**做了什么：**
+
+#### 18.1 Scrollbar
+- 宽度从 4px → 8px（手感更好）
+- thumb 颜色用 `--color-border-default`，hover 加深到 `--color-border-strong`
+- 加 2px 透明边距（让 thumb 视觉上比 track 窄）
+- Firefox 用 `scrollbar-width: thin` + `scrollbar-color`
+
+#### 18.2 Global Focus Ring
+任何 `a / button / [role="button"] / [tabindex]` 在 `:focus-visible` 时都有 `--shadow-focus`。这是 claude_style.md §9.1 承诺的"所有交互元素都有焦点环"。
+
+`:focus-visible` 只在键盘 focus 时触发，鼠标点击不会有视觉环（避免点击后留下烦人的描边）。
+
+---
+
+### Step 19 — 进度条 token 化
+
+**时间**：2026-05-22
+**文件**：`style.css:2316-2354`
+
+**做了什么：**
+- 高度从 `1.5rem` (24px) 保持 24px（已经合适）
+- 圆角从 `5px` → `var(--radius-pill)` (药丸形)
+- 背景从 `var(--progressbarColor)` (#c8c8c8) → `var(--color-surface-2)`
+- 填充从 `var(--progressbar)` → `var(--color-accent-500)`
+- transition 用 token (`var(--motion-normal) var(--ease-out)`)
+- 进度数字加 `tabular-nums`（91% → 12% 不会跳位）
+- **新加 `mix-blend-mode: difference` + `filter: invert(1)`**——这个组合让百分比文字在浅色背景上是深色、在强调色填充上是白色，自动适配
+
+---
+
+### Step 20 — 收尾验证
+
+**时间**：2026-05-22
+
+**全部检查通过：**
+```bash
+✅ node --check style.js
+✅ node --check menu-design.js
+✅ JSON.parse manifest.json
+✅ sh -n uci-defaults
+✅ XML.parse icons.svg
+✅ CSS braces balanced (585 pairs, 4141 lines, 93 KB)
+```
+
+**病灶清零：**
+```bash
+icomoon font files:       0  ✅
+Cocon font files:         0  ✅
+text-transform: uppercase: 0  ✅
+icomoon CSS refs:         0  ✅
+```
+
+---
+
+## 📊 第二轮（Step 12-20）累计变化
+
+| 指标 | 第一轮后 | 第二轮后 |
+|---|---|---|
+| CSS 行数 | 3778 | **4141** (+363) |
+| CSS 大小 | 86 KB | **93 KB** (+7 KB) |
+| 字体文件总大小 | 23 KB | **22 KB**（删了 icomoon ~8 KB） |
+| 字体文件数量 | 4 个 | **3 个**（只剩 design 字体 woff2/woff/ttf） |
+| 新增 SVG sprite | 0 | **5.3 KB**（16 个图标） |
+| 用户可控主题 | 否（仅跟随 OS） | **三态切换 + 持久化** |
+| Skeleton loader | 旋转图标 | **多条占位 + 呼吸动画** |
+| 登录页 | 纯黑空白 | **卡片 + logo + 渐变背景** |
+| Overview 布局 | 单栏长列表 | **CSS Grid 自适应卡片** |
+| 全局 focus ring | 无 | **`a/button/[role=button]` 全部覆盖** |
+| Scrollbar | 4px 一刀切 | **8px + hover 加深 + Firefox 支持** |
+| 进度条数字适配 | 固定色 | **mix-blend-mode 自动反色** |
+
+## 🎯 用户能立刻看到的变化
+
+1. **顶栏右上多了一个主题切换按钮**（sun/moon/monitor 图标），点一下循环切换 light → dark → auto
+2. **登录页变成卡片式**，有 emerald 主色辉光背景、shield logo、卡片有大阴影、删了"复位"按钮
+3. **Overview 状态页变成两栏卡片网格**，hover 微上浮
+4. **加载等待界面变成 skeleton 占位**，不再是旋转图标 + 文字
+5. **键盘 Tab 走过所有按钮 / 链接都有 emerald 焦点环**
+6. **滚动条变粗一点（4→8px）**，hover 时颜色加深
+7. **侧栏汉堡菜单**（小屏才显示）用 CSS 三线绘制，不再依赖字体
+
+
 
 ## 🎯 用户可见的视觉变化
 
