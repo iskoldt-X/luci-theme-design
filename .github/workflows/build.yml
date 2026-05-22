@@ -1,0 +1,192 @@
+name: Build
+
+# Fast theme-only IPK build (no full firmware).
+#
+# Tracks the same ImmortalWrt 24.10 base as
+#   Actions-OpenWrt/build-immortalwrt-SSR-AX6000.yml
+#   Actions-OpenWrt/build-immortalwrt-SSR-x86.yml
+# but skips kernel + rootfs compile — typical run time 3-6 minutes vs 1.5-2 hours.
+#
+# luci-theme-design is a noarch package (PKG_ARCH:=all), so the same .ipk
+# installs on any target — AX6000 (aarch64) and x86_64 alike. No matrix needed.
+
+on:
+  push:
+    branches: [js, main, master]
+    tags: ['v*']
+    paths-ignore:
+      - 'doc/**'
+      - '**.md'
+      - 'preview/**'
+      - '.github/workflows/lint.yml'
+  pull_request:
+    paths-ignore:
+      - 'doc/**'
+      - '**.md'
+      - 'preview/**'
+  workflow_dispatch:
+    inputs:
+      immortalwrt_version:
+        description: 'ImmortalWrt version (e.g. 24.10-SNAPSHOT, 24.10.0)'
+        required: false
+        default: '24.10-SNAPSHOT'
+  schedule:
+    # Mondays 18:00 UTC = Tuesdays 02:00 Asia/Shanghai.
+    # Catches upstream ImmortalWrt SDK changes that break compatibility
+    # before users hit them in their firmware builds.
+    - cron: '0 18 * * 1'
+
+env:
+  # ImmortalWrt soft-forks LuCI with extra i18n + UI tweaks, so we build
+  # against ImmortalWrt's SDK rather than openwrt.org's to match the firmware
+  # the user actually flashes.
+  IMMORTALWRT_VERSION: ${{ github.event.inputs.immortalwrt_version || '24.10-SNAPSHOT' }}
+  # SDK target — any arch works since the theme is noarch; x86/64 is the most
+  # widely cached and smallest download.
+  IMMORTALWRT_TARGET: x86/64
+
+jobs:
+  build:
+    name: Build ipk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need git short hash for PKG_RELEASE stamp
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              build-essential ccache file gawk gettext git \
+              libncurses-dev libssl-dev python3 rsync unzip wget xz-utils zstd
+
+      - name: Download ImmortalWrt SDK
+        run: |
+          SDK_DIR="https://downloads.immortalwrt.org/releases/${IMMORTALWRT_VERSION}/targets/${IMMORTALWRT_TARGET}/"
+          echo "::group::Listing ${SDK_DIR}"
+          curl -sL --retry 3 "${SDK_DIR}" | tee /tmp/listing.html | grep -oE 'immortalwrt-sdk-[^"]+\.tar\.(zst|xz)' | sort -u > /tmp/sdks.txt
+          cat /tmp/sdks.txt
+          echo "::endgroup::"
+
+          SDK_FILE=$(tail -1 /tmp/sdks.txt)
+          if [ -z "${SDK_FILE}" ]; then
+              echo "::error::No SDK tarball found at ${SDK_DIR}"
+              echo "First 100 lines of directory listing:"
+              head -100 /tmp/listing.html
+              exit 1
+          fi
+          echo "Selected: ${SDK_FILE}"
+
+          curl -fL --retry 3 -o sdk.tar "${SDK_DIR}${SDK_FILE}"
+          mkdir -p sdk
+          case "${SDK_FILE}" in
+            *.zst) tar --use-compress-program=unzstd -xf sdk.tar -C sdk --strip-components=1 ;;
+            *.xz)  tar -xJf sdk.tar -C sdk --strip-components=1 ;;
+            *)     echo "::error::Unknown compression: ${SDK_FILE}"; exit 1 ;;
+          esac
+          rm sdk.tar
+          echo "SDK layout:"
+          ls sdk/ | head -20
+
+      - name: Configure SDK feeds
+        working-directory: sdk
+        run: |
+          # Only the luci feed is needed — that's where luci.mk (the Makefile
+          # the theme include's) lives. Skipping `feeds update -a` saves ~2 min.
+          ./scripts/feeds update luci packages
+          ./scripts/feeds install -a -p luci
+
+      - name: Stage theme into SDK
+        run: |
+          mkdir -p sdk/package/luci-theme-design
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='doc/' \
+            --exclude='preview/' \
+            --exclude='.claude/' \
+            --exclude='sdk/' \
+            --exclude='*.tar' \
+            ./ sdk/package/luci-theme-design/
+          echo "Staged tree:"
+          find sdk/package/luci-theme-design -maxdepth 3 -type f | head -30
+
+      - name: Stamp PKG_RELEASE
+        working-directory: sdk
+        run: |
+          DATE=$(date -u +%Y%m%d)
+          SHORT=$(git -C "${GITHUB_WORKSPACE}" rev-parse --short HEAD)
+          REL="${DATE}~${SHORT}"
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=${REL}/" package/luci-theme-design/Makefile
+          echo "PKG_RELEASE=${REL}" >> "${GITHUB_ENV}"
+          echo "---- Stamped Makefile ----"
+          grep '^PKG_' package/luci-theme-design/Makefile
+
+      - name: Build
+        working-directory: sdk
+        run: |
+          echo 'CONFIG_PACKAGE_luci-theme-design=y' >> .config
+          make defconfig
+          # Parallel build first; fall back to single-thread + verbose on failure
+          # so the failing rule is easy to read in the action logs.
+          make package/luci-theme-design/compile V=s -j"$(nproc)" \
+            || make package/luci-theme-design/compile V=s -j1
+
+      - name: Collect IPK
+        id: collect
+        working-directory: sdk
+        run: |
+          IPK=$(find bin/ -type f -name 'luci-theme-design*.ipk' | head -1)
+          if [ -z "${IPK}" ]; then
+              echo "::error::No ipk produced — check the make logs above"
+              echo "bin/ tree:"
+              find bin/ -maxdepth 4 -type f | head -50
+              exit 1
+          fi
+          NAME=$(basename "${IPK}")
+          cp "${IPK}" "${GITHUB_WORKSPACE}/${NAME}"
+          {
+            echo "ipk_name=${NAME}"
+            echo "ipk_path=${GITHUB_WORKSPACE}/${NAME}"
+          } >> "${GITHUB_OUTPUT}"
+          ls -la "${GITHUB_WORKSPACE}/${NAME}"
+          SIZE=$(stat -c%s "${GITHUB_WORKSPACE}/${NAME}")
+          {
+            echo "## Built \`${NAME}\`"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Size | $((SIZE / 1024)) KB ($SIZE bytes) |"
+            echo "| PKG_RELEASE | \`${PKG_RELEASE}\` |"
+            echo "| SDK | ImmortalWrt \`${IMMORTALWRT_VERSION}\` / \`${IMMORTALWRT_TARGET}\` |"
+            echo "| Commit | \`$(git -C "${GITHUB_WORKSPACE}" rev-parse --short HEAD)\` |"
+            echo
+            echo "Install on router:"
+            echo "\`\`\`sh"
+            echo "opkg install ${NAME}"
+            echo "\`\`\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload ipk as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.collect.outputs.ipk_name }}
+          path: ${{ steps.collect.outputs.ipk_path }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload to Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.collect.outputs.ipk_path }}
+            LICENSE
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
