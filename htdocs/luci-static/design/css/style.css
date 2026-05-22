@@ -96,8 +96,8 @@
     --color-accent-900: #064e3b;
 
     /* 派生 alpha（不用 relative color syntax，避免老浏览器降级） */
-    --color-accent-500-12: rgb(16 185 129 / 12%);
-    --color-accent-500-35: rgb(16 185 129 / 35%);
+    --color-accent-500-12: rgba(16, 185, 129, 0.12);
+    --color-accent-500-35: rgba(16, 185, 129, 0.35);
 
     /* ─── 1.9 中性色（浅色模式） ─── */
     --color-bg:           #fafafa;
@@ -108,7 +108,7 @@
     --color-text:         #18181b;
     --color-text-muted:   #52525b;
     --color-text-subtle:  #a1a1aa;
-    --color-text-onAccent:#ffffff;
+    --color-text-onaccent:#ffffff;
 
     --color-border-subtle:  #e4e4e7;
     --color-border-default: #d4d4d8;
@@ -126,10 +126,10 @@
     --color-info-bg:    #dbeafe;
 
     /* ─── 1.11 阴影（浅色） ─── */
-    --shadow-xs: 0 1px 2px rgb(0 0 0 / 4%);
-    --shadow-sm: 0 2px 4px rgb(0 0 0 / 5%);
-    --shadow-md: 0 4px 12px rgb(0 0 0 / 6%), 0 1px 2px rgb(0 0 0 / 4%);
-    --shadow-lg: 0 12px 32px rgb(0 0 0 / 10%), 0 2px 4px rgb(0 0 0 / 4%);
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.04);
     --shadow-focus: 0 0 0 3px var(--color-accent-500-35);
 
     /* ═════════════════════════════════════════════════════════════════════
@@ -139,38 +139,38 @@
     --bg:               var(--color-bg);
     --mainbg:           var(--color-surface-0);
     --bgwhite:          var(--color-surface-0);
-    --activeColor:      var(--color-accent-500);
-    --activeBottom:     var(--color-accent-400) 2px solid;
-    --textColor:        var(--color-text);
-    --borderColor:      var(--color-border-default);
-    --navbgColor:       rgb(255 255 255 / 80%);
-    --navBorder:        1px solid var(--color-border-subtle);
-    --sectionbgColor:   var(--color-surface-0);
-    --sectionbgColor2:  var(--color-surface-1);
-    --sectionBorder:    none;
-    --sectiontabBorder: none;
-    --tabmenuBorderLR:  none;
-    --tabmenubgColor:   transparent;
-    --tabmenuBottom:    1px solid var(--color-border-subtle);
-    --tabmenuRadius:    0;
-    --sectionnodeBorder:1px solid var(--color-border-subtle);
-    --cbilineColor:     1px solid var(--color-border-subtle);
-    --tabbgColor:       var(--color-surface-0);
-    --inputbgColor:     var(--color-surface-1);
-    --inputtextColor:   var(--color-text);
-    --inputBorder:      1px solid var(--color-border-default);
-    --mainleftbgColor:  var(--color-surface-0);
-    --bttextColor:      var(--color-text-onAccent);
-    --badgebgColor:     var(--color-surface-1);
-    --badgeBorder:      1px solid var(--color-border-subtle);
-    --progressbarColor: var(--color-surface-2);
+    --activecolor:      var(--color-accent-500);
+    --activebottom:     var(--color-accent-400) 2px solid;
+    --textcolor:        var(--color-text);
+    --bordercolor:      var(--color-border-default);
+    --navbgcolor:       rgba(255, 255, 255, 0.8);
+    --navborder:        1px solid var(--color-border-subtle);
+    --sectionbgcolor:   var(--color-surface-0);
+    --sectionbgcolor2:  var(--color-surface-1);
+    --sectionborder:    none;
+    --sectiontabborder: none;
+    --tabmenuborderlr:  none;
+    --tabmenubgcolor:   transparent;
+    --tabmenubottom:    1px solid var(--color-border-subtle);
+    --tabmenuradius:    0;
+    --sectionnodeborder:1px solid var(--color-border-subtle);
+    --cbilinecolor:     1px solid var(--color-border-subtle);
+    --tabbgcolor:       var(--color-surface-0);
+    --inputbgcolor:     var(--color-surface-1);
+    --inputtextcolor:   var(--color-text);
+    --inputborder:      1px solid var(--color-border-default);
+    --mainleftbgcolor:  var(--color-surface-0);
+    --bttextcolor:      var(--color-text-onaccent);
+    --badgebgcolor:     var(--color-surface-1);
+    --badgeborder:      1px solid var(--color-border-subtle);
+    --progressbarcolor: var(--color-surface-2);
     --progressbar:      var(--color-accent-500);
-    --progressbartxtColor: #ffffff;
+    --progressbartxtcolor: #ffffff;
     --logo_color:       var(--color-text);
-    --alertColor:       var(--color-text);
-    --alertBackground:  var(--color-surface-1);
-    --modelBackground:  var(--color-surface-0);
-    --scrollbarColor:   var(--color-border-default);
+    --alertcolor:       var(--color-text);
+    --alertbackground:  var(--color-surface-1);
+    --modelbackground:  var(--color-surface-0);
+    --scrollbarcolor:   var(--color-border-default);
 }
 
 /* ═════════════════════════════════════════════════════════════════════════
@@ -184,8 +184,8 @@
         --color-accent-400: #6ee7b7;
         --color-accent-500: #34d399;
         --color-accent-600: #10b981;
-        --color-accent-500-12: rgb(52 211 153 / 12%);
-        --color-accent-500-35: rgb(52 211 153 / 40%);
+        --color-accent-500-12: rgba(52, 211, 153, 0.12);
+        --color-accent-500-35: rgba(52, 211, 153, 0.4);
 
         /* —— 分层灰阶（不用纯黑） —— */
         --color-bg:           #0a0a0b;
@@ -196,7 +196,7 @@
         --color-text:         #fafafa;
         --color-text-muted:   #a1a1aa;
         --color-text-subtle:  #71717a;
-        --color-text-onAccent:#ffffff;
+        --color-text-onaccent:#ffffff;
 
         --color-border-subtle:  #27272a;
         --color-border-default: #3f3f46;
@@ -208,19 +208,19 @@
         --color-danger:  #f87171;
         --color-info:    #60a5fa;
 
-        --color-success-bg: rgb(52 211 153 / 12%);
-        --color-warning-bg: rgb(251 191 36 / 12%);
-        --color-danger-bg:  rgb(248 113 113 / 12%);
-        --color-info-bg:    rgb(96 165 250 / 12%);
+        --color-success-bg: rgba(52, 211, 153, 0.12);
+        --color-warning-bg: rgba(251, 191, 36, 0.12);
+        --color-danger-bg:  rgba(248, 113, 113, 0.12);
+        --color-info-bg:    rgba(96, 165, 250, 0.12);
 
         /* —— 阴影改 1px 边框（深色下阴影不可见） —— */
         --shadow-xs: none;
-        --shadow-sm: 0 0 0 1px rgb(255 255 255 / 5%);
-        --shadow-md: 0 0 0 1px rgb(255 255 255 / 6%);
-        --shadow-lg: 0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px rgb(0 0 0 / 50%);
+        --shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.05);
+        --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.06);
+        --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 12px 32px rgba(0, 0, 0, 0.5);
 
         /* —— Legacy alias 重新指向新 token（自动级联） —— */
-        --navbgColor: rgb(24 24 27 / 80%);
+        --navbgcolor: rgba(24, 24, 27, 0.8);
     }
 }
 
@@ -380,8 +380,8 @@ html[data-theme="dark"] {
     --color-accent-400: #6ee7b7;
     --color-accent-500: #34d399;
     --color-accent-600: #10b981;
-    --color-accent-500-12: rgb(52 211 153 / 12%);
-    --color-accent-500-35: rgb(52 211 153 / 40%);
+    --color-accent-500-12: rgba(52, 211, 153, 0.12);
+    --color-accent-500-35: rgba(52, 211, 153, 0.4);
 
     --color-bg:           #0a0a0b;
     --color-surface-0:    #18181b;
@@ -391,7 +391,7 @@ html[data-theme="dark"] {
     --color-text:         #fafafa;
     --color-text-muted:   #a1a1aa;
     --color-text-subtle:  #71717a;
-    --color-text-onAccent:#ffffff;
+    --color-text-onaccent:#ffffff;
 
     --color-border-subtle:  #27272a;
     --color-border-default: #3f3f46;
@@ -402,25 +402,25 @@ html[data-theme="dark"] {
     --color-danger:  #f87171;
     --color-info:    #60a5fa;
 
-    --color-success-bg: rgb(52 211 153 / 12%);
-    --color-warning-bg: rgb(251 191 36 / 12%);
-    --color-danger-bg:  rgb(248 113 113 / 12%);
-    --color-info-bg:    rgb(96 165 250 / 12%);
+    --color-success-bg: rgba(52, 211, 153, 0.12);
+    --color-warning-bg: rgba(251, 191, 36, 0.12);
+    --color-danger-bg:  rgba(248, 113, 113, 0.12);
+    --color-info-bg:    rgba(96, 165, 250, 0.12);
 
     --shadow-xs: none;
-    --shadow-sm: 0 0 0 1px rgb(255 255 255 / 5%);
-    --shadow-md: 0 0 0 1px rgb(255 255 255 / 6%);
-    --shadow-lg: 0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px rgb(0 0 0 / 50%);
+    --shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.05);
+    --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.06);
+    --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 12px 32px rgba(0, 0, 0, 0.5);
 
-    --navbgColor: rgb(24 24 27 / 80%);
+    --navbgcolor: rgba(24, 24, 27, 0.8);
 }
 /* light 模式覆盖 prefers-color-scheme: dark（强制亮色） */
 html[data-theme="light"] {
     --color-accent-400: #34d399;
     --color-accent-500: #10b981;
     --color-accent-600: #059669;
-    --color-accent-500-12: rgb(16 185 129 / 12%);
-    --color-accent-500-35: rgb(16 185 129 / 35%);
+    --color-accent-500-12: rgba(16, 185, 129, 0.12);
+    --color-accent-500-35: rgba(16, 185, 129, 0.35);
 
     --color-bg:           #fafafa;
     --color-surface-0:    #ffffff;
@@ -445,12 +445,12 @@ html[data-theme="light"] {
     --color-danger-bg:  #fee2e2;
     --color-info-bg:    #dbeafe;
 
-    --shadow-xs: 0 1px 2px rgb(0 0 0 / 4%);
-    --shadow-sm: 0 2px 4px rgb(0 0 0 / 5%);
-    --shadow-md: 0 4px 12px rgb(0 0 0 / 6%), 0 1px 2px rgb(0 0 0 / 4%);
-    --shadow-lg: 0 12px 32px rgb(0 0 0 / 10%), 0 2px 4px rgb(0 0 0 / 4%);
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.04);
 
-    --navbgColor: rgb(255 255 255 / 80%);
+    --navbgcolor: rgba(255, 255, 255, 0.8);
 }
 
 /* 显示状态：默认显示 auto 的 monitor 图标；切到 light/dark 时切换 */
@@ -519,7 +519,7 @@ html {
 }
 
 a {
-    color: var(--textColor);
+    color: var(--textcolor);
     text-decoration: none;
 }
 
@@ -703,7 +703,7 @@ input.cbi-input-invalid {
     border-color: var(--color-danger);
 }
 input.cbi-input-invalid:focus {
-    box-shadow: 0 0 0 3px rgb(239 68 68 / 35%);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.35);
 }
 
 .cbi-dropdown,
@@ -875,12 +875,12 @@ small {
 .main-left {
     float: left;
     width: 17rem;
-    background-color: var(--mainleftbgColor);
+    background-color: var(--mainleftbgcolor);
     overflow-x: auto;
     height: calc(100% - 3.5rem);
     position: fixed;
     padding-top: 15px;
-    box-shadow: 0 0px 4px rgb(0 0 0 / 8%);
+    box-shadow: 0 0px 4px rgba(0, 0, 0, 0.08);
 	/* transition: visibility 150ms, width 150ms; */
 }
 
@@ -889,7 +889,7 @@ small {
     width: calc(100% - 17rem);
     float: right;
     height: 100%;
-    border-left: var(--sectionBorder);
+    border-left: var(--sectionborder);
 }
 
 .main-right > #maincontent {
@@ -1068,19 +1068,19 @@ span[data-indicator="uci-changes"] {
 }
 .alert-message.warning {
     background-color: var(--color-warning-bg);
-    border-color: rgb(245 158 11 / 25%);
+    border-color: rgba(245, 158, 11, 0.25);
     color: var(--color-warning);
 }
 .alert-message.danger,
 .alert-message.error {
     background-color: var(--color-danger-bg);
-    border-color: rgb(239 68 68 / 25%);
+    border-color: rgba(239, 68, 68, 0.25);
     color: var(--color-danger);
 }
 .alert-message.success,
 .alert-message.notice {
     background-color: var(--color-success-bg);
-    border-color: rgb(16 185 129 / 25%);
+    border-color: rgba(16, 185, 129, 0.25);
     color: var(--color-success);
 }
 
@@ -1116,7 +1116,7 @@ span[data-indicator="uci-changes"] {
 }
 
 .main > .main-left > .nav > li a {
-    color: var(--activeColor);
+    color: var(--activecolor);
     display: block;
     border-radius: 6px;
     cursor: pointer;
@@ -1273,7 +1273,7 @@ body[class*="node-"] > .main > .main-left > .nav > .slide > .menu.active::before
 
 .main > .main-left > .nav > li:last-child a:hover,
 .main > .main-left > .nav > .slide > .menu:hover {
-    background: var(--activeColor);
+    background: var(--activecolor);
     color:white;
 }
 .main > .main-left > .nav > .slide:hover {
@@ -1285,13 +1285,13 @@ body[class*="node-"] > .main > .main-left > .nav > .slide > .menu.active::before
 }
 
 .main > .main-left > .nav > .slide > .slide-menu > .active {
-    background-color: var(--activeColor);
+    background-color: var(--activecolor);
 }
 
 .main > .main-left > .nav > .slide > .slide-menu > li > a {
     position: relative;
     display: block;
-    color: var(--textColor);
+    color: var(--textcolor);
     vertical-align: middle;
     background:none !important;
     border: none !important;
@@ -1306,7 +1306,7 @@ body[class*="node-"] > .main > .main-left > .nav > .slide > .menu.active::before
 }
 
 .main > .main-left > .nav > .slide > .slide-menu > li:hover {
-    background: var(--activeColor);
+    background: var(--activecolor);
     color:white !important;
     transition: all 0.2s;
 }
@@ -1315,7 +1315,7 @@ body[class*="node-"] > .main > .main-left > .nav > .slide > .menu.active::before
 }
 
 .main > .main-left > .nav > .slide > .slide-menu > .active:hover {
-    background-color: var(--activeColor);
+    background-color: var(--activecolor);
     cursor: pointer;
 }
 
@@ -1465,7 +1465,7 @@ div.cbi-section {
 }
 
 #cbi-vsftpd .cbi-map-descr {
-    color: var(--activeColor);
+    color: var(--activecolor);
     padding: 0 12px 0px 12px;
     font-size: 1.2rem;
     font-weight: bold;
@@ -1544,7 +1544,7 @@ table > thead > tr > th,
 }
 
 table > tr {
-    border-bottom: var(--cbilineColor) !important;
+    border-bottom: var(--cbilinecolor) !important;
 }
 
 table > tr:last-child {
@@ -1678,7 +1678,7 @@ td > table > tbody > tr > td,
 .cbi-button-positive,
 .cbi-button.cbi-button-positive {
     background-color: var(--color-accent-500) !important;
-    color: var(--color-text-onAccent) !important;
+    color: var(--color-text-onaccent) !important;
     border-color: transparent !important;
 }
 .cbi-input-apply:hover,
@@ -1701,7 +1701,7 @@ td > table > tbody > tr > td,
 .cbi-button-reload,
 .cbi-button-action {
     background-color: var(--color-info) !important;
-    color: var(--color-text-onAccent) !important;
+    color: var(--color-text-onaccent) !important;
     border-color: transparent !important;
 }
 .cbi-button-link:hover,
@@ -1822,7 +1822,7 @@ td > table > tbody > tr > td,
 }
 
 .cbi-tabmenu > li {
-    border-radius: var(--tabmenuRadius);
+    border-radius: var(--tabmenuradius);
 }
 
 .cbi-tabmenu > li, .tabs > li {
@@ -1830,9 +1830,9 @@ td > table > tbody > tr > td,
 }
 
 .tabs > li[class~="active"] > a {
-    color: var(--activeColor) !important;
+    color: var(--activecolor) !important;
     padding-bottom: 8px;
-    border-bottom: var(--activeColor) 2px solid;
+    border-bottom: var(--activecolor) 2px solid;
 }
 
 .tabs > li[class~="active"],
@@ -1841,11 +1841,11 @@ td > table > tbody > tr > td,
 }
 
 .cbi-tabmenu {
-    border-top: var(--sectiontabBorder);
-    border-left: var(--tabmenuBorderLR);
-    border-right: var(--tabmenuBorderLR);
-    border-bottom: var(--tabmenuBottom);
-    background-color: var(--tabmenubgColor);
+    border-top: var(--sectiontabborder);
+    border-left: var(--tabmenuborderlr);
+    border-right: var(--tabmenuborderlr);
+    border-bottom: var(--tabmenubottom);
+    background-color: var(--tabmenubgcolor);
     width: 100%;
     overflow-x: auto;
     margin-top: 5px;
@@ -1857,13 +1857,13 @@ td > table > tbody > tr > td,
 }
 
 .cbi-tabmenu > li[class~="cbi-tab"] a {
-    color: var(--activeColor);
-    border-bottom: 2px solid var(--activeColor);
+    color: var(--activecolor);
+    border-bottom: 2px solid var(--activecolor);
 }
 
 .cbi-section .cbi-section-remove:nth-of-type(2n),
 .container > .cbi-section .cbi-section-node:nth-of-type(2n) {
-	background-color: var(--cbilineColor);
+	background-color: var(--cbilinecolor);
 }
 
 [data-tab-title] {
@@ -1883,7 +1883,7 @@ td > table > tbody > tr > td,
     display: block;
     /* padding: 12px; */
     border-radius: 8px;
-    /* box-shadow: 3px 3px 3px rgb(0 0 0 / 5%); */
+    /* box-shadow: 3px 3px 3px rgba(0, 0, 0, 0.05); */
     /* background-color: var(--bgwhite); */
 }
 
@@ -1894,9 +1894,9 @@ td > table > tbody > tr > td,
 
 .cbi-section-node-tabbed {
     margin-top: 0;
-    border-bottom: var(--sectiontabBorder);
-    border-left: var(--sectiontabBorder);
-    border-right: var(--sectiontabBorder);
+    border-bottom: var(--sectiontabborder);
+    border-left: var(--sectiontabborder);
+    border-right: var(--sectiontabborder);
     border-radius: 0 0;
 }
 
@@ -1936,7 +1936,7 @@ td > table > tbody > tr > td,
     min-height: 40px;
     padding: 8px 10px;
     flex-flow:row wrap;
-    border-bottom: var(--cbilineColor);
+    border-bottom: var(--cbilinecolor);
 }
 
 .cbi-value:last-child {
@@ -2019,7 +2019,7 @@ td > table > tbody > tr > td,
 }
 
 .cbi-rowstyle-2 {
-    background-color: var(--sectionbgColor2);
+    background-color: var(--sectionbgcolor2);
 }
 
 .cbi-section-table .cbi-section-table-titles .cbi-section-table-cell {
@@ -2241,7 +2241,7 @@ td > table > tbody > tr > td,
 	width: auto;
 	max-height: 200px !important;
 	/* border: thin solid #918e8c; */
-	background: var(--activeColor);
+	background: var(--activecolor);
 	/* box-shadow: 0 0 4px #918e8c; */
 	/* color: var(--main-menu-color); */
 	text-align: center;
@@ -2278,7 +2278,7 @@ td > table > tbody > tr > td,
 } */
 
 .cbi-dropdown[open] > ul.dropdown > li[selected] {
-	background: var(--activeColor);
+	background: var(--activecolor);
 }
 
 .cbi-dropdown[open] > ul.dropdown > li.focus {
@@ -2329,7 +2329,7 @@ td > table > tbody > tr > td,
     width: 0;
     height: 100% !important;
     transition: width var(--motion-normal) var(--ease-out) !important;
-    color: var(--color-text-onAccent) !important;
+    color: var(--color-text-onaccent) !important;
     background: var(--color-accent-500) !important;
     border-radius: inherit;
 }
@@ -2376,8 +2376,8 @@ td > table > tbody > tr > td,
     margin: 5em auto;
     padding: 1em;
     border-radius: 5px !important;
-    background: var(--modelBackground);
-    box-shadow: 0 2px 2px 0 rgb(0 0 0 / 16%), 0 0 2px 0 rgb(0 0 0 / 12%);
+    background: var(--modelbackground);
+    box-shadow: 0 2px 2px 0 rgba(0, 0, 0, 0.16), 0 0 2px 0 rgba(0, 0, 0, 0.12);
 }
 
 
@@ -2535,7 +2535,7 @@ body.modal-overlay-active #modal_overlay {
 td > .ifacebadge,
 .td > .ifacebadge {
 	font-size: .8rem;
-	background-color: var(--activeColor);
+	background-color: var(--activecolor);
 	color: white;
 	border-radius: 8px;
 }
@@ -2585,18 +2585,18 @@ td > .ifacebadge,
     padding: 5px;
     margin-top:10px;
     border-radius: 8px;
-    background-color: var(--sectionbgColor);
-    box-shadow: 3px 3px 3px rgb(0 0 0 / 5%);
+    background-color: var(--sectionbgcolor);
+    box-shadow: 3px 3px 3px rgba(0, 0, 0, 0.05);
 }
 
 
 /*textarea*/
 .cbi-input-textarea, textarea {
-    color: var(--inputtextColor);
+    color: var(--inputtextcolor);
     padding: 10px;
     line-height: normal;
-    border: var(--sectionBorder);
-    background-color: var(--inputbgColor);
+    border: var(--sectionborder);
+    background-color: var(--inputbgcolor);
     transition: color 150ms ease, border-color 150ms ease, opacity 150ms ease;
     -webkit-transition: color 150ms ease, border-color 150ms ease, opacity 150ms ease;
     outline-style: none;
@@ -2619,7 +2619,7 @@ td > .ifacebadge,
     padding: 10px;
     margin-bottom: 20px;
     border-radius: 0;
-    background-color: var(--sectionbgColor);
+    background-color: var(--sectionbgcolor);
     border: none;
 }
 
@@ -3123,7 +3123,7 @@ input[name="nslookup"] {
     width: 100%;
     min-height: 44px;
     background-color: var(--color-accent-500) !important;
-    color: var(--color-text-onAccent) !important;
+    color: var(--color-text-onaccent) !important;
     border: 0 !important;
     font-size: var(--text-base);
     font-weight: var(--weight-medium);
@@ -3469,7 +3469,7 @@ input[name="nslookup"] {
 @media screen and (max-width: 992px) {
 
     /* img[src*="/images/logo.png"] {
-    background-color: var(--mainleftbgColor);
+    background-color: var(--mainleftbgcolor);
     height: 50px;
     background-image: var(--mlogo);
     background-size: 310px;
@@ -3790,15 +3790,15 @@ input[name="nslookup"] {
         margin-top: -34px;
     }
     .cbi-section-node > .cbi-value:nth-of-type(2n) {
-        background-color: var(--sectionbgColor);
+        background-color: var(--sectionbgcolor);
     }
 
     .cbi-tabcontainer > .cbi-value:nth-of-type(2n) {
-        background-color: var(--sectionbgColor);
+        background-color: var(--sectionbgcolor);
     }
 
     div > .cbi-value:nth-of-type(2n) {
-        background-color: var(--sectionbgColor);
+        background-color: var(--sectionbgcolor);
     }
 
     .node-main-login > .main .cbi-value {
@@ -3901,10 +3901,10 @@ input[name="nslookup"] {
 	position: fixed;
 	bottom: 0;
 	width: 100%;
-	border-top: var(--navBorder);
+	border-top: var(--navborder);
 	height: calc(50px + constant(safe-area-inset-bottom));
 	height: calc(50px + env(safe-area-inset-bottom));
-	background-color: var(--navbgColor);
+	background-color: var(--navbgcolor);
 	-webkit-backdrop-filter: blur(10px);
 	backdrop-filter: blur(10px);
 	/* flex 布局自适应：openclash 缺失时其余项均分宽度，不再留 20% 空位 */
@@ -3930,14 +3930,14 @@ input[name="nslookup"] {
   .cbi-button.cbi-button-positive,
   .cbi-button-edit {
 	  color: #fff !important;
-	  background-color: var(--activeColor);
+	  background-color: var(--activecolor);
   }
 
 td.cbi-button, .cbi-button-apply,
 .right .cbi-button {
     font-size: var(--text-sm);
     font-family: var(--font-sans);
-    border: var(--inputBorder);
+    border: var(--inputborder);
     transition: color 150ms ease, border-color 150ms ease, opacity 150ms ease;
     -webkit-transition: color 150ms ease, border-color 150ms ease, opacity 150ms ease;
     outline-style: none;
@@ -3949,7 +3949,7 @@ td.cbi-button, .cbi-button-apply,
 .node-admin-status-iptables .right {
     padding: 12px;
     border-radius: 8px;
-    box-shadow: 3px 3px 3px rgb(0 0 0 / 5%);
+    box-shadow: 3px 3px 3px rgba(0, 0, 0, 0.05);
     /* background-color: var(--bgwhite); */
 }
 
@@ -3992,9 +3992,9 @@ td.cbi-button, .cbi-button-apply,
     min-width: inherit;
     overflow-x: auto;
     overflow-y: hidden;
-    background-color: var(--sectionbgColor);
+    background-color: var(--sectionbgcolor);
      -webkit-overflow-scrolling: touch;
-	border: var(--sectionBorder);
+	border: var(--sectionborder);
     margin-bottom: 20px;
     border-radius: 8px;
     margin-top: 5px;
@@ -4007,16 +4007,16 @@ td.cbi-button, .cbi-button-apply,
 
 /* fix node-admin-status-processe */
 .node-admin-status-processe button.btn.cbi-button-action {
-    color: var(--bttextColor);
+    color: var(--bttextcolor);
     background-color: rgb(0,171,232) !important;
     border-color: rgb(0,171,232) !important;
 }
 
 /* fix node-admin-system-opkg cbi-button-positive */
 .node-admin-system-opkg button.btn.cbi-button-positive {
-    color: var(--bttextColor);
-    background-color: var(--activeColor) !important;
-    border-color: var(--activeColor) !important;
+    color: var(--bttextcolor);
+    background-color: var(--activecolor) !important;
+    border-color: var(--activecolor) !important;
 }
 
 .node-admin-status-processe, button.btn.cbi-button-negative {
@@ -4028,7 +4028,7 @@ td.cbi-button, .cbi-button-apply,
 .node-admin-status-realtime-load #view div,
 .node-admin-status-realtime-bandwidth #view div,
 .node-admin-status-realtime-connections #view div{
-    border: var(--sectionBorder) !important;
+    border: var(--sectionborder) !important;
     font-family: -apple-system;
     background: none !important;
 }
