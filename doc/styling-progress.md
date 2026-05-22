@@ -799,3 +799,71 @@ LuCI 的 build pipeline 短期内不会修这个 minifier，**任何新加的 CS
 | 永久约束写入文档 | 无 | **styling-progress §3 + finalplan §10** |
 | CI 防御 | 仅 brace / syntax / CJK | + **minifier-unsafe syntax 检测** |
 
+---
+
+### Step 22 — menu-design.js handleMenuExpand 修复 `<li>.active` 维护
+
+**时间**：2026-05-23（Step 21 上线后立刻发现）
+**文件**：`htdocs/luci-static/resources/menu-design.js`
+**改动**：handleMenuExpand 三处修改（~10 行 net diff）
+
+#### 触发场景
+
+Step 21 修了 CSS minifier 让视觉正常之后，**点击一级菜单**（System / Services / Docker / VPN / 网络）切换时**二级菜单瞬开瞬收**——slideDown 完成的同时立刻消失。
+
+#### Root cause（详见 finalplan §10.10）
+
+CSS 的 submenu display 规则 key 在 `<li>` 上：
+
+```css
+.main > .main-left > .nav > .slide.active > ul { display: block }
+.main > .main-left > .nav > .slide > ul { display: none }
+```
+
+但 `handleMenuExpand` 只动 `<a>.active` 和 `<ul.slide-menu>.active`，**从不维护 `<li>.active`**：
+
+- 初次 render 时 `renderMainMenu` 给当前 page 的 `<li>` 加了 `slide active`，首次访问 OK
+- 切换菜单后：旧菜单 li 的 active 未移除 + 新菜单 li 的 active 未添加
+- slideDown 强制 `style="display: block"` 短暂显示，cb 清空后立刻被 CSS hide
+
+**4 年前从 material theme 继承的 bug**——原项目 CSS selector 可能不同所以没暴露，v3 重构 CSS 时没改这条 rule 也没意识到 JS 缺失，v4 修了 minifier 让 CSS 完整生效后才暴露。
+
+#### 修复（diff 见 finalplan §10.10 完整代码）
+
+handleMenuExpand 三处：
+
+1. `querySelectorAll` 改选 `li.slide.active`（之前是 `li > ul.active`）
+2. slideUp cb 增加 `activeSlide.classList.remove('active')`
+3. slideDown **之前同步**加 `slide.classList.add('active')` ← **关键**
+
+第 3 点的同步时机：必须在 slideDown 设 inline `display:block` 之前加 `<li>.active`，让 CSS keep-visible 规则在 transitionend cb 清空 inline style 时立刻接管，否则会闪一下又 hide。
+
+#### 验证
+
+修复后预期行为：
+- 点 System → Status 子菜单收起 (slideUp 200ms) + System 子菜单展开 (slideDown 200ms) + 保持
+- 再次点 System → 收起（collapse 模式）
+- 反复切换 System ↔ Services ↔ Docker ↔ VPN ↔ 网络 → 每次都正常 expand 且保持
+
+#### 跟 Step 21 同源不同角度的教训
+
+| Step | static audit 漏在哪 |
+|---|---|
+| 21（minifier） | 漏在 **build pipeline 行为**——source 看不到 minifier 做了什么 |
+| 22（菜单 active） | 漏在 **JS 操作 DOM class 与 CSS selector 对齐**——这个关系无法静态推导，**必须真实交互测试** |
+
+两者合起来证明：production deploy 不只是"装上能跑"，还包括**用户真正会做的所有交互**。未来 visual regression / e2e 测试（finalplan §10.7 C-future-2）**必须包括点击每个一级菜单**作为标准场景。
+
+---
+
+## 📊 第三轮（Step 21 + 22）累计变化（更新）
+
+| 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
+|---|---|---|---|
+| 现代 rgb()/hsl() | 50 处 | **0** | 0 |
+| camelCase 自定义属性 | 31 名 | **0** | 0 |
+| menu-design `<li>.active` 维护 | ❌ 不维护 | ❌ 不维护 | **✅ 维护** |
+| 部署后切换一级菜单 | 整页崩 | 视觉正常但子菜单瞬开瞬收 | **正常 expand+保持** |
+| 永久约束写入文档 | 无 | finalplan §10.1-10.9 | + finalplan §10.10 |
+| 累计真实部署暴露 bug | 0 | 2 (Bug A/B) | 3 (Bug A/B/C) |
+

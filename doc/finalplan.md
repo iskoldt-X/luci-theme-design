@@ -1038,6 +1038,107 @@ doc/finalplan.md                          ← +§10 v4 修订记录（本节）
 
 **整个改动周期里，gemini + codex + claude + codex 三轮复盘 + 真实部署 verification 五个阶段**，累计抓出 ~50 处问题，其中至少 3 处是会引入新 bug 的（v2-④ jquery defer、v3-① root URL、v4 minifier）。**前 4 个阶段是静态防御，第 5 个阶段是 production verification——前者不能替代后者。**
 
+### 10.10 后续发现：menu-design.js `<li>.active` class 不维护
+
+> 触发时间：2026-05-23（v4 §10.1-10.9 CSS minifier 修复上线后）
+> 触发场景：装新 ipk + 浏览器强刷后视觉正常，但**点击一级菜单切换时二级菜单瞬开瞬收**——slideDown 动画完成后子菜单立刻消失。
+> 性质：跟 §10.1-10.9 minifier 同源（部署后才暴露），但 root cause 完全不同——是 4 年前从原 material theme 继承的 JS/CSS 对齐 bug。
+
+#### 现象
+
+DevTools 挂 MutationObserver 监视 `.main-left` 下所有 class 变化，点 System 一级菜单后 console 显示：
+
+```
+class change <a System> menu → menu spinning            (LuCI 加 spinning)
+class change <a System> menu spinning → menu            (spinning 移除)
+class change <ul.slide-menu> "slide-menu active" → "slide-menu"   (Status's ul −active)
+class change <a Status> "menu active" → "menu"          (Status's a −active)
+class change <ul.slide-menu> "slide-menu" → "slide-menu active"   (System's ul +active)
+class change <a System> "menu" → "menu active"          (System's a +active)
+```
+
+**没有任何 `<li>` 的 class 变化** —— 但 CSS 的 submenu display 规则恰好 key 在 `<li>` 上：
+
+```css
+.main > .main-left > .nav > .slide.active > ul { display: block }   /* 让子菜单可见 */
+.main > .main-left > .nav > .slide > ul { display: none }            /* 默认隐藏 */
+```
+
+#### 根因
+
+`htdocs/luci-static/resources/menu-design.js` 的 `handleMenuExpand` 只动 `<a>` 和 `<ul.slide-menu>` 的 active class，**从不维护 `<li>.active`**：
+
+```javascript
+slideDown(submenu, function () {
+    slide_menu.classList.add('active');   // <ul> — 但 CSS 不看这个
+    a.classList.add('active');            // <a> — 跟 display 无关
+    // ← 漏了 slide.classList.add('active')，<li> 永远不变
+});
+```
+
+**初次 render** 时 `renderMainMenu` 正确给当前 page 对应的 `<li>` 加了 `"slide active"`（看 finalplan §1.14 修过的 `liCls.push('active')` 逻辑），所以首次访问那个一级菜单的子菜单展开 OK。**但点击切换菜单后**：
+
+- 旧菜单的 `<li class="slide active">` **active 未移除** → CSS 仍让旧 ul 命中 `display: block`
+- 新菜单的 `<li class="slide">` **active 未添加** → 新 ul 命中 `display: none`
+- `slideDown` 用 inline `style="display: block"` 让新 ul 暂时可见
+- 200ms 后 transitionend cb 清空 inline style，CSS 重新接管 → display: none → **新子菜单瞬间消失**
+
+视觉效果完美匹配用户描述的"无法保持展开"。
+
+**这个 bug 从原 material theme 继承下来已经 4 年**——原项目的 CSS selector 可能不是 `.slide.active > ul` 所以没暴露。v3 的 31 项代码健康度修复**没改这条 CSS rule**，但也**没意识到 JS 这边的缺失**。v4 minifier 修复让 CSS 完整生效后才暴露。
+
+#### 修复（handleMenuExpand 三处修改）
+
+```javascript
+// 1. querySelectorAll 改成选 li.slide.active（之前选的是 li > ul.active）
+var activeSlides = document.querySelectorAll(
+    '.main .main-left .nav > li.slide.active'
+);
+
+// 2. slideUp 的 cb 里增加 activeSlide.classList.remove('active')
+activeSlides.forEach(function (activeSlide) {
+    var ul = activeSlide.querySelector(':scope > ul.slide-menu');
+    slideUp(ul, function () {
+        activeSlide.classList.remove('active');   // ← 新增：维护 <li>.active
+        if (ul) ul.classList.remove('active');
+        if (ul && ul.previousElementSibling)
+            ul.previousElementSibling.classList.remove('active');
+    });
+    if (!collapse && ul === slide_menu) collapse = true;
+});
+
+// 3. slideDown 之前同步加 slide.classList.add('active')
+if (submenu) {
+    slide.classList.add('active');                // ← 新增：同步加 <li>.active
+    slideDown(submenu, function () {
+        slide_menu.classList.add('active');
+        a.classList.add('active');
+    });
+}
+```
+
+**第 3 点是关键**：必须在 slideDown 设 inline `display: block` 之**前**同步加 `<li>.active`，否则 cb 清空 inline style 那一刻 CSS 又 hide 新 ul。
+
+#### 教训：跟 §10.6 一脉相承但角度不同
+
+| 防御层 | 是否抓到 | 为什么 |
+|---|---|---|
+| Static audit + lint | ❌ | "JS 操作 DOM class" 跟 "CSS selector 用的 class" 的对齐关系**无法静态推导** |
+| v4 §10.1-10.9 minifier 修复 | ❌ | 修了 CSS 之后视觉看起来正常，**单点页面**没问题 |
+| 真实**交互**测试（点切换一级菜单） | ✅ | 才暴露 |
+
+**进一步教训**：不仅 "部署" 是验收，**交互** 也是验收。视觉静态截图正常 ≠ 交互行为正常。
+
+未来的 e2e 测试（finalplan §10.7 C-future-2）如果做，**必须包括"逐个点击一级菜单 → 验证子菜单展开且保持"** 作为标准场景。这种 1 行代码 4 年没暴露的 bug，**只有交互测试能 catch**。
+
+#### 改动文件
+
+```
+htdocs/luci-static/resources/menu-design.js   ← handleMenuExpand 改三处 (~10 行 net diff)
+doc/finalplan.md                              ← +§10.10（本节）
+doc/styling-progress.md                       ← +Step 22 同步记录
+```
+
 ---
 
 ## 附录 A：本次复核确认过的统计数据
