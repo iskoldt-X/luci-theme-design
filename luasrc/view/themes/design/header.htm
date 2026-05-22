@@ -35,31 +35,28 @@
 <!DOCTYPE html>
 <html lang="<%=luci.i18n.context.lang%>">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0,viewport-fit=cover" />
-<link rel="manifest" href="<%=media%>/manifest.json">
-<title><%=striptags( (boardinfo.hostname or "OpenWrt") .. ( (node and node.title) and ' - ' .. translate(node.title) or '')) %> - LuCI</title>
-    <meta name="format-detection" content="telephone=no, email=no"/>
-	<meta name="x5-fullscreen" content="true">
-    <meta name="full-screen" content="yes">
-	<meta name="x5-page-mode" content="app">
-    <meta name="browsermode" content="application">
-    <meta name="msapplication-tap-highlight" content="no">
-	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0,viewport-fit=cover" />
+	<title><%=striptags( (boardinfo.hostname or "OpenWrt") .. ( (node and node.title) and ' - ' .. translate(node.title) or '')) %> - LuCI</title>
+
+	<meta name="format-detection" content="telephone=no, email=no"/>
 	<meta name="theme-color" media="(prefers-color-scheme: light)" content="white">
 	<meta name="theme-color" media="(prefers-color-scheme: dark)" content="black">
 	<meta name="application-name" content="<%=striptags( (boardinfo.hostname or "OpenWrt") ) %> - LuCI">
-	<meta name="apple-mobile-web-app-title" content="<%=striptags( (boardinfo.hostname or "OpenWrt") ) %> - LuCI">
-	<meta name="msapplication-TileImage" content="<%=media%>/images/icon.png"/>
-    <link rel="icon" href="<%=media%>/images/icon.png" sizes="192x192">
-	<link rel="apple-touch-icon" sizes="192x192" href="<%=media%>/images/icon.png">
+
 	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+	<meta name="apple-mobile-web-app-title" content="<%=striptags( (boardinfo.hostname or "OpenWrt") ) %> - LuCI">
 	<meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-touch-fullscreen" content="yes" /> 
 	<meta name="msapplication-TileColor" content="#09c">
+
+	<link rel="manifest" href="<%=media%>/manifest.json">
+	<link rel="icon" href="<%=media%>/images/icon.png" sizes="192x192">
+	<link rel="apple-touch-icon" sizes="192x192" href="<%=media%>/images/icon.png">
+	<link rel="shortcut icon" type="image/png" href="<%=media%>/images/icon.png">
+
 	<link rel="stylesheet" href="<%=media%>/css/style.css?v=<%= ver.luciversion %>">
-	<script src="<%=media%>/js/jquery.min.js?v=3.5.1"></script>
-	<link rel="shortcut icon" href="<%=media%>/favicon.ico">
+	<script src="<%=media%>/js/jquery.min.js?v=1.11.3"></script>
 	<% if node and node.css then %>
 	<link rel="stylesheet" href="<%=resource%>/<%=node.css%>">
 	<% end -%>
@@ -85,11 +82,13 @@
 </header>
 
 <div class="navbar">
-  <a href="/cgi-bin/luci/admin/status/overview"><img src="<%=media%>/images/home.png" /></a>
-  <a href="/cgi-bin/luci/admin/services/openclash"><img src="<%=media%>/images/openclash.png" /></a>
-  <a href="/cgi-bin/luci/admin/network/network"><img src="<%=media%>/images/link.png" /></a>
-  <a href="/cgi-bin/luci/admin/status/realtime"><img src="<%=media%>/images/rank.png" /></a>
-  <a href="/cgi-bin/luci/admin/system/admin"><img src="<%=media%>/images/user.png" /></a>
+  <a href="<%=url('admin/status/overview')%>" aria-label="<%:Overview%>"><img src="<%=media%>/images/home.png" alt="<%:Overview%>" /></a>
+  <% if disp.lookup('admin/services/openclash') then %>
+  <a href="<%=url('admin/services/openclash')%>" aria-label="OpenClash"><img src="<%=media%>/images/openclash.png" alt="OpenClash" /></a>
+  <% end %>
+  <a href="<%=url('admin/network/network')%>" aria-label="<%:Network%>"><img src="<%=media%>/images/link.png" alt="<%:Network%>" /></a>
+  <a href="<%=url('admin/status/realtime')%>" aria-label="<%:Realtime Graphs%>"><img src="<%=media%>/images/rank.png" alt="<%:Realtime Graphs%>" /></a>
+  <a href="<%=url('admin/system/admin')%>" aria-label="<%:Administration%>"><img src="<%=media%>/images/user.png" alt="<%:Administration%>" /></a>
 </div>
 
 <div class="main">
@@ -103,6 +102,11 @@
 		<div id="maincontent">
 			<div class="container">
 				<%- if luci.sys.process.info("uid") == 0 and luci.sys.user.getuser("root") and not luci.sys.user.getpasswd("root") and path ~= "admin-system-admin-password" then -%>
+				<div class="alert-message warning">
+					<h4><%:No password set!%></h4>
+					<p><%:There is no password set on this router. Please configure a root password to protect the web interface.%></p>
+					<div class="right"><a class="btn cbi-button cbi-button-apply" href="<%=url("admin/system/admin/password")%>"><%:Go to password configuration...%></a></div>
+				</div>
 				<%- end -%>
 
 				<noscript>
