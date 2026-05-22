@@ -14,8 +14,11 @@
 | **P1** 优先修 | 9 | ✅ **全部完成** | ~85 min |
 | **P2** 代码味道 | 11 | ✅ **全部完成**（P2-6 随 P3-2 一并完成） | ~75 min |
 | **P3** 长期改善 | 7 | ✅ **6/7 完成**（P3-3 CSS 拆分建议独立 PR） | ~2.5 h |
+| **v3** codex 复盘后微调 | 4 | ✅ **3/4 修复**（jQuery 部署风险记入 §9.3 checklist） | ~10 min |
 
-**累计：28 项已修复 · 1 项建议独立 PR · 0 项待办**
+**累计：31 项已修复 · 1 项建议独立 PR · 0 项待办**
+
+详见 [§9 v3 修订记录](#9-v3-修订记录codex-第三轮复盘后的微调)。
 
 ### 已消除的硬编码病灶（grep 自动验证）
 
@@ -732,6 +735,163 @@ README 明确"适用于 lede For Lean's OpenWRT Only [lede]"，18.06.9 SDK 与 L
 | 将 root 警告归还到合理位置 | 纠正"钟摆式自我矫正" |
 
 **6 比 0 偏向 codex** —— v1 的 finalplan.md 经过 codex 复盘后变得更稳健、更具可执行性。
+
+---
+
+## 9. v3 修订记录（codex 第三轮复盘后的微调）
+
+> P3 实施完成后，codex 又做了一轮上线前评估，结论是"没有发现会影响路由器转发、网络服务或让系统本身出问题的硬错误"，但提出 4 处可以再打磨的点。本节记录这一轮的处理。
+
+### 9.1 修订总览
+
+| 编号 | codex 反馈 | 风险 | 处理 |
+|---|---|---|---|
+| ① | root 警告按钮指向 `admin/system/admin/password`，Lean/18.06 可能 404 | 中（首次安全配置流程会断） | **已修** → 改回 `admin/system/admin`（同文件 line 90 已经用这个，更稳） |
+| ② | 删 jQuery 后第三方插件页若偷用全局 `$` 可能崩 | 部署期风险（非本仓库代码） | **记入"上线前 checklist"**，需要实机点过常用插件 |
+| ③ | `renderTabMenu` 递归时把已 append 的节点再 append（深层 tab 顺序异常） | 低（仅显示） | **已修** → 删除外层的冗余 `container.appendChild`，仅在递归内部 append |
+| ④ | navbar 用 `float + width:20%`，隐藏 openclash 时留 20% 空位 | 低（视觉） | **已修** → 改 flex 布局，自适应分配宽度 |
+
+### 9.2 各项详细说明
+
+#### v3-① root 警告按钮 URL
+
+`header.htm:107` 原本写：
+
+```html
+<a href="<%=url("admin/system/admin/password")%>">
+```
+
+但是：
+- 同一文件 line 90 的导航栏一直用 `admin/system/admin`
+- Lean's OpenWrt 18.06（本主题明确支持的目标）的 LuCI 系统管理路径是 `admin/system/admin`，里面包含密码设置表单
+- 较新 LuCI 才把密码拆出 `password` 子页
+
+修复：
+
+```html
+<a href="<%=url("admin/system/admin")%>">
+```
+
+兼容新老 LuCI，且与同文件其它链接一致。
+
+#### v3-② jQuery 移除的部署期风险（代码不动）
+
+主题自身已彻底去 jQuery 化（P3-2 完成），主题代码静态检查全通过。但：
+
+- 历史上有部分第三方 LuCI 插件**直接使用主题提供的全局 `$ / jQuery`**（即便它们不应该这样做）；
+- 一旦主题不再加载 jquery.min.js，这些插件页在浏览器控制台会报 `ReferenceError: $ is not defined`；
+- 路由器服务本身、网络转发不受影响，但插件页面 UI 可能损坏。
+
+**这不是本仓库代码的问题，而是部署期需要验证的事项。** 上线前必须实机点一遍：
+
+```
+□ OpenClash 主页 + 配置页 + 节点订阅
+□ vssr 主页 + 节点页
+□ samba / cifsd 配置页
+□ luci-app-nlbw 流量统计
+□ ttyd 终端页
+□ vsftpd FTP 配置页
+□ OpenVPN 服务/客户端配置
+□ aliyundrive-webdav 配置页
+```
+
+如果某插件页面 JS 报 `$ is not defined`，可选择：
+- (a) **临时回滚**：把 jquery.min.js 放回去（但保留主题自己的 vanilla JS）；
+- (b) **联系插件作者**：让插件自己加载 jQuery；
+- (c) **接受**：那个插件页面用不了，等用户上游修复。
+
+#### v3-③ renderTabMenu 重复 append
+
+`menu-design.js:223` 原代码：
+
+```javascript
+container.appendChild(ul);                                                   // 自己 append
+container.style.display = '';
+
+if (activeNode)
+    container.appendChild(this.renderTabMenu(activeNode, ..., l));           // 递归调用 + 又 append 一次
+```
+
+递归 `renderTabMenu()` 内部第一行也是 `container.appendChild(ul)`，所以外层那一行 `container.appendChild(this.renderTabMenu(...))` 是**重新 append 同一个节点**——DOM 会把节点移动到 container 的末尾，导致深层 tab 在 DOM 中的顺序不符合预期。
+
+修复（删除外层冗余的 append）：
+
+```javascript
+container.appendChild(ul);
+container.style.display = '';
+
+if (activeNode)
+    this.renderTabMenu(activeNode, ..., l);   // 让递归自己处理 append
+```
+
+#### v3-④ navbar 空位
+
+`style.css:3288` 原代码：
+
+```css
+.navbar a {
+    float: left;
+    width: 20%;             /* 假设 5 个 nav 项 */
+    ...
+}
+```
+
+但 header.htm:85 用 `<% if disp.lookup('admin/services/openclash') then %>` 条件渲染 OpenClash，未装的用户实际只有 4 项 × 20% = 80%，右边留 20% 空位。
+
+修复（flex 自适应）：
+
+```css
+.navbar {
+    ...
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.navbar a {
+    flex: 1 1 0;            /* 自动均分 */
+    max-width: 100px;       /* 保留对大屏的上限 */
+    text-align: center;
+    padding: 8px 0;
+    text-decoration: none;
+}
+```
+
+4 项时每项 25%，5 项时每项 20%，6 项时每项 16.67% —— 始终铺满。
+
+### 9.3 上线前 checklist
+
+在按 P3 部署到生产路由器前，请确认：
+
+```
+□ 浏览器手动打开（清除缓存后）：
+  □ 登录页正常显示
+  □ 状态总览图标正常（包括复核新发现的 nlbw / wizard 图标）
+  □ 侧边栏菜单展开/折叠动画顺畅（原生 slideUp/slideDown 替代 jQuery）
+  □ 侧边栏在 992px 以下变成抽屉式
+  □ 移动底栏 4/5 项都铺满（没有右侧空隙）
+  □ 顶栏阴影在小屏/大屏自动切换（@media query 替代了原 JS 逻辑）
+  □ root 无密码警告点击跳转到密码设置页（不 404）
+  □ uci changes 指示器图标显示正常（MutationObserver 替代 DOMSubtreeModified）
+
+□ 常用插件页（如有装）：
+  □ OpenClash / vssr / samba / nlbw / ttyd / vsftpd / OpenVPN / aliyundrive-webdav
+  □ 关注浏览器控制台是否有 "jQuery is not defined" 或 "$ is not defined"
+
+□ CI:
+  □ tag-based 推送会触发 release.yml 并自动 sed PKG_RELEASE
+  □ PR 会触发 lint.yml
+```
+
+### 9.4 codex 三轮复盘累计贡献
+
+| 轮次 | 关键贡献 |
+|---|---|
+| v1 | 最初列出 8 项分析（gemini + codex + claude 都覆盖到的） |
+| v2 | 抓出 P0/P1 分类不严谨；**抓出 P2-6 jquery defer 会引入新崩溃**；命名冲突、动态 PKG_RELEASE 在 tarball 失效、SDK 不该激进升级 |
+| v3 | root 按钮 URL 适配 Lean；**警告 jQuery 移除的部署期插件兼容风险**；renderTabMenu 重复 append；navbar 空位 |
+
+**整个改动周期里，codex 复盘三次共抓出 13 处问题，其中至少 2 处是会引入新 bug 的（v2-④ jquery defer、v3-① root URL）。这是非常高价值的"代码守门人"工作。**
 
 ---
 

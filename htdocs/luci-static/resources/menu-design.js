@@ -220,8 +220,12 @@ return baseclass.extend({
 		container.appendChild(ul);
 		container.style.display = '';
 
+		// Recurse for nested tabs. The recursive call itself appends its own
+		// <ul> to #tabmenu; doing an outer container.appendChild() on the
+		// return value would re-append (i.e. move) the same node and produce
+		// wrong DOM order at deeper levels.
 		if (activeNode)
-			container.appendChild(this.renderTabMenu(activeNode, url + '/' + activeNode.name, l));
+			this.renderTabMenu(activeNode, url + '/' + activeNode.name, l);
 
 		return ul;
 	},

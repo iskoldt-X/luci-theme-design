@@ -3271,28 +3271,30 @@ input[name="nslookup"] {
 
 
 .navbar {
-    z-index: 200;
+	z-index: 200;
 	overflow: hidden;
 	position: fixed;
 	bottom: 0;
 	width: 100%;
 	border-top: var(--navBorder);
-	text-align: center;
-	height:calc(50px + constant(safe-area-inset-bottom));
-	height:calc(50px + env(safe-area-inset-bottom));
+	height: calc(50px + constant(safe-area-inset-bottom));
+	height: calc(50px + env(safe-area-inset-bottom));
 	background-color: var(--navbgColor);
-	  -webkit-backdrop-filter: blur(10px);
+	-webkit-backdrop-filter: blur(10px);
 	backdrop-filter: blur(10px);
-  }
-  
-  .navbar a {
-	  float: left;
-	  text-align: center;
-	  padding: 8px 0;
-	  width: 20%;
-	  text-decoration: none;
-	  max-width: 100px;
-  }
+	/* flex 布局自适应：openclash 缺失时其余项均分宽度，不再留 20% 空位 */
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.navbar a {
+	flex: 1 1 0;
+	text-align: center;
+	padding: 8px 0;
+	text-decoration: none;
+	max-width: 100px;
+}
 
   .navbar a img {
 	width: 28px;
