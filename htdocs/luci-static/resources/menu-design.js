@@ -93,10 +93,25 @@ return baseclass.extend({
 		var a = ev.target, slide = a.parentNode, slide_menu = a.nextElementSibling;
 		var collapse = false;
 
-		document.querySelectorAll('.main .main-left .nav > li >ul.active').forEach(function (ul) {
+		// Snapshot the currently expanded <li>s BEFORE making any change.
+		// The CSS rule that actually drives submenu visibility is
+		//   .main > .main-left > .nav > .slide.active > ul { display: block }
+		// — it keys off `.active` on the <li>, NOT on the inner <ul> or <a>.
+		// Without maintaining <li>.active here, slideDown briefly shows the
+		// submenu via its inline `display:block`, then transitionend's cleanup
+		// hands control back to CSS, which immediately hides it again because
+		// the parent <li> has no `.active`. Net effect: submenu expands and
+		// instantly collapses. (Reported 2026-05-23 on ImmortalWrt 24.10.)
+		var activeSlides = document.querySelectorAll(
+			'.main .main-left .nav > li.slide.active'
+		);
+
+		activeSlides.forEach(function (activeSlide) {
+			var ul = activeSlide.querySelector(':scope > ul.slide-menu');
 			slideUp(ul, function () {
-				ul.classList.remove('active');
-				if (ul.previousElementSibling)
+				activeSlide.classList.remove('active');
+				if (ul) ul.classList.remove('active');
+				if (ul && ul.previousElementSibling)
 					ul.previousElementSibling.classList.remove('active');
 			});
 			if (!collapse && ul === slide_menu) {
@@ -110,6 +125,10 @@ return baseclass.extend({
 		if (!collapse) {
 			var submenu = slide.querySelector('.slide-menu');
 			if (submenu) {
+				// Add <li>.active IMMEDIATELY (synchronously, before slideDown
+				// starts) so the CSS keep-visible rule applies as soon as
+				// slideDown's inline `display:block` is cleared on transitionend.
+				slide.classList.add('active');
 				slideDown(submenu, function () {
 					slide_menu.classList.add('active');
 					a.classList.add('active');
