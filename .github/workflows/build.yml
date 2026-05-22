@@ -50,6 +50,10 @@ jobs:
     name: Build ipk
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    permissions:
+      # Required for softprops/action-gh-release to push the nightly tag
+      # and upload release assets (default GITHUB_TOKEN scope is read-only).
+      contents: write
 
     steps:
       - name: Checkout
@@ -173,9 +177,14 @@ jobs:
           fi
           NAME=$(basename "${IPK}")
           cp "${IPK}" "${GITHUB_WORKSPACE}/${NAME}"
+          # Also publish a fixed-name copy so the nightly pre-release has a
+          # stable URL — users can `wget .../luci-theme-design.ipk` without
+          # knowing the current PKG_RELEASE stamp.
+          cp "${IPK}" "${GITHUB_WORKSPACE}/luci-theme-design.ipk"
           {
             echo "ipk_name=${NAME}"
             echo "ipk_path=${GITHUB_WORKSPACE}/${NAME}"
+            echo "ipk_fixed=${GITHUB_WORKSPACE}/luci-theme-design.ipk"
           } >> "${GITHUB_OUTPUT}"
           ls -la "${GITHUB_WORKSPACE}/${NAME}"
           SIZE=$(stat -c%s "${GITHUB_WORKSPACE}/${NAME}")
@@ -196,14 +205,53 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload ipk as artifact
+        # NB: actions/upload-artifact ALWAYS wraps content in a .zip — even if
+        # `path` is a single file. The downloaded .zip must be `unzip`-ed to
+        # recover the ipk. For direct `wget + opkg install` use the rolling
+        # pre-release instead (next step) which serves the ipk verbatim.
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.collect.outputs.ipk_name }}
+          name: luci-theme-design-${{ env.PKG_RELEASE }}
           path: ${{ steps.collect.outputs.ipk_path }}
           retention-days: 30
           if-no-files-found: error
 
-      - name: Upload to Release (tag push only)
+      - name: Upload to rolling pre-release (branch push)
+        # Every push to a default branch overwrites a tag like `nightly-js`
+        # with the latest ipk. Release assets are served as-is (no .zip
+        # wrapper), so users can wget + opkg install directly.
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly-${{ github.ref_name }}
+          name: "Nightly · ${{ github.ref_name }}"
+          prerelease: true
+          make_latest: 'false'
+          body: |
+            Rolling pre-release. **Overwritten on every push** to `${{ github.ref_name }}`.
+
+            | | |
+            |---|---|
+            | Commit | [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
+            | PKG_RELEASE | `${{ env.PKG_RELEASE }}` |
+            | SDK | ImmortalWrt `${{ env.IMMORTALWRT_VERSION }}` |
+
+            **Install on router (stable URL):**
+
+            ```sh
+            cd /tmp
+            wget https://github.com/${{ github.repository }}/releases/download/nightly-${{ github.ref_name }}/luci-theme-design.ipk
+            opkg install luci-theme-design.ipk
+            ```
+
+            Or grab the timestamped build below if you want to pin a specific commit.
+          files: |
+            ${{ steps.collect.outputs.ipk_path }}
+            ${{ steps.collect.outputs.ipk_fixed }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to versioned Release (tag push)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
