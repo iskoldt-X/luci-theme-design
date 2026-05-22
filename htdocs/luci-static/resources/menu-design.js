@@ -5,6 +5,45 @@
 // Local helper: short alias for document.querySelector with null tolerance.
 function qs(sel) { return document.querySelector(sel); }
 
+// ── Menu icon mapping (upgrade.md §4.C2) ──────────────────────────────────────
+// Replaces the legacy 'design' icon-font \uXXXX pseudo-element approach with
+// inline Lucide SVG <use>. Lookup priority: data-title → data-node-name → null.
+// When null, no icon is rendered (text-only menu item).
+var MENU_ICON_MAP = {
+	// by data-title (LuCI menu .title after _() translation, then space → _)
+	'Status':            'i-activity',
+	'System':            'i-settings',
+	'Services':          'i-server',
+	'Docker':            'i-box',
+	'NAS':               'i-hard-drive',
+	'VPN':               'i-shield',
+	'Network':           'i-globe',
+	'Bandwidth_Monitor': 'i-bar-chart',
+	'Statistics':        'i-pie-chart',
+	'Control':           'i-sliders',
+	'Asterisk':          'i-phone',
+	'Inital_Setup':      'i-sparkles',   // sic — LuCI's typo, preserved
+	'iStore':            'i-shopping-bag',
+	'Logout':            'i-log-out',
+	'Reboot':            'i-power',
+	// by data-node-name (fallback for menus whose title varies by locale)
+	'nlbw':              'i-bar-chart',
+	'wizard':            'i-sparkles'
+};
+
+var ICON_BASE_URL = (typeof L !== 'undefined' && L.env && L.env.mediaurlbase
+	? L.env.mediaurlbase
+	: '/luci-static/design') + '/icons.svg';
+
+function iconForMenu(dataTitle, nodeName) {
+	return MENU_ICON_MAP[dataTitle] || MENU_ICON_MAP[nodeName] || null;
+}
+
+function makeMenuIcon(iconName) {
+	return E('svg', { 'class': 'svg-icon menu-icon', 'aria-hidden': 'true' },
+		E('use', { 'href': ICON_BASE_URL + '#' + iconName }));
+}
+
 // Animation helpers that replace jQuery's slideUp / slideDown ("fast" = 200 ms).
 // Use max-height transitions so we don't need jQuery; cb runs at transition end.
 function slideUp(el, cb) {
@@ -163,14 +202,23 @@ return baseclass.extend({
 			if (isActive)
 				ul.classList.add('active');
 
+			// Build the <a> children: [optional SVG icon] + translated title text.
+			// Icons are only rendered at level 1 (top menu); level 2+ are text-only,
+			// matching the legacy 'design' icon-font rules which also targeted L1 only.
+			var dataTitle = children[i].title.replace(/\s+/g, '_');
+			var iconName  = (l === 1) ? iconForMenu(dataTitle, children[i].name) : null;
+			var aChildren = iconName
+				? [makeMenuIcon(iconName), _(children[i].title)]
+				: [_(children[i].title)];
+
 			ul.appendChild(E('li', { 'class': liCls.length ? liCls.join(' ') : null }, [
 				E('a', {
 					'href': L.url(url, children[i].name),
 					'click': (l == 1) ? ui.createHandlerFn(this, 'handleMenuExpand') : null,
 					'class': aCls.length ? aCls.join(' ') : null,
 					'data-node-name': children[i].name,
-					'data-title': children[i].title.replace(/\s+/g, '_'),
-				}, [_(children[i].title)]),
+					'data-title': dataTitle,
+				}, aChildren),
 				submenu
 			]));
 		}

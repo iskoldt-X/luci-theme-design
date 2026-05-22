@@ -9,14 +9,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Opt-in to Node 24 runtime for any straggler action that hasn't bumped
+# (build.yml has the same env; the warning is workflow-scoped).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
 

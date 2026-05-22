@@ -42,6 +42,43 @@
 | 长期 | 工程优化（CSS 拆分 / i18n 压测 / Lighthouse CI / 兼容矩阵） | ~11h | 独立 PR |
 | **合计** | | **~70h** | |
 
+### 📊 实施进度（2026-05-23 更新）
+
+执行细节见 [styling-progress.md §4](styling-progress.md)，task 跟踪见 session task list。
+
+| Task | 提案章节 | 工时 | 状态 |
+|---|---|---|---|
+| **第一波 — 纯主题增量** | | **16h** | **✅ 完成** |
+| T3 S1 Cmd+K 命令面板 | §1.S1 | 8h | ✅ shipped (4278ed3..[next]) |
+| T4 S2a Toast 通知层 | §1.S2a | 3h | ✅ shipped (本批) |
+| T5 B1 移动端 Bottom Sheet | §3.B1 | 2h | ✅ shipped (本批) |
+| T6 C2 Lucide SVG 迁移（主菜单） | §4.C2 | 3h | ✅ shipped (本批) — `::after` 箭头 + 状态图标下次清理 |
+| **Phase 0 — 基础设施** | | **40 min** | **✅ 完成** |
+| T1 nightly pre-release 修复 | — | 30min | ✅ shipped (本批) — perms 移到 workflow-level |
+| T2 Node 24 actions 升级 | — | 10min | ✅ shipped (本批) — v4 → v5 + escape env |
+| **第二波 — CGI + 实时数据** | | **18h** | ⏳ 下批 |
+| T7 §0.5 CGI 基础设施（blocker） | §0.5 | 2h | ⏳ |
+| T8 S3 Sparkline / Live Metrics | §1.S3 | 6h | ⏳ |
+| T9 A1 WAN Hero | §2.A1 | 6h | ⏳ |
+| T10 A5 Wi-Fi/LAN 测速 | §2.A5 | 4h | ⏳ |
+| **第三波 — 交互深化** | | **15h** | ⏳ |
+| T11 A2 设备列表 + OUI | §2.A2 | 7h | ⏳ |
+| T12 A3 快速操作浮层 | §2.A3 | 3h | ⏳ |
+| T13 S2b 应用变更体验重塑 | §1.S2b | 5h | ⏳ |
+| **第四波 — 流量分析** | | **10h** | ⏳ |
+| T14 D2 流量分析（渐进增强） | §5.D2 | 10h | ⏳ |
+| **长期 — 工程加固** | | **11h** | ⏳ |
+| T15 C1 CSS 拆分 | §4.C1 | 4h | ⏳ |
+| T16 C3 i18n 压测 | §4.C3 | 2h | ⏳ |
+| T17 C4 Lighthouse CI | §4.C4 | 2h | ⏳ |
+| T18 C5 CGI 安全审计 | §4.C5 | 1h | ⏳ blocked by T7 |
+| T19 C6 LuCI 兼容矩阵 | §4.C6 | 2h | ⏳ |
+| **加固 — 部署期 backlog** | | **~10h** | ⏳ |
+| T20 Build-time CSS diff | finalplan §10.7 | 2h | ⏳ |
+| T21 Visual regression test | finalplan §10.7 | 6-8h | ⏳ |
+
+**进度**：6 / 21 task 完成（28.6%），16.7h / 70h 工时（24%）。
+
 ---
 
 ## 0. 总指导原则

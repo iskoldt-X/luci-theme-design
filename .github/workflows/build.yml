@@ -36,6 +36,13 @@ on:
     # before users hit them in their firmware builds.
     - cron: '0 18 * * 1'
 
+# Workflow-level permissions — moved here from job-level (was preventing
+# softprops/action-gh-release from pushing the rolling `nightly-js` tag on
+# some repo configurations where the org-default GITHUB_TOKEN scope wins
+# over job-scoped grants. Workflow-level write is consistently honored.
+permissions:
+  contents: write
+
 env:
   # ImmortalWrt soft-forks LuCI with extra i18n + UI tweaks, so we build
   # against ImmortalWrt's SDK rather than openwrt.org's to match the firmware
@@ -44,20 +51,21 @@ env:
   # SDK target — any arch works since the theme is noarch; x86/64 is the most
   # widely cached and smallest download.
   IMMORTALWRT_TARGET: x86/64
+  # Opt-in to Node 24 runtime for JS actions; default Node 20 is deprecated
+  # (will be removed 2026-09-16). Bumping action versions below covers most;
+  # this env is the official escape hatch for any straggler that hasn't
+  # released a v24-compatible version yet.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   build:
     name: Build ipk
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    permissions:
-      # Required for softprops/action-gh-release to push the nightly tag
-      # and upload release assets (default GITHUB_TOKEN scope is read-only).
-      contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0   # need git short hash for PKG_RELEASE stamp
 
@@ -209,7 +217,7 @@ jobs:
         # `path` is a single file. The downloaded .zip must be `unzip`-ed to
         # recover the ipk. For direct `wget + opkg install` use the rolling
         # pre-release instead (next step) which serves the ipk verbatim.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: luci-theme-design-${{ env.PKG_RELEASE }}
           path: ${{ steps.collect.outputs.ipk_path }}

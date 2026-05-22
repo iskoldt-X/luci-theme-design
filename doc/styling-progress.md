@@ -867,3 +867,107 @@ handleMenuExpand 三处：
 | 永久约束写入文档 | 无 | finalplan §10.1-10.9 | + finalplan §10.10 |
 | 累计真实部署暴露 bug | 0 | 2 (Bug A/B) | 3 (Bug A/B/C) |
 
+---
+
+## 🚀 第四轮（Step 23-27）：upgrade.md v2 Phase 1 + Phase 0 落地
+
+> 起飞时间：2026-05-23（v4 menu fix 上线后）
+> 范围：upgrade.md v2 提案的第一波 + Phase 0 基础设施收尾
+> 节奏：一次 ship 多个 task，用户批量测试（每 2 个 phase 一测）
+
+### Step 23 — S1 Cmd+K 命令面板（旗舰）
+
+**时间**：2026-05-23
+**对应 upgrade.md**：§1.S1
+**改动**：
+- 新文件 `htdocs/luci-static/resources/cmdk.js`（~270 行 LuCI module）
+- `icons.svg` +4 个 Lucide 图标（search / arrow-up / arrow-down / corner-down-left）
+- `style.css` +203 行 §8 cmdk styles
+- `header.htm` +`#cmdk-trigger` magnifier 按钮
+- `footer.htm` +`L.require('cmdk')`
+
+**功能完整度**：6 档 fuzzy 评分 / ⌘K 触发 / 键盘 ↑↓ Enter Esc / 拼音首字母 / 最近 5 项 localStorage / aria-combobox / iOS 16px 防 zoom / backdrop-filter fallback。upgrade.md §0.6 i18n contract 全遵循。
+
+**用户能立刻看到的变化**：按 ⌘K 或点顶栏放大镜按钮，弹出搜索面板覆盖 LuCI 所有菜单。输入"wifi"/"wx"/"防火墙"等都能匹配。
+
+### Step 24 — S2a Toast 通知层
+
+**时间**：2026-05-23
+**对应 upgrade.md**：§1.S2a
+**改动**：
+- 新文件 `htdocs/luci-static/resources/toast.js`（~150 行 LuCI module）
+- `icons.svg` +1（i-info）
+- `style.css` +110 行 §9 toast styles
+- `footer.htm` +`L.require('toast')`
+
+**实现要点**：拦截 `ui.addNotification` 路由到右下角 toast 栈（移动端从底部）。4 种类型 success/info/warning/error，error 不自动消失。`role="alert"` for error，`role="status"` 其他。支持 action button（如撤销）和 close button。返回 dummy node 兼容老 LuCI 调用方 `.remove()`。
+
+**用户能立刻看到的变化**：保存配置 / 错误提示原本顶部 banner，现在变右下角 toast，2-5 秒自动消失。
+
+### Step 25 — B1 移动端 Bottom Sheet
+
+**时间**：2026-05-23
+**对应 upgrade.md**：§3.B1
+**改动**：`style.css` +35 行 §10（仅 `@media (max-width: 640px)`）
+
+**实现**：在小屏 override LuCI 的 `#modal_overlay` + `.modal`，让 modal 从底部滑起（iOS Settings 同款），加 drag handle hint，支持 safe-area-inset-bottom（刘海屏避让）。桌面无变化。
+
+**用户能立刻看到的变化**：手机上打开任何 LuCI modal（比如某些插件的 confirm 框）会从底部滑上来，圆角顶 + 灰色拖动条。
+
+### Step 26 — C2 完整 Lucide SVG 迁移（删 'design' icon font 主用法）
+
+**时间**：2026-05-23
+**对应 upgrade.md**：§4.C2
+**改动**：
+- `icons.svg` +14 个 Lucide 菜单图标（settings / server / box / hard-drive / shield / globe / bar-chart / pie-chart / sliders / phone / sparkles / shopping-bag / log-out / power）
+- `menu-design.js` +`MENU_ICON_MAP` + `iconForMenu()` + `makeMenuIcon()` + 在 `renderMainMenu` level 1 注入 SVG
+- `style.css` 删除 17 处 `:before { content: "\eXXX" }` 规则 + 通用 `:before` block (~80 行) → 替换为 `.menu-icon` styling（~15 行）
+
+**保留**：
+- `@font-face design` 声明本身（暂保留，下次 cleanup）
+- `.menu::after` 箭头（仍用 design font \eb03，下次迁移）
+- `Logout/Reboot` 的 padding 规则
+
+**Net diff**：style.css -65 行 / +95 行 sprite icons / ~50 行 menu-design.js 改动。
+
+**用户能立刻看到的变化**：侧边栏菜单图标从 'design' 字体的 emoji-like 字符 → Lucide 极简线条图标。配色跟随 currentColor（自动 emerald hover）。
+
+### Step 27 — Phase 0 收尾：CI 现代化（T1 + T2）
+
+**时间**：2026-05-23
+**改动**：
+- `.github/workflows/build.yml`：permissions 从 job-level 移到 workflow-level（修复 nightly release 不发布的 bug，T1）；actions/checkout@v4 → v5；actions/upload-artifact@v4 → v5；加 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'` env（T2）
+- `.github/workflows/lint.yml`：actions/checkout@v5；actions/setup-node@v5；同样的 Node 24 env
+
+**修复**：
+- T1 nightly pre-release 应该开始正常更新（workflow-level perms 比 job-level 在某些 repo / org 配置下更可靠）
+- T2 Node 20 deprecation warning 消除
+
+**Note**：如果 T1 修复后仍不发布，需要 user check repo Settings → Actions → General → Workflow permissions = "Read and write permissions"。
+
+---
+
+## 📊 第四轮（Step 23-27）累计变化
+
+| 指标 | 第三轮后 | 第四轮后 |
+|---|---|---|
+| LuCI module 文件数 | 1（menu-design.js） | **3**（+cmdk.js +toast.js） |
+| SVG sprite 图标数 | 16 | **36**（+4 cmdk +1 toast +14 menu +1 placeholder/info dup ok） |
+| CSS 行数 | 4141 | **4445** |
+| 'design' icon font 引用数 | 4 | **3**（删了主要的 :before block） |
+| 菜单 :before content 规则 | 17 | **0** |
+| upgrade.md §1.S1 Cmd+K | 提案中 | ✅ shipped |
+| upgrade.md §1.S2a Toast | 提案中 | ✅ shipped |
+| upgrade.md §3.B1 Bottom Sheet | 提案中 | ✅ shipped |
+| upgrade.md §4.C2 Lucide 迁移 | 提案中 | ✅ shipped（主菜单部分） |
+| Action versions | v4-stack | **v5-stack** + Node 24 env |
+| nightly release | 不发布 | **应该 OK**（perms workflow-level） |
+
+## 🎯 用户能立刻看到的变化（第四轮）
+
+1. **⌘K / Ctrl+K** 弹出全菜单 fuzzy 搜索面板（顶栏也有放大镜按钮）
+2. **配置保存等通知**从顶部 banner 变右下角 toast
+3. **手机上 modal** 变成底部滑起的 sheet
+4. **侧边栏菜单图标**从 'design' 字体的 emoji 替换为 Lucide 极简线条
+5. **GH Actions** 不再警告 Node 20 deprecated
+

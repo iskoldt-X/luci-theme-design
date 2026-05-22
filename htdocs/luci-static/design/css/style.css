@@ -1164,87 +1164,32 @@ span[data-indicator="uci-changes"] {
     transition: all 0.3s;
 }
 
-.main > .main-left > .nav > .slide > a:before,
-.main > .main-left > .nav > li > a:before {
+/* Menu icons — upgrade.md §4.C2 — Lucide SVG migration.
+   menu-design.js injects <svg class="menu-icon"> as the first child of <a>
+   at level 1. The legacy 'design' icon font + 17 per-menu :before content
+   rules are gone. The @font-face design declaration is kept (for now) only
+   to support the still-pending arrow chevron .menu::after; cleanup is a
+   followup. */
+.main > .main-left > .nav > .slide > a > .menu-icon,
+.main > .main-left > .nav > li > a > .menu-icon {
     display: inline-block;
-    left:-10px;
-    top: 1px;
-    position: relative;
-    font-family: "design" !important;
-    font-weight: bold !important;
-    text-transform: none !important;
-    speak: none;
-    font-size: 1.2rem !important;
-    -webkit-font-smoothing: antialiased;
+    width: 1.15rem;
+    height: 1.15rem;
+    margin-left: -10px;        /* preserve original :before { left: -10px } shift */
+    margin-right: var(--space-2);
+    vertical-align: -3px;
+    color: currentColor;
+    stroke-width: 1.6;
+    flex-shrink: 0;
 }
 
-.main > .main-left > .nav > .slide > a[data-title="Status"]:before {
-    content: "\e6b8";
-}
-
-.main > .main-left > .nav > .slide > a[data-title="System"]:before {
-    content: "\e645";
-}
-
-.main > .main-left > .nav > .slide > a[data-title="Services"]:before {
-    content: "\e6cb";
-}
-
-.main > .main-left > .nav > .slide > a[data-title="Docker"]:before {
-    content: "\44";
-}
-
-.main > .main-left > .nav > .slide > a[data-title="NAS"]:before {
-    content: "\eb04";
-}
-
-.main > .main-left > .nav > .slide > a[data-title="VPN"]:before {
-    content: "\56";
-}
-
-.main > .main-left > .nav > .slide > a[data-title="Network"]:before {
-    content: "\72";
-}
-
-.main > .main-left > .nav > .slide > a[data-node-name="nlbw"]:before,
-.main > .main-left > .nav > .slide > a[data-title="Bandwidth_Monitor"]:before {
-    content: "\e764";
-}
-
-.main .main-left .nav li.slide .menu[data-title="Statistics"]:before {
-	content: "\e604";
-}
-
-.main .main-left .nav li.slide .menu[data-title="Control"]:before {
-  content: "\e67a";
-}
-
-.main .main-left .nav li.slide .menu[data-title="Asterisk"]:before {
-	content: "\e7dd";
-}
-
-.main > .main-left > .nav > li > a[data-node-name="wizard"]:before,
-.main > .main-left > .nav > li > a[data-title="Inital_Setup"]:before {
-    content: "\e67e";
-}
-
-.main > .main-left > .nav > li > a[data-title="iStore"]:before {
-    content: "\e676";
-}
-
+/* Preserved layout tweaks for two special menu items that don't follow the
+   default .slide-menu structure (they're top-level, no children). */
 .main > .main-left > .nav > li > a[data-title="Logout"] {
     padding: 0.675rem 0 0.675rem 2.5rem;
 }
-
-.main > .main-left > .nav > li > a[data-title="Logout"]:before {
-    content: "\e641";
-}
-
 .main > .main-left > .nav > li > a[data-title="Reboot"] {
     padding: 6px 25px;
-}
-.main > .main-left > .nav > li > a[data-title="Reboot"]:before {
-    content: "\e004";
 }
 
 .main > .main-left > .nav > .slide > .menu.active::after {
@@ -4342,4 +4287,159 @@ td.cbi-button, .cbi-button-apply,
 /* Backdrop-filter fallback for old WebViews / embedded browsers */
 @supports not (backdrop-filter: blur(4px)) {
     .cmdk-overlay { background: rgba(0, 0, 0, 0.6); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §9 TOAST NOTIFICATIONS — upgrade.md §1.S2a
+ * Right-bottom stack (desktop) / full-width from bottom (mobile).
+ * 4 types via colored left border. Error doesn't auto-dismiss.
+ * Backed by htdocs/luci-static/resources/toast.js
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.toast-container {
+    position: fixed;
+    bottom: var(--space-5);
+    right: var(--space-5);
+    z-index: var(--z-toast);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    max-width: 420px;
+    pointer-events: none;   /* let clicks pass through gaps */
+}
+
+.toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-subtle);
+    border-left-width: 3px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+    min-width: 280px;
+    animation: toast-enter var(--motion-normal) var(--ease-out);
+}
+.toast-leaving {
+    animation: toast-leave var(--motion-fast) var(--ease-out) forwards;
+}
+
+@keyframes toast-enter {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-leave {
+    from { opacity: 1; transform: translateY(0); }
+    to   { opacity: 0; transform: translateY(8px); }
+}
+
+.toast-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.toast-success { border-left-color: var(--color-success); }
+.toast-success .toast-icon { color: var(--color-success); }
+.toast-info    { border-left-color: var(--color-info); }
+.toast-info .toast-icon { color: var(--color-info); }
+.toast-warning { border-left-color: var(--color-warning); }
+.toast-warning .toast-icon { color: var(--color-warning); }
+.toast-error   { border-left-color: var(--color-danger); }
+.toast-error .toast-icon { color: var(--color-danger); }
+
+.toast-body {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+.toast-action {
+    background: transparent;
+    border: 0;
+    color: var(--color-accent-600);
+    font-weight: var(--weight-medium);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    padding: 0 var(--space-2);
+    flex-shrink: 0;
+}
+.toast-action:hover { color: var(--color-accent-500); }
+
+.toast-close {
+    background: transparent;
+    border: 0;
+    color: var(--color-text-subtle);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 var(--space-1);
+    margin: -2px -4px 0 0;
+    flex-shrink: 0;
+}
+.toast-close:hover { color: var(--color-text); }
+
+@media (max-width: 640px) {
+    .toast-container {
+        right: var(--space-3);
+        left: var(--space-3);
+        bottom: var(--space-3);
+        max-width: none;
+    }
+    .toast { min-width: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §10 BOTTOM SHEET (mobile modal style) — upgrade.md §3.B1
+ * On small screens, LuCI's #modal_overlay + .modal becomes a sheet that
+ * slides up from the bottom edge (iOS Settings / Telegram style). Drag
+ * handle at top hints dismissibility.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 640px) {
+    body.modal-overlay-active #modal_overlay {
+        top: 0 !important;
+        padding-top: 0 !important;
+    }
+
+    .modal {
+        position: absolute !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        margin: 0 !important;
+        max-width: none !important;
+        width: 100% !important;
+        max-height: 90vh !important;
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0 !important;
+        padding: var(--space-5) var(--space-4) calc(var(--space-5) + env(safe-area-inset-bottom)) !important;
+        animation: sheet-enter var(--motion-normal) var(--ease-out);
+        overflow-y: auto;
+    }
+
+    /* Drag handle at top of sheet */
+    .modal::before {
+        content: '';
+        display: block;
+        width: 40px;
+        height: 4px;
+        background: var(--color-border-default);
+        border-radius: var(--radius-pill);
+        margin: calc(-1 * var(--space-3)) auto var(--space-4);
+        flex-basis: auto;
+    }
+
+    @keyframes sheet-enter {
+        from { transform: translateY(100%); }
+        to   { transform: translateY(0); }
+    }
+
+    .modal.cbi-modal { max-height: 90vh !important; }
 }
