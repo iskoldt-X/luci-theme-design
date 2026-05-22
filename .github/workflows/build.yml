@@ -141,18 +141,22 @@ jobs:
           echo 'CONFIG_PACKAGE_luci-theme-design=y' >> .config
           make defconfig
 
-          # Pre-fetch dependency source tarballs in parallel; clean up failed
-          # (truncated) downloads so the real build doesn't trip over them.
-          # This is the same robustness pattern as
-          # Actions-OpenWrt/build-immortalwrt-SSR-*.yml.
-          echo "::group::Pre-fetch sources"
-          make download -j8 2>&1 | tail -50 || true
-          find dl/ -size -1024c -print -delete 2>/dev/null || true
-          echo "::endgroup::"
-
-          # Parallel build of luci-theme-design and its dependency staging
-          # (lua → lucihttp → luci-base → theme). Single-thread + verbose fallback
-          # so the failing rule is readable in action logs.
+          # Build luci-theme-design and its transitive dependency staging:
+          #   lua → lucihttp → luci-base → luci-theme-design
+          #
+          # We deliberately do NOT run top-level `make download` first.
+          # Actions-OpenWrt/build-immortalwrt-SSR-*.yml uses that pattern because
+          # it builds the full firmware (300+ packages), but here we only need
+          # ~4 packages' sources. `make download` would pre-fetch hundreds of
+          # unrelated sources (kernel mods, busybox, dnsmasq, …) totalling
+          # 1 GB+, taking 10+ minutes — and the `| tail` pipe in the previous
+          # version silently swallowed live progress (run 26312854285 looked
+          # frozen at the "Pre-fetch sources" group for that reason).
+          #
+          # `make package/<x>/compile` fetches only what x and its deps need,
+          # streaming output live to the action log.
+          #
+          # Single-thread + verbose fallback on failure for readable logs.
           make package/luci-theme-design/compile V=s -j"$(nproc)" \
             || make package/luci-theme-design/compile V=s -j1
 
