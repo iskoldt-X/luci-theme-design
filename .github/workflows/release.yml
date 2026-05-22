@@ -9,7 +9,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    # ubuntu-20.04 EOL'd in 2025-04; 24.04 is the current GitHub-hosted LTS.
+    # SDK is intentionally pinned to 18.06.9 to track Lean's OpenWrt (lede) base.
+    runs-on: ubuntu-24.04
     steps:
 
       - name: Initialization Environment
@@ -34,14 +36,23 @@ jobs:
 
       - name: Build
         id: build
-        run: | 
+        run: |
           cd openwrt-sdk
-          git clone  --depth=1 -b "${{ github.ref_name }}" https://github.com/gngpp/luci-theme-design.git package/luci-theme-design
+          git clone --depth=1 -b "${{ github.ref_name }}" https://github.com/gngpp/luci-theme-design.git package/luci-theme-design
+
+          # Stamp PKG_RELEASE with the current date so each release is unique
+          # without needing a manual Makefile bump. Makefile keeps a static
+          # fallback for local / no-git builds (reproducible build friendly).
+          RELEASE_DATE=$(date +%Y%m%d)
+          echo "Updating PKG_RELEASE to $RELEASE_DATE"
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$RELEASE_DATE/" package/luci-theme-design/Makefile
+          grep '^PKG_' package/luci-theme-design/Makefile
+
           ./scripts/feeds update -a && ./scripts/feeds install -a
           echo "CONFIG_PACKAGE_luci-theme-design=y" >> .config
           make defconfig
           make package/luci-theme-design/compile V=s -j$(nproc)
-          TARGET="$(find bin/ | grep  luci-theme-design)"
+          TARGET="$(find bin/ | grep luci-theme-design)"
           echo "TARGET=$(pwd)/$TARGET"
           echo "TARGET=$(pwd)/$TARGET" >> $GITHUB_OUTPUT
           echo "status=success" >> $GITHUB_OUTPUT
@@ -50,7 +61,7 @@ jobs:
         id: tag
         uses: dawidd6/action-get-tag@v1
         with:
-        # Optionally strip `v` prefix
+          # Optionally strip `v` prefix
           strip_v: false
 
       - name: Upload to release

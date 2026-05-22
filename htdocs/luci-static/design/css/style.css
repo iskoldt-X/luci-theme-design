@@ -22,7 +22,6 @@
     --navBorder: 1px solid #f2f2f2;
     --sectionbgColor: #fff;
     --sectionbgColor2: #fff;
-    --sectionShaddow: 3px 3px 3px rgba(0,0,0,.05);
     --sectionBorder: none;
     --sectiontabBorder: none;
     --tabmenuBorderLR: none;
@@ -63,7 +62,6 @@
     --navBorder: 1px solid #1c1c1e;
     --sectionbgColor: #1c1c1e;
     --sectionbgColor2: #1c1c1e;
-    --sectionShaddow: 3px 3px 3px rgba(0,0,0,.05);
     --sectionBorder: none;
     --sectiontabBorder: none;
     --sectionnodeBorder: #3d3d41 1px solid;
@@ -105,21 +103,15 @@
 }
 
 @font-face {
-  font-family: 'design';
-  src: url('');
-  src: url('?#iefix') format('embedded-opentype'),
-  url('../fonts/iconfont-Regular.woff2') format('woff2'),
-  url('../fonts/iconfont-Regular.woff') format('woff'),
-  url('../fonts/iconfont-Regular.ttf') format('truetype'),
-  url('#iconfont') format('svg');
+    font-family: 'design';
+    src: url('../fonts/iconfont-Regular.woff2') format('woff2'),
+         url('../fonts/iconfont-Regular.woff') format('woff'),
+         url('../fonts/iconfont-Regular.ttf') format('truetype');
 }
 
-@font-face{
+@font-face {
     font-family: 'Cocon-Regular-Font';
-    src : url('../fonts/Cocon-Regular-Font.otf') format('opentype');
-}
-div{
-    font-family: 'HYk2gj';
+    src: url('../fonts/Cocon-Regular-Font.otf') format('opentype');
 }
 
 ::-webkit-scrollbar {
@@ -352,6 +344,13 @@ header {
     z-index: 101;
 }
 
+/* Replaces the JS resize handler that used to toggle box-shadow on small viewports */
+@media (max-width: 992px) {
+    header {
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+    }
+}
+
 footer {
     text-align: right;
     padding: 1rem;
@@ -499,7 +498,7 @@ header > .fill > .container > #logo {
 }
 
 header > .fill > .container > #logo > img {
-	width: calc(0% + 10rem);
+	width: 10rem;
 	margin-top: -.5rem;
 }
 
@@ -565,52 +564,6 @@ header > .fill > .container > .status > * {
 	margin-left: .3rem;
 	cursor: pointer;
 }
-
-/* .modemenu-buttons {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	color: #fff;
-	color: var(--header-color);
-	background: #09c;
-	background: var(--header-bg);
-	padding: .5rem;
-	transition: box-shadow .2s;
-	box-shadow: 0 2px 5px rgb(0 0 0 / 26%);
-} */
-
-/* #modemenu {
-	margin: 0.25rem;
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-}
-
-#modemenu > li > a {
-	font-size: .8rem;
-	font-weight: bold;
-	padding: .3rem .8rem;
-	white-space: nowrap;
-	text-decoration: none;
-	text-transform: uppercase;
-	color: #fff !important;
-	border-radius: 3px;
-	background-color: #bfbfbf;
-	text-shadow: none;
-}
-
-#modemenu > li > a.active {
-	background-color: #002B49 !important;
-}
-
-#modemenu > li.divider {
-	margin-left: .25rem;
-	margin-right: .25rem;
-	border: .5rem solid var(--submenu-bg-hover);
-	border-left: 1px solid var(--submenu-bg-hover);
-	border-right: 1px solid var(--submenu-bg-hover);
-	border-radius: 1rem;
-} */
 
 #xhr_poll_status {
 	display: flex;
@@ -784,7 +737,8 @@ span[data-indicator="uci-changes"] {
     content: "\72";
 }
 
-.main > .main-left > .nav > .slide > a[data-title="Bandwidth Monitor"]:before {
+.main > .main-left > .nav > .slide > a[data-node-name="nlbw"]:before,
+.main > .main-left > .nav > .slide > a[data-title="Bandwidth_Monitor"]:before {
     content: "\e764";
 }
 
@@ -800,11 +754,8 @@ span[data-indicator="uci-changes"] {
 	content: "\e7dd";
 }
 
-.main > .main-left > .nav > li > a[data-title="Inital Setup"]:before {
-    content: "\e67e";
-}
-
-.main > .main-left > .nav > li > a[href="/cgi-bin/luci//admin/wizard"]:before {
+.main > .main-left > .nav > li > a[data-node-name="wizard"]:before,
+.main > .main-left > .nav > li > a[data-title="Inital_Setup"]:before {
     content: "\e67e";
 }
 
@@ -948,10 +899,6 @@ h3 {
     padding: 0 12px 10px 12px;
 }
 
-h4 {
-
-}
-
  div.cbi-section{
 	 border: var(--sectionBorder);
 	 margin-bottom: 20px;
@@ -971,7 +918,6 @@ h4 {
 [data-page="admin-system-opkg"] #maincontent > .container {
    /* margin: 10px 0 0 0; */
    padding: 10px;
-   border: 1px;
    font-weight: normal;
    font-style: normal;
    line-height: 1;
@@ -982,7 +928,6 @@ h4 {
    overflow-y: hidden;
    background-color: var(--sectionbgColor);
    border-radius: 8px;
-   /* box-shadow: var(--sectionShaddow); */
    -webkit-overflow-scrolling: touch;
 }
 
@@ -1236,10 +1181,6 @@ td > table > tbody > tr > td,
     box-shadow: none;
 }
 
-form.inline + form.inline,
-.cbi-button + .cbi-button {
-}
-
 .cbi-button-reset,
 .cbi-input-remove {
     color: #fff !important;
@@ -1396,7 +1337,7 @@ form.inline + form.inline,
 }
 
 .cbi-tabmenu > li:hover {
-    background-color: none;
+    background-color: transparent;
 }
 
 .cbi-tabmenu > li[class~="cbi-tab"] a {
@@ -1563,10 +1504,6 @@ form.inline + form.inline,
 
 .cbi-rowstyle-2 {
     background-color: var(--sectionbgColor2);
-}
-
-.cbi-rowstyle-2 .cbi-button-up,
-.cbi-rowstyle-2 .cbi-button-down{
 }
 
 .cbi-section-table .cbi-section-table-titles .cbi-section-table-cell {
@@ -2457,6 +2394,14 @@ label[data-index][data-depends] {
 
 .showSide {
 	display: none;
+	/* Reset native <button> styling so .showSide stays visually identical
+	   after the <span>→<button> a11y migration. */
+	background: transparent;
+	border: 0;
+	padding: 0;
+	font: inherit;
+	color: inherit;
+	cursor: pointer;
 }
 
 .darkMask {
@@ -2543,12 +2488,6 @@ input[name="nslookup"] {
     margin-top: 10px !important;
 }
 
-.node-main-login > .main .cbi-map {
-}
-
-.node-main-login > .main div.cbi-section .cbi-value {
-}
-
 .node-main-login > .main div.cbi-section .cbi-value-title {
     padding: 10px 0 10px 5px !important;
 }
@@ -2577,10 +2516,6 @@ input[name="nslookup"] {
     width: 300px;
     padding: 80px 0 0 0;
 } */
-
-.node-main-login > .main form > div:nth-last-child(1) {
-}
-
 
 .node-main-login > .main .cbi-value > * {
     display: inline-block !important;
@@ -2607,70 +2542,6 @@ input[name="nslookup"] {
 .node-system-reboot > .main > .main-right h3 {
     margin-left: 12px;
 }
-
-.node-main-login > .main .cbi-section {
-    margin-top: 10px !important;
-}
-
-.node-main-login > .main .cbi-map {
-}
-
-.node-main-login > .main div.cbi-section .cbi-value {
-}
-
-.node-main-login > .main div.cbi-section .cbi-value-title {
-    padding: 10px 0 10px 5px !important;
-}
-
-.node-main-login > .main .cbi-value {
-    border: none;
-}
-
-.node-main-login > .main .cbi-value-title {
-    width: 7rem;
-}
-
-.node-main-login > .main #maincontent {
-    display: flex;
-    height: 100%;
-    text-align: center;
-    align-items: center;
-    align-content: center;
-    justify-content: center;
-}
-
-/* .node-main-login > .main .container {
-    background-image: var(--logo);
-    background-repeat: no-repeat;
-    background-size: 300px auto;
-    width: 300px;
-    padding: 80px 0 0 0;
-} */
-
-.node-main-login > .main form > div:nth-last-child(1) {
-}
-
-
-.node-main-login > .main .cbi-value > * {
-    display: inline-block !important;
-}
-
-/* .node-main-login > .main .cbi-input-user,
-.node-main-login > .main .cbi-input-password {
-    min-width: 15rem;
-} */
-
-.node-main-login > .main .cbi-input-text {
-    min-width: 15rem;
-}
-
-.node-main-login footer {
-    bottom: 0;
-    position: absolute;
-    width: 100%;
-}
-
-
 
 /* fix status */
 .node-status-overview > .main fieldset:nth-child(4) .td:nth-child(2),
@@ -2725,12 +2596,6 @@ input[name="nslookup"] {
 	display: inline;
 	padding: .3rem .6rem;
 }
-/* 
-[data-page^="admin-system-admin"]:not(.node-main-login) .cbi-map:not(#cbi-dropbear),
-[data-page="admin-system-opkg"] #maincontent > .container {
-	margin-top: 2rem;
-	padding-top: .1rem;
-} */
 
 [data-page="admin-system-opkg"] #maincontent > .container {
 	margin: 2rem;
@@ -2902,21 +2767,6 @@ input[name="nslookup"] {
 	}
 }
 
-/* IE hacks */
-/* @media all and (-ms-high-contrast: none) {
-	.main > .main-left > .nav > .slide > .menu::before {
-		top: 30.25%;
-	}
-
-	.main > .main-left > .nav > li:last-child::before {
-		top: 20%;
-	}
-
-	.showSide::before {
-		top: -12px;
-	}
-} */
-
 @media screen and (max-width: 1280px) {
     header {
         /*height: 3.5rem;*/
@@ -2931,7 +2781,7 @@ input[name="nslookup"] {
     }
 
     .main-left {
-        width: calc(0% + 17rem);
+        width: 17rem;
         top: 50px;
     }
 
@@ -3389,13 +3239,6 @@ input[name="nslookup"] {
         margin: 0;
     }
 
-    #cbi-samba-cfg010f89-_tmpl .cbi-value-title{
-        width: 15%;
-
-    }
-     #cbi-samba-cfg010f89-_tmpl .cbi-value-field{
-        width: 95%;        
-    }
     /*  fix nlbw component */
     #detail-bubble {
         left: unset !important;
@@ -3428,28 +3271,30 @@ input[name="nslookup"] {
 
 
 .navbar {
-    z-index: 200;
+	z-index: 200;
 	overflow: hidden;
 	position: fixed;
 	bottom: 0;
 	width: 100%;
 	border-top: var(--navBorder);
-	text-align: center;
-	height:calc(50px + constant(safe-area-inset-bottom));
-	height:calc(50px + env(safe-area-inset-bottom));
+	height: calc(50px + constant(safe-area-inset-bottom));
+	height: calc(50px + env(safe-area-inset-bottom));
 	background-color: var(--navbgColor);
-	  -webkit-backdrop-filter: blur(10px);
+	-webkit-backdrop-filter: blur(10px);
 	backdrop-filter: blur(10px);
-  }
-  
-  .navbar a {
-	  float: left;
-	  text-align: center;
-	  padding: 8px 0;
-	  width: 20%;
-	  text-decoration: none;
-	  max-width: 100px;
-  }
+	/* flex 布局自适应：openclash 缺失时其余项均分宽度，不再留 20% 空位 */
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.navbar a {
+	flex: 1 1 0;
+	text-align: center;
+	padding: 8px 0;
+	text-decoration: none;
+	max-width: 100px;
+}
 
   .navbar a img {
 	width: 28px;
@@ -3514,7 +3359,6 @@ td.cbi-button, .cbi-button-apply,
 .node-admin-status-realtime-connections #view table[id*=connections] {
     /* margin: 10px 0 0 0; */
     padding: 10px;
-    border: 1px;
     font-weight: normal;
     font-style: normal;
     line-height: 1;
@@ -3524,8 +3368,7 @@ td.cbi-button, .cbi-button-apply,
     overflow-x: auto;
     overflow-y: hidden;
     background-color: var(--sectionbgColor);
-    /* box-shadow: var(--sectionShaddow); */
-    -webkit-overflow-scrolling: touch;
+     -webkit-overflow-scrolling: touch;
 	border: var(--sectionBorder);
     margin-bottom: 20px;
     border-radius: 8px;

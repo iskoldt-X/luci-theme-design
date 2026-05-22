@@ -1,0 +1,81 @@
+name: Lint
+
+# Lightweight static checks on every push / PR.
+# Catches things release.yml only sees at tag time.
+
+on:
+  push:
+    branches: [ js, main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Check JavaScript syntax
+        run: |
+          for f in $(find htdocs -name '*.js' -not -name 'jquery*.min.js'); do
+            echo "Checking $f"
+            node --check "$f"
+          done
+
+      - name: Validate JSON files
+        run: |
+          for f in $(find htdocs -name '*.json'); do
+            echo "Checking $f"
+            python3 -m json.tool "$f" > /dev/null
+          done
+
+      - name: Shellcheck uci-defaults
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './root/etc/uci-defaults'
+
+      - name: Validate CSS brace balance
+        run: |
+          python3 <<'PY'
+          import re, sys, glob
+          ok = True
+          for path in glob.glob('htdocs/**/*.css', recursive=True):
+              content = open(path).read()
+              no_comments = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+              o, c = no_comments.count('{'), no_comments.count('}')
+              if o != c:
+                  print(f'FAIL {path}: {o} {{ vs {c} }}')
+                  ok = False
+              else:
+                  print(f'OK   {path}: {o} pairs')
+          sys.exit(0 if ok else 1)
+          PY
+
+      - name: Validate Lua template parses
+        run: |
+          # OpenWrt Lua templates aren't pure Lua, but we can at least check
+          # there are no unbalanced template delimiters.
+          python3 <<'PY'
+          import re, sys, glob
+          ok = True
+          for path in glob.glob('luasrc/**/*.htm', recursive=True):
+              content = open(path).read()
+              opens = len(re.findall(r'<%', content))
+              closes = len(re.findall(r'%>', content))
+              if opens != closes:
+                  print(f'FAIL {path}: {opens} <% vs {closes} %>')
+                  ok = False
+              else:
+                  print(f'OK   {path}: {opens} template tags')
+          sys.exit(0 if ok else 1)
+          PY

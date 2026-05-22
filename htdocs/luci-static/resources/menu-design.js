@@ -2,6 +2,47 @@
 'require baseclass';
 'require ui';
 
+// Local helper: short alias for document.querySelector with null tolerance.
+function qs(sel) { return document.querySelector(sel); }
+
+// Animation helpers that replace jQuery's slideUp / slideDown ("fast" = 200 ms).
+// Use max-height transitions so we don't need jQuery; cb runs at transition end.
+function slideUp(el, cb) {
+	if (!el) { if (cb) cb(); return; }
+	el.style.overflow = 'hidden';
+	el.style.maxHeight = el.scrollHeight + 'px';
+	void el.offsetHeight; // force reflow so the first max-height takes effect
+	el.style.transition = 'max-height 200ms ease';
+	el.style.maxHeight = '0px';
+	var done = function () {
+		el.removeEventListener('transitionend', done);
+		el.style.transition = '';
+		el.style.maxHeight = '';
+		el.style.overflow = '';
+		if (cb) cb();
+	};
+	el.addEventListener('transitionend', done);
+}
+
+function slideDown(el, cb) {
+	if (!el) { if (cb) cb(); return; }
+	el.style.overflow = 'hidden';
+	el.style.maxHeight = '0px';
+	el.style.display = 'block';
+	void el.offsetHeight;
+	el.style.transition = 'max-height 200ms ease';
+	el.style.maxHeight = el.scrollHeight + 'px';
+	var done = function () {
+		el.removeEventListener('transitionend', done);
+		el.style.transition = '';
+		el.style.maxHeight = '';
+		el.style.overflow = '';
+		el.style.display = '';
+		if (cb) cb();
+	};
+	el.addEventListener('transitionend', done);
+}
+
 return baseclass.extend({
 	__init__: function() {
 		ui.menu.load().then(L.bind(this.render, this));
@@ -23,19 +64,28 @@ return baseclass.extend({
 				this.renderTabMenu(node, url);
 		}
 
-		document.querySelector('.showSide')
-			.addEventListener('click', ui.createHandlerFn(this, 'handleSidebarToggle'));
+		var showSide = qs('.showSide');
+		if (showSide)
+			showSide.addEventListener('click', ui.createHandlerFn(this, 'handleSidebarToggle'));
 
-		document.querySelector('.darkMask')
-			.addEventListener('click', ui.createHandlerFn(this, 'handleSidebarToggle'));
-			
-		document.querySelector(".main > .loading").style.opacity = '0';
-		document.querySelector(".main > .loading").style.visibility = 'hidden';
+		var darkMask = qs('.darkMask');
+		if (darkMask)
+			darkMask.addEventListener('click', ui.createHandlerFn(this, 'handleSidebarToggle'));
 
-		if (window.innerWidth <= 992)
-			document.querySelector('.main-left').style.width = '0';
+		var loading = qs('.main > .loading');
+		if (loading) {
+			loading.style.opacity = '0';
+			loading.style.visibility = 'hidden';
+		}
 
-		document.querySelector('.main-right').style.overflow = 'auto';
+		var mainLeft = qs('.main-left');
+		if (mainLeft && window.innerWidth <= 992)
+			mainLeft.style.width = '0';
+
+		var mainRight = qs('.main-right');
+		if (mainRight)
+			mainRight.style.overflow = 'auto';
+
 		window.addEventListener('resize', this.handleSidebarToggle, true);
 	},
 
@@ -44,25 +94,27 @@ return baseclass.extend({
 		var collapse = false;
 
 		document.querySelectorAll('.main .main-left .nav > li >ul.active').forEach(function (ul) {
-			$(ul).stop(true).slideUp("fast", function () {
+			slideUp(ul, function () {
 				ul.classList.remove('active');
-				ul.previousElementSibling.classList.remove('active');
+				if (ul.previousElementSibling)
+					ul.previousElementSibling.classList.remove('active');
 			});
 			if (!collapse && ul === slide_menu) {
 				collapse = true;
 			}
-
 		});
 
 		if (!slide_menu)
 			return;
-		
-		
+
 		if (!collapse) {
-			$(slide).find(".slide-menu").slideDown("fast",function(){
-				slide_menu.classList.add('active');
-				a.classList.add('active');
-			});
+			var submenu = slide.querySelector('.slide-menu');
+			if (submenu) {
+				slideDown(submenu, function () {
+					slide_menu.classList.add('active');
+					a.classList.add('active');
+				});
+			}
 			a.blur();
 		}
 		ev.preventDefault();
@@ -79,39 +131,47 @@ return baseclass.extend({
 		for (var i = 0; i < children.length; i++) {
 			var isActive = ((L.env.dispatchpath[l] == children[i].name) && (L.env.dispatchpath[l - 1] == tree.name)),
 				submenu = this.renderMainMenu(children[i], url + '/' + children[i].name, l),
-				hasChildren = submenu.children.length,
-				slideClass = hasChildren ? 'slide' : null,
-				menuClass = hasChildren ? 'menu' : null;
-			if (isActive) {
-				ul.classList.add('active');
-				slideClass += " active";
-				menuClass += " active";
-			}
+				hasChildren = submenu.children.length;
 
-			ul.appendChild(E('li', { 'class': slideClass }, [
+			// Build class list as array to avoid "null active" bug from string coercion
+			var liCls = [];
+			if (hasChildren) liCls.push('slide');
+			if (isActive)    liCls.push('active');
+			var aCls = [];
+			if (hasChildren) aCls.push('menu');
+			if (isActive)    aCls.push('active');
+
+			if (isActive)
+				ul.classList.add('active');
+
+			ul.appendChild(E('li', { 'class': liCls.length ? liCls.join(' ') : null }, [
 				E('a', {
 					'href': L.url(url, children[i].name),
 					'click': (l == 1) ? ui.createHandlerFn(this, 'handleMenuExpand') : null,
-					'class': menuClass,
-					'data-title': hasChildren ? children[i].title.replace(" ", "_") : children[i].title.replace(" ", "_"),
+					'class': aCls.length ? aCls.join(' ') : null,
+					'data-node-name': children[i].name,
+					'data-title': children[i].title.replace(/\s+/g, '_'),
 				}, [_(children[i].title)]),
 				submenu
 			]));
 		}
 
 		if (l == 1) {
-			var container = document.querySelector('#mainmenu');
-
-			container.appendChild(ul);
-			container.style.display = '';
+			var container = qs('#mainmenu');
+			if (container) {
+				container.appendChild(ul);
+				container.style.display = '';
+			}
 		}
 
 		return ul;
 	},
 
 	renderModeMenu: function(tree) {
-		var ul = document.querySelector('#modemenu'),
+		var ul = qs('#modemenu'),
 		    children = ui.menu.getChildren(tree);
+
+		if (!ul) return;
 
 		for (var i = 0; i < children.length; i++) {
 			var isActive = (L.env.requestpath.length ? children[i].name == L.env.requestpath[0] : i == 0);
@@ -135,13 +195,13 @@ return baseclass.extend({
 	},
 
 	renderTabMenu: function(tree, url, level) {
-		var container = document.querySelector('#tabmenu'),
+		var container = qs('#tabmenu'),
 			l = (level || 0) + 1,
 			ul = E('ul', { 'class': 'tabs' }),
 			children = ui.menu.getChildren(tree),
 			activeNode = null;
 
-		if (children.length == 0)
+		if (!container || children.length == 0)
 			return E([]);
 
 		for (var i = 0; i < children.length; i++) {
@@ -160,18 +220,25 @@ return baseclass.extend({
 		container.appendChild(ul);
 		container.style.display = '';
 
+		// Recurse for nested tabs. The recursive call itself appends its own
+		// <ul> to #tabmenu; doing an outer container.appendChild() on the
+		// return value would re-append (i.e. move) the same node and produce
+		// wrong DOM order at deeper levels.
 		if (activeNode)
-			container.appendChild(this.renderTabMenu(activeNode, url + '/' + activeNode.name, l));
+			this.renderTabMenu(activeNode, url + '/' + activeNode.name, l);
 
 		return ul;
 	},
 
 	handleSidebarToggle: function(ev) {
 		var width = window.innerWidth,
-		    darkMask = document.querySelector('.darkMask'),
-		    mainRight = document.querySelector('.main-right'),
-		    mainLeft = document.querySelector('.main-left'),
-		    open = mainLeft.style.width == '';
+		    darkMask = qs('.darkMask'),
+		    mainRight = qs('.main-right'),
+		    mainLeft = qs('.main-left');
+
+		if (!mainLeft || !mainRight || !darkMask) return;
+
+		var open = mainLeft.style.width == '';
 
 			if (width > 992 || ev.type == 'resize')
 				open = true;
@@ -190,11 +257,7 @@ return baseclass.extend({
 
 		mainRight.style['overflow-y'] = open ? 'auto' : 'visible';
 
-		if (open) {
-			$("header").css("box-shadow",   "0 2px 4px rgb(0 0 0 / 8%)")
-		} else {
-			$("header").css("box-shadow",   "17rem 2px 4px rgb(0 0 0 / 8%)")
-		}
+		// box-shadow handled via CSS @media in style.css instead of JS
 	},
 });
 
