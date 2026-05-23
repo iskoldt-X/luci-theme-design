@@ -2102,7 +2102,27 @@ td > table > tbody > tr > td,
    sibling of .cbi-value-field, sometimes as a child; the grid-area
    property only takes effect on grid items (sibling case) and is
    harmlessly ignored on non-grid-item descendants (child case). */
-.cbi-value {
+/* Step 105 + 107 (Round 23): Step 105 used bare class selectors
+   (.cbi-value-field {…}) which matched TWO unintended contexts:
+   (1) <td class="cbi-value-field"> inside <table class="cbi-section-
+       table"> — Disk Man / Mount Points / NLBW etc. The `display:
+       block` override killed native table-cell layout, stacking all
+       8 data cells vertically at column 1 x-position.
+   (2) <div class="cbi-value"> wrapping a single .cbi-section (no
+       label child) — Backup / Flash firmware uses this simpleform
+       pattern. Grid layout placed the inner .cbi-section into the
+       200-px label column, squishing it.
+   Step 107 fix is two-layer scoping:
+     (a) `div.cbi-value:has(> .cbi-value-title)` — grid only fires
+         when the .cbi-value is a div AND has a label child. Excludes
+         simpleform .cbi-value (no label child) AND any non-div
+         element that happens to share the .cbi-value class.
+     (b) `div.cbi-value > .cbi-value-{title,field,description}` —
+         child rules scoped to direct children of div.cbi-value.
+         <td>.cbi-value-field inside <tr> never matches because tr's
+         parent isn't div.cbi-value. */
+
+div.cbi-value:has(> .cbi-value-title) {
     display: grid;
     grid-template-columns: minmax(140px, 200px) 1fr;
     grid-template-areas:
@@ -2117,11 +2137,11 @@ td > table > tbody > tr > td,
     border-bottom: 1px solid var(--color-border-subtle);
 }
 
-.cbi-value:last-child {
+div.cbi-value:has(> .cbi-value-title):last-child {
     border-bottom: none;
 }
 
-.cbi-value-title {
+div.cbi-value > .cbi-value-title {
     grid-area: label;
     /* Reset old layout: was display:table-cell + float:left + width:35% */
     width: auto;
@@ -2135,20 +2155,27 @@ td > table > tbody > tr > td,
     line-height: 1.4;
 }
 
-.cbi-value-field {
+div.cbi-value > .cbi-value-field {
     grid-area: value;
-    /* Reset old layout: was display:table-cell + width:65% */
+    /* Reset old layout: was display:table-cell + width:65%.
+       Step 107 scoping prevents this from hitting <td>.cbi-value-
+       field in tables — without the `div.cbi-value >` prefix,
+       Step 105's `display: block` was breaking all cbi-section-
+       table data rows. */
     width: auto;
     display: block;
     color: var(--color-text);
 }
 
-.cbi-value-description {
-    grid-area: hint;
-    /* Reset old "small + opacity .5" to preview's text-xs + text-subtle.
-       opacity reset to 1 since text-subtle already provides the muted
-       tone via color token — opacity hits user-typed strong/em/links
-       inside the hint too, which is wrong. */
+div.cbi-value > .cbi-value-description,
+div.cbi-value > .cbi-value-field > .cbi-value-description {
+    /* Reset old "small + opacity .5" to preview's text-xs +
+       text-subtle. opacity reset to 1 since text-subtle already
+       provides the muted tone via color token — opacity hits user-
+       typed strong/em/links inside the hint too, which is wrong.
+       Two selectors cover both DOM shapes LuCI emits: description
+       as a direct sibling of field (Material-style), or as a child
+       of field (Bootstrap-style). */
     display: block;
     font-size: var(--text-xs);
     color: var(--color-text-subtle);
@@ -2156,6 +2183,14 @@ td > table > tbody > tr > td,
     margin-top: var(--space-1);
     opacity: 1;
     line-height: 1.4;
+}
+
+div.cbi-value > .cbi-value-description {
+    /* grid-area only applies to the direct-child case (sibling of
+       field). The grandchild case (inside field) inherits field's
+       grid-area: value automatically — visually the hint just
+       appears below the input within the value cell. Same result. */
+    grid-area: hint;
 }
 
 .cbi-value ul {
@@ -4004,11 +4039,12 @@ input[name="nslookup"] {
     .main > .main-left > .nav > .slide > .slide-menu > li > a {
     }
 
-    /* Step 105 (Round 22): on the narrowest tier (≤370 px) stack the
-       label / value / hint vertically. Single-column grid keeps the
-       same DOM contract — title in row 1, value in row 2, hint in
-       row 3 (still positioned under value via grid-area). */
-    .cbi-value {
+    /* Step 105 + 107 (Round 23): on the narrowest tier (≤370 px) stack
+       the label / value / hint vertically. Selectors scoped to
+       `div.cbi-value:has(> .cbi-value-title)` (same scope as the base
+       rule above) so non-form-row .cbi-value wrappers don't get this
+       treatment either at narrow widths. */
+    div.cbi-value:has(> .cbi-value-title) {
         grid-template-columns: 1fr;
         grid-template-areas:
             "label"
@@ -4018,7 +4054,7 @@ input[name="nslookup"] {
         padding: var(--space-3) 0;
     }
 
-    .cbi-value-title {
+    div.cbi-value > .cbi-value-title {
         /* Slightly bolder weight in stacked mode so the label still
            reads as the "header" of the row when label and value share
            the same width. */
