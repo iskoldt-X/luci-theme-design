@@ -5203,3 +5203,62 @@ td.cbi-button, .cbi-button-apply,
     background: var(--color-accent-500) !important;
     color: var(--color-text-onaccent) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Round 34 / Step 132 — Realtime/Connections inline-style polyline + legend
+ *
+ * /admin/status/realtime/connections (LuCI 上游 .htm 模板)给 SVG 折线和
+ * 图例标签直接写 inline X11 命名色:
+ *   <polyline style="fill:green;stroke:green">     ← TCP
+ *   <polyline style="fill:blue;stroke:blue">       ← UDP
+ *   <polyline style="fill:red;stroke:red">         ← Other
+ *   <strong style="border-bottom:2px solid green">TCP:</strong>
+ *   ... 同 blue / red
+ *
+ * Step 110(Round 26)已经加了 polyline:nth-of-type(N) !important 规则给
+ * realtime 全套,理论上应该覆盖。但 nth-of-type 在 connections.htm 的 DOM
+ * 结构上可能不命中(polyline 嵌在 <g> 里时索引会变)。这里加属性选择器
+ * 作为 bulletproof 兜底 —— 直接匹配 inline style 内容,不依赖 DOM 顺序。
+ *
+ * 语义映射:
+ *   green (TCP)    → --chart-1 (success green)
+ *   blue  (UDP)    → --chart-2 (info blue)
+ *   red   (Other)  → --chart-3 (amber-orange,警告色,语义最近)
+ *
+ * 覆盖 SVG polyline + legend <strong> border-bottom 两类元素。
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+[class*="node-admin-status-realtime"] polyline[style*="stroke:green" i],
+[class*="node-admin-status-realtime"] polyline[style*="stroke: green" i],
+[class*="node-admin-status-realtime"] polyline[style*="fill:green" i],
+[class*="node-admin-status-realtime"] polyline[style*="fill: green" i] {
+    stroke: var(--chart-1) !important;
+    fill:   var(--chart-1) !important;
+}
+
+[class*="node-admin-status-realtime"] polyline[style*="stroke:blue" i],
+[class*="node-admin-status-realtime"] polyline[style*="stroke: blue" i],
+[class*="node-admin-status-realtime"] polyline[style*="fill:blue" i],
+[class*="node-admin-status-realtime"] polyline[style*="fill: blue" i] {
+    stroke: var(--chart-2) !important;
+    fill:   var(--chart-2) !important;
+}
+
+[class*="node-admin-status-realtime"] polyline[style*="stroke:red" i],
+[class*="node-admin-status-realtime"] polyline[style*="stroke: red" i],
+[class*="node-admin-status-realtime"] polyline[style*="fill:red" i],
+[class*="node-admin-status-realtime"] polyline[style*="fill: red" i] {
+    stroke: var(--chart-3) !important;
+    fill:   var(--chart-3) !important;
+}
+
+/* Legend strong tags 的 border-bottom 颜色 — green/blue/red 三色 */
+[class*="node-admin-status-realtime"] strong[style*="border-bottom"][style*="green" i] {
+    border-bottom-color: var(--chart-1) !important;
+}
+[class*="node-admin-status-realtime"] strong[style*="border-bottom"][style*="blue" i] {
+    border-bottom-color: var(--chart-2) !important;
+}
+[class*="node-admin-status-realtime"] strong[style*="border-bottom"][style*="red" i] {
+    border-bottom-color: var(--chart-3) !important;
+}
