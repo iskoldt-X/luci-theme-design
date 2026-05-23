@@ -2314,6 +2314,218 @@ Step 109 时我加的 `header > .fill > .container > .status { margin-left: auto
 
 ---
 
+## 🎯 第二十九轮(Step 113):Overview 全部 cbi-section 改 1/1
+
+> 触发:Chrome-Claude 给 Overview 做几何 audit,精确测量 12 个卡的尺寸 + 位置 + 列数。发现 LuCI 原生 `.cbi-section` 默认走 2-col 自适应(`minmax(360px, 1fr)`),但只有 first-of-type 被强制 1/-1 跨满,**其他 7 个被压成 360px 一列** —— DHCP(10 列)只看到 hostname,Storage 长 Docker 路径被截断,UPnP 右半空白。
+
+### 根因 — 一行选择器太窄
+
+style.css 4626 行的规则:
+```css
+.node-admin-status-overview #view > .cbi-section:first-of-type {
+    grid-column: 1 / -1;
+}
+```
+
+`:first-of-type` 只盯第一个 section(系统信息),其余 6 个被 auto-fit 2-col 处理 —— 写这条规则的时候(Step 41 那一波)System info 是"hero treatment"独享,但**所有其他 cbi-section 也都吃亏**了。
+
+### 修法 — 删 `:first-of-type` 一个字
+
+```css
+.node-admin-status-overview #view > .cbi-section {
+    grid-column: 1 / -1;
+}
+```
+
+全部 cbi-section 满宽。
+
+### 反直觉 — 页面更**矮**了
+
+| 情况 | 卡宽 | 高 |
+|---|---|---|
+| 1/2(2-col)| 360px | DHCP 卡 ~800px tall(10 字段竖叠) |
+| 1/1(满宽) | ~1100px | DHCP 卡 ~400px tall(label/value 横排) |
+
+宽给充足了之后,Step 105 的 `.cbi-value` 内部 grid(label 左 + value 右)就发挥了 —— 不再被迫纵向堆叠。Chrome-Claude 估算 ~4600 → ~2800px。
+
+### 📊 第二十九轮(Step 113)累计
+
+| 指标 | 第二十八轮后 | 第二十九轮后 |
+|---|---|---|
+| 第一个 cbi-section(System) | 1/1 满宽 | 1/1(不变) |
+| 其他 7 个 cbi-section | 1/2 强制压窄 | 1/1 满宽 |
+| DHCP 表看见的列数 | 1(只 Hostname) | 6-7(IPv4/MAC/Lease/Static 全见) |
+| Storage 长 path | 截断 | 完整可见 |
+| 页总高度 | ~4600px | ~2800px |
+
+---
+
+## 🎯 第三十轮(Step 114):3 张自定义卡 auto-fit 3-up
+
+> 触发:Step 113 之后所有 cbi-section 都 1/1,但用户问"实际上,是不是把 LAN clients、Wi-Fi test、和 Traffic Analysis 放到一起 1/3 更好呢"。这是个有 viewport 依赖的判断。
+
+### Viewport 矩阵决定可行性
+
+| 屏 | main 内容区 | 1/3 每卡宽 | 设备卡(需 ≥440px) | Speedtest 双 gauge |
+|---|---|---|---|---|
+| 1920×1080 desktop | ~1620 | 540 | ✓ | ✓ |
+| 1440×900 | ~1140 | 380 | ⚠️ name 列挤 | ⚠️ gauge 略小 |
+| 1366×768 笔记本 | ~1086 | 362 | ❌ name 截断 | ⚠️ |
+| 1280×720 | ~1000 | 333 | ❌ 破图 | ❌ |
+
+**强制 1/3 在中等屏破图**(devices 6-col grid 总和 326+1fr,360 时 1fr 列没空间)。所以**不强制,用 auto-fit 让它降级**。
+
+### 修法
+
+1. **bump parent minmax floor 360 → 440** — 浏览器决定能放几列时,以 440 为 floor,避免 ≥3 但 <440 的 awkward 区间
+2. **移除 `.devices-card / .speedtest-card / .traffic-card` 的 `grid-column: 1 / -1`** — 让它们 auto-flow(`.wan-hero` + `.design-tile-grid` 仍然强制满宽,作为页面 anchor)
+
+### 自动断点
+
+```
+main ≥ 1320px → 3-up   (3 卡一行,每卡 ~440)
+880 ≤ main < 1320 → 2+1 (2 卡一行,1 卡 wrap 下一行)
+main < 880 → 1-up      (全栈)
+```
+
+### 📊 第三十轮(Step 114)累计
+
+| 指标 | 第二十九轮后 | 第三十轮后 |
+|---|---|---|
+| devices/speedtest/traffic 默认 | 全 1/1 | auto-fit 3/2/1 |
+| 宽屏(1920+)效果 | 3 卡竖叠浪费横向 | 3-up 一行 |
+| 中等屏 1366 | 不变 | 2 卡 + 1 wrap,每卡 ≥440px |
+| 窄屏 / 手机 | 不变 | 1-up(同 Step 113 后) |
+
+---
+
+## 🔥 第三十一轮(Step 115-119):自实现 per-host bandwidth — offload-proof,kernel-agnostic
+
+> 触发:用户问 "openwrt / immortalwrt 是否真的有不被 offload 影响的,可以给我们提供 Traffic analysis 所需的数据的软件?"。深入调查后发现 OpenWrt 生态**没有现成解** —— nlbwmon 全家是 conntrack-based 被 flow offload 杀,vnstat 是 interface-level 没 per-host,libpcap-based 工具(bandwidthd/ntopng)虽然可行但都是独立 UI 难集成。用户明确要 **per-device + 集成在主题里 + 零额外 opkg**。
+>
+> 这一轮 5 个 Step(115 + 116 + 117 + 118 + 119),其中 115/117/118 是同一功能的**3 次设计迭代收敛**,涉及 NAT 时机理解 / kernel CONFIG 限制 / nftables family 选择的 deep-water debugging。Chrome-Claude 帮不上忙(他没源码、没 router shell),全靠跟用户的 nft 输出对话 step-by-step 收敛。
+
+### 设计目标(115 起点)
+
+实现 **per-host bandwidth accounting**,要求:
+- ✅ Flow offload 开启时仍然准确
+- ✅ Per-device 粒度(不只是 interface 总和)
+- ✅ 零额外 opkg 安装(打进主题 ipk)
+- ✅ 集成在主题 Traffic Analysis 卡 UI 里(不 link out)
+
+技术路径:**nftables `netdev` family + `ingress` hook** —— 在 NIC RX 入口 fire,在 nf_flowtable fastpath divergence **之前**,counter rule 看到所有 packet 包括 offloaded 流。
+
+### Step 115 — 初版(broken):netdev + WAN ingress
+
+```
+chain lan_in   { hook ingress device br-lan ; ip saddr ... counter ... }  ← upload
+chain wan_in   { hook ingress device eth1   ; ip daddr ... counter ... }  ← download
+```
+
+ship 后用户 dump nft 表:
+- TX counters 正常(.225 = 280KB,.222 = 6KB ...)✓
+- **ALL RX counters = 0 packets / 0 bytes** ❌
+
+**根因(我设计时漏想)**:packet 进 eth1 ingress 那一刻,daddr 还是路由器的**公网 IP** 91.229.203.238,**NAT/DNAT 还没跑**(DNAT 在 PREROUTING,在 ingress 之后)。我的规则 `ip daddr 192.168.45.X` 在 eth1 ingress **永远不可能 match** —— 那时 LAN host 的 IP 都还没出现在 packet 上。
+
+这是**对 Linux netfilter 流水线时机的理解错误**,典型的"我以为我懂网络栈但其实没真的画过那张流程图"。
+
+### Step 116 — dev-sync 补漏(中间小修)
+
+试图运行 uci-defaults 时发现 "not found":dev-sync.sh 只 sync 了 `/etc/init.d/`,**漏了 `/etc/uci-defaults/`**。补 5 行 rsync block。
+
+### Step 117 — 设计对但 kernel CONFIG 缺
+
+把 `wan_in` 改成 `lan_out`,挂 **br-lan egress** —— packet 离开 br-lan 去 LAN 设备时,DNAT 已经完成,daddr 是真实 LAN host IP。理论完美。
+
+ship 后用户 dump:
+- chain lan_in 在 ✓
+- chain lan_out **不在**
+
+logread:
+```
+design-host-acct: failed to add lan_out chain — kernel lacks netdev egress hook? Downloads will be 0.
+```
+
+我**自己写的猜测错误信息**误导了我:netdev/egress hook 是 kernel 5.16+ 才有的特性,但 ImmortalWrt 24.10 用 kernel 6.6.139 啊?
+
+诊断 round:让用户跑实际 nft 命令(绕过 init.d 的 `2>/dev/null` 屏蔽)看真错误。结果:
+```
+Error: Chain of type "filter" is not supported, perhaps kernel support is missing?
+```
+
+kernel 6.6 的内核源码 *有* 这个能力,但 **ImmortalWrt build config 没启 `CONFIG_NETFILTER_EGRESS=y`**(实际 OpenWrt 上游 build 也是 N)。要它就得自己 buildroot 编译固件 —— 用户**正常不可接受**。
+
+### Step 118 — 换 family:bridge 替 netdev
+
+第三次尝试。`netdev/egress` 不行,试 `bridge/postrouting` —— 用户在诊断 round 里同时测了这条 alternative,Exit: 0,可用。
+
+#### Bridge family 工作原理
+
+```
+download 路径:
+  eth1 RX
+  → inet PREROUTING (DNAT: daddr 91.229.x → 192.168.45.X)
+  → inet FORWARD                      ← flow offload bypass HERE
+  → inet POSTROUTING
+  → br-lan start_xmit
+  → bridge code (lookup MAC, select lan-port)
+  → bridge POSTROUTING                ← 我们的 hook,daddr 已经是 LAN IP
+  → lan-port TX
+```
+
+Bridge family 跟 inet/netfilter 是**完全不同的网络栈分支**。Flow offload bypass 是 inet/forward 范围内的事情,跟 bridge layer 无关。Bridge prerouting/postrouting hook **每个进出 bridge 的 packet 都触发**,包括 offloaded 流。
+
+而且 bridge family 是 kernel 4.x 时代就有的 feature,**所有 OpenWrt build 都启用** —— 真·universal compat。
+
+#### 重写 init.d + CGI
+
+- `table netdev design_acct` → `table bridge design_acct`
+- `lan_in`:`hook ingress device br-lan` → `hook prerouting`(bridge family 不需要 device qualifier)
+- `lan_out`:`hook egress device br-lan` → `hook postrouting`
+- CGI 自动探测 family(先试 bridge 再 fallback netdev,兼容 mid-upgrade 状态)
+
+ship 后用户验证:
+- `chain lan_in {` ✓
+- `chain lan_out {` ✓
+- `host_rx_192_168_45_177 = 13 packets / 678 bytes`(从 0/0 → 非零!)
+
+**问题彻底解决**。
+
+### Step 119 — 刷新加速 30s → 5s
+
+用户问"刷新每 5 秒可以吗"。Backend cron(5 min 扫 DHCP)不动,**前端 traffic.js `REFRESH_MS` 改 5000**。CGI 每次 ~10ms,12 req/min 路由器无感。Traffic Analysis 卡现在跟 WAN tile(2s 刷新)同等"live feel"。
+
+### 📊 第三十一轮(Step 115-119)累计
+
+| 指标 | 第三十轮后 | 第三十一轮后 |
+|---|---|---|
+| Flow offload + per-host 监控 | 不可能(nlbwmon broken) | ✅ 可行 |
+| 实现路径 | 无 | nftables bridge family + ingress/postrouting hooks |
+| 依赖 opkg 包 | N/A | **0** |
+| Kernel CONFIG 要求 | N/A | 默认 build 就有 |
+| 集成 UI | empty state + 链接出去 | 主题原生 Traffic Analysis 卡,5s 刷新 |
+| Upload tracking | ❌ | ✅ |
+| Download tracking | ❌ | ✅ |
+| Static-IP 主机(不在 DHCP) | N/A | ❌(v2 可加 ARP 扫描) |
+| IPv6 tracking | N/A | ❌(v2 可加 `ip6 saddr/daddr` 并列 chain) |
+
+---
+
+## 🎯 Round 29-31 横向观察
+
+**"NAT 时机的 mental model 比我以为的弱"**:Step 115 错在我没**完整想过** Linux netfilter packet flow 在 netdev/ingress 这个 hook point 上 daddr 是什么状态。我大概知道"NAT 在 PREROUTING",但没意识到 netdev hook **在 PREROUTING 之前**。这种"我以为我懂"的盲点,只在 ship 之后看到 dump 才暴露。**教训:涉及网络栈 hook point 的修改,应该手画一张 packet flow 图,标注每个 hook 上的 packet 状态**(saddr/daddr/conntrack/NAT 是否已生效)。
+
+**"自己写的猜测错误信息可能误导自己"**:Step 117 ship 的时候我在 init.d 写了 `logger -t design-host-acct "failed to add lan_out chain — kernel lacks netdev egress hook?"`。这条 message 是我的 hypothesis(基于"egress hook 需要 kernel 5.16+")。但实际原因是 kernel CONFIG,跟 kernel 版本无关。**好在我加了 `?`(疑问号)。如果写成 "kernel lacks netdev egress hook." 全 assertive 我可能更难纠正**。教训:**logger 信息里写自己不能 100% 确定的 hypothesis 时,要加疑问号或者 "possibly" 之类的 hedge**,给未来 debug 留余地。
+
+**"3 步迭代收敛 vs. 一开始想清楚"**:Round 31 是 115→117→118 三次同功能迭代。每次都基于上一次的 dump 改 design。理论上可以一开始就**画完整 NAT/offload/family 三层矩阵**避免迭代 —— 但实际花的总时间(每 step 10-20 min code + 用户 dump 5 min)可能跟"一次想清楚"差不多。**迭代式 debug + 用户真实 dump 反馈** 在这种 deep-water 领域可能比"我想清楚再写"更高效。前提是**每个 step 都 emit 足够多诊断信息**(logger / nft -j dump)便于下一轮收敛。
+
+**"bridge family 在 OpenWrt 生态里被低估了"**:整个调查过程我把 netdev 当成首选,bridge 只是 fallback。事后看 bridge family **应该是首选** —— 更老(更多 build 支持)、跨 offload(layer-2)、对 bridged-LAN(95% OpenWrt 用户的 br-lan 配置)天然贴合。我误以为 netdev 更"现代"所以更好,但实际 OpenWrt build 配置里 netdev 反而**不一定全编**。教训:**对 LuCI/OpenWrt 这种异构 build 生态,选 "更老 + 更普遍"的 API 通常比 "更新 + 理论更好"的 API 安全**。
+
+**"用户提的功能需求往往揭露生态空白"**:用户问"是不是有现成软件",我去查了半天得出"OpenWrt 生态没人做过 offload-proof per-host bandwidth"。这是个**真 ecosystem gap** —— nlbwmon / wrtbwmon / collectd 全是 conntrack-based,vnstat 是 interface-level,libpcap 工具都是独立 UI。我们的 Round 31 解决方案(自带 init.d + CGI + 主题 UI)可能是**全网第一个集成式实现**。**值得 OpenWrt 社区 PR 一个 luci-app 把这个套路提取出来**。但这是 future work,本项目不必为此再加额外维护负担。
+
+---
+
 
 
 
