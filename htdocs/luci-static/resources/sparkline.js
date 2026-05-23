@@ -88,12 +88,26 @@ function makeTile(id, iconName, label, iconBase) {
 }
 
 function renderTileSpark(tileEl, ring) {
+	var lineEl = tileEl.querySelector('.design-tile-spark-line');
+	var fillEl = tileEl.querySelector('.design-tile-spark-fill');
 	var linePath = ring.path(SPARK_W, SPARK_H);
-	tileEl.querySelector('.design-tile-spark-line').setAttribute('d', linePath);
-	var fillPath = linePath
-		? linePath + ' L' + SPARK_W + ',' + SPARK_H + ' L0,' + SPARK_H + ' Z'
-		: '';
-	tileEl.querySelector('.design-tile-spark-fill').setAttribute('d', fillPath);
+
+	// Step 57: when fewer than 2 samples have arrived (1st poll cycle),
+	// ring.path() returns ''. Instead of leaving the SVG empty (looks
+	// broken), draw a faded dashed baseline so the user sees "data area
+	// is here, just collecting" — combined with the placeholder class
+	// CSS which dashes + dims it.
+	if (!linePath) {
+		var baseY = (SPARK_H / 2).toFixed(1);
+		lineEl.setAttribute('d', 'M 0,' + baseY + ' L ' + SPARK_W + ',' + baseY);
+		lineEl.classList.add('design-tile-spark-line-empty');
+		fillEl.setAttribute('d', '');
+		return;
+	}
+
+	lineEl.classList.remove('design-tile-spark-line-empty');
+	lineEl.setAttribute('d', linePath);
+	fillEl.setAttribute('d', linePath + ' L' + SPARK_W + ',' + SPARK_H + ' L0,' + SPARK_H + ' Z');
 }
 
 function setTile(tileEl, value, meta) {

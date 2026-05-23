@@ -397,8 +397,12 @@
 }
 
 .design-tile-icon {
-    width: 16px;
-    height: 16px;
+    /* Step 57: bumped from 16px → 20px. 16px is too small to register
+       as an icon on a 1080p+ display next to text — users perceived
+       "no icon, just text". 20px matches the visual weight of a single
+       text char so the head row reads as "[icon] Label". */
+    width: 20px;
+    height: 20px;
     color: var(--color-accent-500);
     flex-shrink: 0;
 }
@@ -440,10 +444,23 @@
 
 .design-tile-spark-line {
     stroke: var(--color-accent-500);
-    stroke-width: 1.5;
+    /* Step 57: 1.5 → 2 stroke-width — sparkline was too thin to register
+       on retina-class screens, especially when data is flat (just a
+       horizontal line). */
+    stroke-width: 2;
     stroke-linecap: round;
     stroke-linejoin: round;
     fill: none;
+}
+
+/* Step 57: empty/insufficient-data state. We draw a dashed center line
+   so the user sees "data is collecting, will appear shortly" rather
+   than wondering whether the sparkline area is just empty space. */
+.design-tile-spark-line-empty {
+    stroke: var(--color-border-default);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+    opacity: 0.6;
 }
 
 .design-tile-spark-fill {
@@ -1292,8 +1309,11 @@
 }
 
 .quick-actions-item-icon {
-    width: 16px;
-    height: 16px;
+    /* Step 57: 16px → 18px so icons are clearly perceptible next to
+       the action label text (matching the tile-icon visual weight
+       bump from the same Step). */
+    width: 18px;
+    height: 18px;
     color: var(--color-text-muted);
     flex-shrink: 0;
 }
