@@ -53,17 +53,23 @@ var STORAGE_KEY = 'design-device-names-v1';
 
 // ── Type inference by hostname keyword ────────────────────────────────────────
 // First match wins. Patterns are case-insensitive regex source strings.
+// Step 93 (Round 17): tightened icon mappings — iphone/ipad/android now map
+// to i-phone (was i-info), printer / nas / windows-pc added. Icons drawn
+// from the sprite at htdocs/luci-static/design/icons.svg.
 var DEVICE_TYPES = [
-	{ re: /macbook|imac|mac-?mini/i,                    icon: 'i-monitor',     label: 'Computer' },
-	{ re: /iphone/i,                                    icon: 'i-info',        label: 'Phone' },
-	{ re: /ipad/i,                                      icon: 'i-info',        label: 'Tablet' },
-	{ re: /android|pixel|samsung[-_]?galaxy|oneplus/i,  icon: 'i-info',        label: 'Android device' },
-	{ re: /tv|bravia|webos|chromecast|firetv|appletv/i, icon: 'i-monitor',     label: 'TV / streamer' },
-	{ re: /switch|nintendo|playstation|ps5|ps4|xbox/i,  icon: 'i-info',        label: 'Game console' },
-	{ re: /thermostat|nest|hue|aqara|tuya|sonoff/i,     icon: 'i-thermometer', label: 'IoT' },
-	{ re: /camera|cam|doorbell|ring/i,                  icon: 'i-eye',         label: 'Camera' },
-	{ re: /printer|laserjet|brother|epson|canon/i,      icon: 'i-server',      label: 'Printer' },
-	{ re: /echo|alexa|homepod|nest-?audio/i,            icon: 'i-phone',       label: 'Smart speaker' }
+	{ re: /macbook|imac|mac-?mini/i,                          icon: 'i-monitor',     label: 'Computer' },
+	{ re: /printer|laserjet|brother|epson|canon|hp-laserjet/i, icon: 'i-server',      label: 'Printer' },
+	{ re: /windows|thinkpad|surface|dell-|win[-_]?dk/i,       icon: 'i-monitor',     label: 'Computer' },
+	{ re: /truenas|synology|qnap|nas$|nas[-_]/i,              icon: 'i-hard-drive',  label: 'NAS' },
+	{ re: /iphone/i,                                          icon: 'i-phone',       label: 'Phone' },
+	{ re: /ipad/i,                                            icon: 'i-phone',       label: 'Tablet' },
+	{ re: /android|pixel|samsung[-_]?galaxy|oneplus/i,        icon: 'i-phone',       label: 'Android device' },
+	{ re: /tv|bravia|webos|chromecast|firetv|appletv|lg-tv/i, icon: 'i-monitor',     label: 'TV / streamer' },
+	{ re: /switch|nintendo|playstation|ps5|ps4|xbox/i,        icon: 'i-zap',         label: 'Game console' },
+	{ re: /thermostat|nest|hue|aqara|tuya|sonoff|qingping/i,  icon: 'i-thermometer', label: 'IoT' },
+	{ re: /camera|cam$|cam-|doorbell|ring|hikvision/i,        icon: 'i-eye',         label: 'Camera' },
+	{ re: /echo|alexa|homepod|nest-?audio/i,                  icon: 'i-info',        label: 'Smart speaker' },
+	{ re: /node$|gemma|raspberry|rpi|pi-/i,                   icon: 'i-cpu',         label: 'Server' }
 ];
 
 // ── Vendor by MAC OUI prefix ──────────────────────────────────────────────────
@@ -97,6 +103,35 @@ function inferType(hostname) {
 		}
 	}
 	return { icon: 'i-info', label: _('Unknown') };
+}
+
+// Step 93 (Round 17): "Last seen" inference from DHCP lease expiry. Without
+// a true presence signal (ARP cache, iwinfo assoclist), this is the cheapest
+// available proxy. Semantics:
+//   - Static lease (no expires) → assume online. Static leases imply the
+//     admin pinned the address; the device may or may not be present, but
+//     showing it as "offline forever" looks wrong.
+//   - Lease still valid (expires > now) → "Now". Device renewed within
+//     the lease lifetime (typically 12 h).
+//   - Lease expired (expires <= now) → "Xm" / "Xh" / "Xd" depending on
+//     how long ago. UI also marks the row with .devices-row-offline so
+//     CSS can dim it via opacity.
+function formatLastSeen(lease) {
+	if (!lease || !lease.expires || lease.expires <= 0) {
+		return { stale: false, text: _('Now') };
+	}
+	var nowSec = Math.floor(Date.now() / 1000);
+	var exp    = lease.expires;
+	if (exp > nowSec) return { stale: false, text: _('Now') };
+	var age = nowSec - exp;
+	return { stale: true, text: relativeAge(age) };
+}
+
+function relativeAge(ageSec) {
+	if (ageSec < 60)    return '<1m';
+	if (ageSec < 3600)  return Math.floor(ageSec / 60)    + 'm';
+	if (ageSec < 86400) return Math.floor(ageSec / 3600)  + 'h';
+	return Math.floor(ageSec / 86400) + 'd';
 }
 
 // ── Custom names (Step 44) — localStorage persistence ────────────────────────
@@ -151,6 +186,12 @@ return baseclass.extend({
 	},
 
 	injectCard: function () {
+		// Step 93 (Round 17): pixel-parity rewrite to preview A2.
+		// Outer card unchanged; inside it: head row (icon + title + count)
+		// followed by a .devices-table containing a column-header strip
+		// and the rows container. Rows themselves emit a 6-col grid
+		// (.devices-summary) keyed off the same template-columns as the
+		// header so labels align with values column-for-column.
 		var card = E('div', { 'class': 'devices-card', 'id': 'devices-card' }, [
 			E('div', { 'class': 'devices-head' }, [
 				svgEl('svg', { 'class': 'svg-icon devices-icon', 'aria-hidden': 'true' },
@@ -158,12 +199,22 @@ return baseclass.extend({
 				E('span', { 'class': 'devices-title' }, _('LAN Clients')),
 				E('span', { 'class': 'devices-count', 'id': 'devices-count' }, '')
 			]),
-			E('ul', { 'class': 'devices-list', 'id': 'devices-list' }, [
-				E('li', { 'class': 'devices-empty' }, _('Loading...'))
+			E('div', { 'class': 'devices-table' }, [
+				E('div', { 'class': 'devices-thead' }, [
+					// First label spans icon + name columns (see CSS rule
+					// .devices-col-name { grid-column: 1 / 3 })
+					E('span', { 'class': 'devices-col-name' }, _('Device')),
+					E('span', { 'class': 'devices-col-ip' },   _('IP')),
+					E('span', { 'class': 'devices-col-sig' },  _('Signal')),
+					E('span', { 'class': 'devices-col-seen' }, _('Last seen')),
+					E('span', { 'class': 'devices-col-chev' }, '')
+				]),
+				E('div', { 'class': 'devices-rows', 'id': 'devices-rows' }, [
+					E('div', { 'class': 'devices-empty' }, _('Loading...'))
+				])
 			])
 		]);
-		var view = document.getElementById('view');
-		view.appendChild(card);
+		document.getElementById('view').appendChild(card);
 	},
 
 	refresh: function () {
@@ -174,15 +225,17 @@ return baseclass.extend({
 			if (data && data.dhcp6_leases) leases = leases.concat(data.dhcp6_leases);
 			self.render(leases);
 		}).catch(function () {
-			document.getElementById('devices-list').innerHTML = '';
-			document.getElementById('devices-list').appendChild(
-				E('li', { 'class': 'devices-empty' }, _('Unable to read DHCP leases'))
-			);
+			// Step 93 (Round 17): container renamed devices-list → devices-rows
+			// when the inner DOM moved from <ul>/<li> to grid <div> rows.
+			var rowsEl = document.getElementById('devices-rows');
+			if (!rowsEl) return;
+			rowsEl.innerHTML = '';
+			rowsEl.appendChild(E('div', { 'class': 'devices-empty' }, _('Unable to read DHCP leases')));
 		});
 	},
 
 	render: function (leases) {
-		var listEl = document.getElementById('devices-list');
+		var rowsEl  = document.getElementById('devices-rows');
 		var countEl = document.getElementById('devices-count');
 
 		// Dedupe by MAC (handle v4+v6 from same client)
@@ -206,17 +259,17 @@ return baseclass.extend({
 		countEl.textContent = unique.length ? '(' + unique.length + ')' : '';
 
 		if (!unique.length) {
-			listEl.innerHTML = '';
-			listEl.appendChild(E('li', { 'class': 'devices-empty' }, _('No clients')));
+			rowsEl.innerHTML = '';
+			rowsEl.appendChild(E('div', { 'class': 'devices-empty' }, _('No clients')));
 			return;
 		}
 
-		// Step 44: build all rows ONCE with their detail content embedded,
-		// then toggle a class on click — no DOM rebuild on every expand.
-		listEl.innerHTML = '';
+		// Step 44: build all rows ONCE with detail embedded, then toggle a
+		// class on click — no DOM rebuild on every expand.
+		rowsEl.innerHTML = '';
 		var self = this;
 		unique.forEach(function (l) {
-			listEl.appendChild(self.buildRow(l));
+			rowsEl.appendChild(self.buildRow(l));
 		});
 	},
 
@@ -227,6 +280,7 @@ return baseclass.extend({
 		var vendor  = ouiVendor(mac);
 		var ipShort = (l.ipaddr || '').split('.').pop();
 		var isOpen  = self.expanded[mac] === true;
+		var seen    = formatLastSeen(l);
 
 		// Resolve display name: user override (Step 44) > DHCP hostname >
 		// vendor "device" > "Unknown device".
@@ -234,8 +288,22 @@ return baseclass.extend({
 			|| l.hostname
 			|| (vendor ? vendor + ' ' + _('device') : _('Unknown device'));
 
-		return E('li', {
-			'class':    'devices-row' + (isOpen ? ' devices-row-expanded' : ''),
+		// Step 93 (Round 17): Wi-Fi signal data is deferred to a follow-up
+		// CGI (Step 94+, reading iwinfo via ubus). Until then, every device
+		// renders the "Wired" pill — on routers that aren't access points
+		// this is the truth; on Wi-Fi routers it's a conservative fallback
+		// that will be upgraded to live signal bars when the CGI lands.
+		var sigCell = E('span', { 'class': 'devices-row-sig' }, [
+			E('span', { 'class': 'devices-sig-wired' }, _('Wired'))
+		]);
+
+		var seenCell = E('span', {
+			'class': 'devices-row-seen ' + (seen.stale ? 'devices-seen-stale' : 'devices-seen-online')
+		}, seen.text);
+
+		return E('div', {
+			'class':    'devices-row' + (isOpen ? ' devices-row-expanded' : '')
+			            + (seen.stale ? ' devices-row-offline' : ''),
 			'data-mac': mac,
 			'click': function (e) {
 				// Don't toggle when an action button (or anything inside it)
@@ -244,63 +312,70 @@ return baseclass.extend({
 				self.toggleRow(mac);
 			}
 		}, [
-			E('div', { 'class': 'devices-row-main' }, [
-				svgEl('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
-					svgUse(self.iconBase + '#' + type.icon)),
-				E('span', { 'class': 'devices-row-name', 'data-mac': mac },
-					displayName),
+			E('div', { 'class': 'devices-summary' }, [
+				// Step 93: icon now sits inside a 32×32 rounded box that
+				// changes background on hover / expand — matches preview.
+				E('div', { 'class': 'devices-icon-wrap' }, [
+					svgEl('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
+						svgUse(self.iconBase + '#' + type.icon))
+				]),
+				E('span', { 'class': 'devices-row-name', 'data-mac': mac }, displayName),
 				E('span', { 'class': 'devices-row-ip' }, ipShort ? '.' + ipShort : '—'),
-				E('span', { 'class': 'devices-row-type' }, type.label),
-				// Chevron rotates 180° via CSS when expanded
+				sigCell,
+				seenCell,
 				svgEl('svg', { 'class': 'svg-icon devices-row-chev', 'aria-hidden': 'true' },
 					svgUse(self.iconBase + '#i-arrow-down'))
 			]),
-			// Detail wrapper is always in DOM — max-height transition handles
-			// the visual collapse/expand. Cheaper than rebuilding rows.
+			// Detail is always in DOM — max-height transition handles the
+			// visual collapse/expand. Cheaper than rebuilding rows on each
+			// click.
 			E('div', { 'class': 'devices-row-detail' }, [
 				E('div', { 'class': 'devices-detail-grid' }, [
-					self.detailRow(_('Full IP'),  l.ipaddr || '—'),
-					self.detailRow(_('MAC'),      mac || '—'),
-					self.detailRow(_('Vendor'),   vendor || _('Unknown')),
-					self.detailRow(_('Lease expires'), l.expires
+					self.detailCell(_('Full IP'),    l.ipaddr || '—', /*mono*/ true),
+					self.detailCell(_('MAC'),        mac || '—',      /*mono*/ true),
+					self.detailCell(_('Vendor'),     vendor ? (vendor + ' (' + mac.substr(0, 8) + ')') : _('Unknown')),
+					self.detailCell(_('Type'),       type.label),
+					// Step 93: Connection placeholder — Step 94 (Wi-Fi CGI)
+					// will replace with "Wi-Fi 5GHz · ch 149 · 80MHz" etc.
+					self.detailCell(_('Connection'), _('Wired (Wi-Fi data pending iwinfo CGI)')),
+					self.detailCell(_('Lease expires'), l.expires
 						? new Date(l.expires * 1000).toLocaleString()
-						: _('static or expired'))
+						: _('static / no expiry'))
 				]),
 				E('div', { 'class': 'devices-actions' }, [
-					E('button', {
-						'type':  'button',
-						'class': 'cbi-button cbi-button-action devices-action',
-						'click': function (e) {
-							e.stopPropagation();
-							self.actionRename(mac, displayName);
-						}
-					}, _('Rename')),
-					E('button', {
-						'type':  'button',
-						'class': 'cbi-button cbi-button-action devices-action',
-						'click': function (e) {
-							e.stopPropagation();
-							toastSafe('info', _('Rate limiting is not yet implemented'));
-						}
-					}, _('Limit')),
-					E('button', {
-						'type':  'button',
-						'class': 'cbi-button cbi-button-negative devices-action',
-						'click': function (e) {
-							e.stopPropagation();
-							toastSafe('warning', _('Blocking is not yet implemented'));
-						}
-					}, _('Block'))
+					self.actionBtn('action',   _('Rename'),    function () { self.actionRename(mac, displayName); }),
+					self.actionBtn('action',   _('Whitelist'), function () { toastSafe('info',    _('Whitelist is not yet implemented')); }),
+					self.actionBtn('action',   _('Limit'),     function () { toastSafe('info',    _('Rate limiting is not yet implemented')); }),
+					self.actionBtn('negative', _('Block'),     function () { toastSafe('warning', _('Blocking is not yet implemented')); })
 				])
 			])
 		]);
 	},
 
-	detailRow: function (label, value) {
-		return E('div', { 'class': 'devices-detail-row' }, [
-			E('span', { 'class': 'devices-detail-label' }, label),
-			E('span', { 'class': 'devices-detail-value' }, value)
+	// Step 93 (Round 17): each detail cell now uses semantic dt/dd inside a
+	// wrapper div (matches preview structure). Pass mono=true for values
+	// that should render in --font-mono (IP, MAC, etc.) — the CSS keys off
+	// `.mono` on the dd to apply tabular-nums + mono font.
+	detailCell: function (label, value, mono) {
+		return E('div', { 'class': 'devices-detail-cell' }, [
+			E('dt', {}, label),
+			E('dd', mono ? { 'class': 'mono' } : {}, value)
 		]);
+	},
+
+	// Step 93: tiny button factory — keeps the verb (Rename / Limit / …)
+	// next to its handler in buildRow without 30 lines of E() boilerplate
+	// per button. `kind` is the LuCI button modifier class suffix
+	// ('action' for neutral, 'negative' for danger red).
+	actionBtn: function (kind, label, onClick) {
+		return E('button', {
+			'type':  'button',
+			'class': 'cbi-button cbi-button-' + kind + ' devices-action',
+			'click': function (e) {
+				e.stopPropagation();
+				onClick();
+			}
+		}, label);
 	},
 
 	toggleRow: function (mac) {
