@@ -68,6 +68,14 @@ MetricRing.prototype.delta = function () {
 	if (this.data.length < 2) return 0;
 	return this.data[this.data.length - 1] - this.data[this.data.length - 2];
 };
+// Step 89 (Round 15): mean over the entire ring window (~5 min at 5 s
+// sampling). Used in tile meta lines like "Past 5 min · Avg 14.2%".
+MetricRing.prototype.avg = function () {
+	if (this.data.length === 0) return 0;
+	var sum = 0;
+	for (var i = 0; i < this.data.length; i++) sum += this.data[i];
+	return sum / this.data.length;
+};
 MetricRing.prototype.path = function (w, h) {
 	if (this.data.length < 2) return '';
 	var lo = Infinity, hi = -Infinity;
@@ -105,7 +113,7 @@ MetricRing.prototype.path = function (w, h) {
 //    — the browser doesn't paint that as SVG, so even perfectly-attributed
 //    <path> children render to nothing. Same fix the menu icons needed in
 //    Step 77; we missed it here.
-function makeTile(id, iconName, label, iconBase) {
+function makeTile(id, iconName, label, iconBase, hasProgress) {
 	var baseY = (SPARK_H / 2).toFixed(1);
 	var initPath = 'M 0,' + baseY + ' L ' + SPARK_W + ',' + baseY;
 
@@ -153,16 +161,39 @@ function makeTile(id, iconName, label, iconBase) {
 		'stroke':             'currentColor'
 	}, [fillPath, linePath]);
 
-	// Tile container stays HTML — only the SVG bits need namespace fix
-	return E('div', { 'class': 'design-tile', 'id': id }, [
+	// Step 89 (Round 15): value row is now 4 split inline spans — prefix
+	// (optional '↓'/'↑' for WAN), num (big), unit (e.g. '%'), trend (colored
+	// pill). setTile() below fills them. Empty trend is hidden by CSS
+	// (:empty rule) so makeTile bakes it in zero-state.
+	var valueRow = E('div', { 'class': 'design-tile-value' }, [
+		E('span', { 'class': 'design-tile-prefix' }, ''),
+		E('span', { 'class': 'design-tile-num' },    '—'),
+		E('span', { 'class': 'design-tile-unit' },   ''),
+		E('span', { 'class': 'design-tile-trend' },  '')
+	]);
+
+	// Step 89 (Round 15): reorder to match preview — head, value, spark,
+	// [progress for tiles that opt in], meta. Sparkline now sits ABOVE meta
+	// (visually closer to the value it's plotting) rather than at the bottom.
+	var children = [
 		E('div', { 'class': 'design-tile-head' }, [
 			iconSvg,
 			E('span', { 'class': 'design-tile-label' }, label)
 		]),
-		E('div', { 'class': 'design-tile-value' }, '—'),
-		E('div', { 'class': 'design-tile-meta' }, ''),
+		valueRow,
 		sparkSvg
-	]);
+	];
+
+	if (hasProgress) {
+		// Inner div is the fill — width:0% at bake-time, setTile() animates it.
+		children.push(E('div', { 'class': 'design-tile-progress' },
+			E('div', { 'style': 'width:0%' })));
+	}
+
+	children.push(E('div', { 'class': 'design-tile-meta' }, ''));
+
+	// Tile container stays HTML — only the SVG bits need namespace fix
+	return E('div', { 'class': 'design-tile', 'id': id }, children);
 }
 
 function renderTileSpark(tileEl, ring) {
@@ -201,9 +232,53 @@ function renderTileSpark(tileEl, ring) {
 	fillEl.setAttribute('d', linePath + ' L' + SPARK_W + ',' + SPARK_H + ' L0,' + SPARK_H + ' Z');
 }
 
-function setTile(tileEl, value, meta) {
-	tileEl.querySelector('.design-tile-value').textContent = value;
-	tileEl.querySelector('.design-tile-meta').textContent  = meta || '';
+// Step 89 (Round 15): richer setter — fills the split spans (prefix /
+// num / unit / trend pill) and optionally drives the memory tile's
+// progress bar fill width. opts shape:
+//   { num, unit, prefix, trend: { dir, text } | null, meta, progress }
+// `meta` may be a plain string, a single DOM node, or an array of nodes
+// (used by the temp tile to render a coloured status-dot before the
+// status text).
+function setTile(tileEl, opts) {
+	var numEl    = tileEl.querySelector('.design-tile-num');
+	var unitEl   = tileEl.querySelector('.design-tile-unit');
+	var prefixEl = tileEl.querySelector('.design-tile-prefix');
+	var trendEl  = tileEl.querySelector('.design-tile-trend');
+	var metaEl   = tileEl.querySelector('.design-tile-meta');
+	var progEl   = tileEl.querySelector('.design-tile-progress > div');
+
+	if (numEl)    numEl.textContent    = (opts.num == null) ? '—' : String(opts.num);
+	if (unitEl)   unitEl.textContent   = opts.unit   || '';
+	if (prefixEl) prefixEl.textContent = opts.prefix || '';
+
+	if (trendEl) {
+		if (opts.trend && opts.trend.dir !== 'flat') {
+			trendEl.textContent = (opts.trend.dir === 'up' ? '↑ ' : '↓ ') + opts.trend.text;
+			trendEl.className   = 'design-tile-trend design-tile-trend-' + opts.trend.dir;
+		} else {
+			// Empty content + base class — CSS `:empty { display: none }` hides
+			// the chip so the value row collapses cleanly.
+			trendEl.textContent = '';
+			trendEl.className   = 'design-tile-trend';
+		}
+	}
+
+	if (metaEl) {
+		if (opts.meta == null) {
+			metaEl.textContent = '';
+		} else if (typeof opts.meta === 'string') {
+			metaEl.textContent = opts.meta;
+		} else if (Array.isArray(opts.meta)) {
+			// replaceChildren accepts (...Node|string), spread the array.
+			metaEl.replaceChildren.apply(metaEl, opts.meta);
+		} else if (opts.meta.nodeType) {
+			metaEl.replaceChildren(opts.meta);
+		}
+	}
+
+	if (progEl && typeof opts.progress === 'number' && isFinite(opts.progress)) {
+		progEl.style.width = Math.max(0, Math.min(100, opts.progress)) + '%';
+	}
 }
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
@@ -234,6 +309,25 @@ function fmtBpsSplit(bps) {
 	if (bps < 1e6)     return { num: (bps / 1000).toFixed(1),  unit: 'Kbps' };
 	if (bps < 1e9)     return { num: (bps / 1e6).toFixed(1),   unit: 'Mbps' };
 	return { num: (bps / 1e9).toFixed(2), unit: 'Gbps' };
+}
+
+// Step 89 (Round 15): compute a trend descriptor for the colored pill in
+// tile values. Logic: last-sample vs current-sample (per user choice — the
+// existing ring.delta() semantics). Returns null if either value isn't a
+// finite number (e.g. ring still has 0-1 samples). Returns { dir: 'flat' }
+// when |delta| < threshold so the pill stays hidden during noise.
+//   opts.threshold : number — below |delta| this is treated as flat
+//   opts.format    : function(abs)→string — defaults to abs.toFixed(1)
+//   opts.suffix    : string — appended after the formatted number (e.g. '%')
+function deltaToTrend(curr, prev, opts) {
+	opts = opts || {};
+	if (curr == null || prev == null || !isFinite(curr) || !isFinite(prev)) return null;
+	var d = curr - prev;
+	var threshold = opts.threshold || 0;
+	if (Math.abs(d) < threshold) return { dir: 'flat', text: '' };
+	var abs = Math.abs(d);
+	var fmt = opts.format ? opts.format(abs) : abs.toFixed(1);
+	return { dir: d > 0 ? 'up' : 'down', text: fmt + (opts.suffix || '') };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -269,9 +363,11 @@ return baseclass.extend({
 
 	injectTiles: function () {
 		var view = document.getElementById('view');
+		// Step 89 (Round 15): memory tile opts in to the progress bar
+		// (4th makeTile arg). Other tiles use the default (sparkline only).
 		var grid = E('div', { 'class': 'design-tile-grid' }, [
 			makeTile('design-tile-cpu',  'i-cpu',         _('CPU Load'),    this.iconBase),
-			makeTile('design-tile-mem',  'i-memory',      _('Memory'),      this.iconBase),
+			makeTile('design-tile-mem',  'i-memory',      _('Memory'),      this.iconBase, /*hasProgress*/ true),
 			makeTile('design-tile-net',  'i-activity',    _('WAN Traffic'), this.iconBase),
 			makeTile('design-tile-temp', 'i-thermometer', _('Temperature'), this.iconBase)
 		]);
@@ -304,8 +400,9 @@ return baseclass.extend({
 		this._timer = setInterval(L.bind(this.tick, this), SAMPLE_INTERVAL_MS);
 	},
 
-	// Step 43: callback for wan-stats.subscribe. Updates the Net tile's value
-	// (download Mbps), meta (upload + device name), and rx-rate sparkline.
+	// Step 43 + 89: callback for wan-stats.subscribe. Updates the Net tile's
+	// value (split prefix '↓' + num + unit), meta (upload + device name),
+	// trend pill (rx delta vs previous sample), and rx-rate sparkline.
 	onWanStats: function (data) {
 		if (!this.tileNet) return;
 		// If the WAN device is missing or fully offline, hide the tile instead
@@ -316,18 +413,32 @@ return baseclass.extend({
 		}
 		this.tileNet.style.display = '';
 
+		var prevRx = this.rings.net.last();
 		if (data.rxBps !== null) this.rings.net.push(data.rxBps);
 
 		var d = fmtBpsSplit(data.rxBps);
 		var u = fmtBpsSplit(data.txBps);
-		// Use ↓ prefix on value so it visually matches the throughput row in
-		// the WAN Hero (Step 43 pairs these visually).
-		var displayValue = (d.num === '—') ? '—' : ('↓ ' + d.num + ' ' + d.unit);
-		var displayMeta  = (u.num === '—')
-			? (data.deviceName || '')
-			: ('↑ ' + u.num + ' ' + u.unit + (data.deviceName ? ' · ' + data.deviceName : ''));
 
-		setTile(this.tileNet, displayValue, displayMeta);
+		// Throughput trend pill: 50 Kbps threshold suppresses idle-link
+		// noise; format auto-picks Mbps/Kbps based on magnitude so the pill
+		// stays compact ("↓ 1.2 Mbps", not "↓ 1200000 bps").
+		var trend = deltaToTrend(data.rxBps, prevRx, {
+			threshold: 50000,
+			format: function (abs) {
+				var f = fmtBpsSplit(abs);
+				return f.num + ' ' + f.unit;
+			}
+		});
+
+		setTile(this.tileNet, {
+			prefix: (d.num === '—') ? '' : '↓',
+			num:    d.num,
+			unit:   d.unit,
+			trend:  trend,
+			meta:   (u.num === '—')
+				? (data.deviceName || '')
+				: ('↑ ' + u.num + ' ' + u.unit + (data.deviceName ? ' · ' + data.deviceName : ''))
+		});
 		renderTileSpark(this.tileNet, this.rings.net);
 	},
 
@@ -338,37 +449,60 @@ return baseclass.extend({
 		sysInfo().then(function (info) {
 			if (!info) return;
 
-			// loadavg[0] is 1-min average, ubus encodes as Q16 fixed point
-			var load1 = (info.load && info.load[0]) ? info.load[0] / 65536 : 0;
+			// ── CPU (Step 89: still loadavg here; Step 90 swaps in CPU% data
+			//    source). loadavg[0] is 1-min average, ubus encodes as Q16
+			//    fixed point.
+			var load1   = (info.load && info.load[0]) ? info.load[0] / 65536 : 0;
+			var prevCpu = self.rings.cpu.last();
 			self.rings.cpu.push(load1);
-			var delta = self.rings.cpu.delta();
-			var deltaStr = (delta === 0 || Math.abs(delta) < 0.005) ? '' :
-				(delta > 0 ? ' ↗ ' : ' ↘ ') + Math.abs(delta).toFixed(2);
-			setTile(self.tileCpu, load1.toFixed(2), _('1-min loadavg') + deltaStr);
+			setTile(self.tileCpu, {
+				num:   load1.toFixed(2),
+				unit:  '',
+				trend: deltaToTrend(load1, prevCpu, { threshold: 0.05, format: function (v) { return v.toFixed(2); } }),
+				meta:  _('1-min loadavg') + ' · ' + _('Avg') + ' ' + self.rings.cpu.avg().toFixed(2)
+			});
 			renderTileSpark(self.tileCpu, self.rings.cpu);
 
-			// Memory used %
+			// ── Memory used %
 			if (info.memory && info.memory.total) {
-				var used = info.memory.total - (info.memory.available || info.memory.free || 0);
-				var pct  = (used / info.memory.total) * 100;
+				var used    = info.memory.total - (info.memory.available || info.memory.free || 0);
+				var pct     = (used / info.memory.total) * 100;
+				var prevMem = self.rings.mem.last();
 				self.rings.mem.push(pct);
-				setTile(self.tileMem,
-					pct.toFixed(0) + '%',
-					formatBytes(used) + ' / ' + formatBytes(info.memory.total));
+				setTile(self.tileMem, {
+					num:      pct.toFixed(0),
+					unit:     '%',
+					trend:    deltaToTrend(pct, prevMem, { threshold: 1.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
+					progress: pct,
+					meta:     formatBytes(used) + ' / ' + formatBytes(info.memory.total)
+				});
 				renderTileSpark(self.tileMem, self.rings.mem);
 			}
 		}).catch(function () { /* keep stale display */ });
 
-		// Temperature
+		// ── Temperature
 		if (self.tileTemp.style.display !== 'none') {
 			fetchTempZones().then(function (zones) {
 				if (!zones || !zones.length) return;
-				var t = Math.max.apply(null, zones);
+				var t        = Math.max.apply(null, zones);
+				var prevTemp = self.rings.temp.last();
 				self.rings.temp.push(t);
-				var status = (t >= 80) ? _('hot')
-				           : (t >= 65) ? _('warm')
-				           : _('normal');
-				setTile(self.tileTemp, t + '°C', status);
+
+				// Threshold + label + dot color all keyed off the same bands.
+				var dotCls, statusText;
+				if (t >= 80)      { dotCls = 'design-tile-status-dot-hot';  statusText = _('Hot'); }
+				else if (t >= 65) { dotCls = 'design-tile-status-dot-warm'; statusText = _('Warm'); }
+				else              { dotCls = 'design-tile-status-dot-ok';   statusText = _('Normal'); }
+
+				setTile(self.tileTemp, {
+					num:   t,
+					unit:  '°C',
+					trend: deltaToTrend(t, prevTemp, { threshold: 0.5, suffix: '°C', format: function (v) { return v.toFixed(1); } }),
+					meta:  [
+						E('span', { 'class': 'design-tile-status-dot ' + dotCls }, '●'),
+						' ' + statusText
+					]
+				});
 				renderTileSpark(self.tileTemp, self.rings.temp);
 			});
 		}
