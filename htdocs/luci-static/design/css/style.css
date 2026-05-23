@@ -4137,6 +4137,37 @@ td.cbi-button, .cbi-button-apply,
     word-break: normal;
 }
 
+/* Step 88 (Round 14): re-enable wrap on Storage card's path column.
+   Step 84's comment above said "The Storage section instead uses
+   <div class='cbi-value'>" — that assumption was wrong. Chrome-Claude
+   Round-14 DOM dump on the live overview page showed Storage ALSO
+   renders via real <table>/<tr>/<td> markup, just like DHCP. So
+   Step 84's blanket `:not(td)` exclusion accidentally caught Storage's
+   path cells too, regressing the long-Docker-overlay-path overflow
+   that Step 82 had fixed.
+
+   Structural discriminator from the DOM dump:
+     Storage row:  <tr> with 2 <td> children   (path | usage %)
+     DHCP row:     <tr> with 5 <td> children   (host | IPv4 | MAC |
+                                                 lease | static)
+   Same .cbi-section parent, same <table class="table">, but the
+   column count differs. So target 2-column rows specifically using
+   `:first-child:nth-last-child(2)` (matches the first td of a 2-td
+   row) plus a `~ td` to catch the second one. DHCP/lease tables have
+   5 columns so never match — they keep their default nowrap, which
+   is what we want for IPv4/MAC/hostname cells.
+
+   Deliberately avoiding selectors based on class names like the
+   `.lases` typo on DHCP's <table class="table lases">, or `.left` on
+   storage's <td class="td left"> — those are LuCI internals that
+   could shift in any version bump. Column count is the structural
+   invariant. */
+.node-admin-status-overview #view .cbi-section tr > td:first-child:nth-last-child(2),
+.node-admin-status-overview #view .cbi-section tr > td:first-child:nth-last-child(2) ~ td {
+    white-space: normal !important;
+    overflow-wrap: break-word !important;
+}
+
 /* Step 75: also set min-width:0 on the grid cell. CSS Grid items default
    to min-width:auto (= intrinsic content size), which makes long table
    values force the column wider than its allotted track. min-width:0
