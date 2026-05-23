@@ -11,18 +11,27 @@
 //   - "did changing the antenna / channel help?"
 //
 // Three phases per run:
-//   1. Latency  — 10 × /cgi-bin/design/ping, median + stddev (jitter)
-//   2. Download — 1 × /cgi-bin/design/download?bytes=10485760 (10MB)
-//   3. Upload   — 1 × /cgi-bin/design/upload (POST 5MB blob)
+//   1. Latency  — N × /cgi-bin/design/ping, median + stddev (jitter)
+//   2. Download — 1 × /cgi-bin/design/download?bytes=N (default 50MB)
+//   3. Upload   — 1 × /cgi-bin/design/upload (POST blob, default 25MB)
 //
 // Lives in a card injected into Overview. Trigger is a button — not auto —
-// because hammering /dev/urandom + 10MB stream is not free on tiny routers.
+// because hammering /dev/urandom + tens of MB stream is not free.
 //
-// MVP: single direction at a time, simple median. Deferred:
-//   - 2.4G/5G comparison mode (would need user to switch SSIDs mid-test)
-//   - Last-10-runs history in localStorage
-//   - Theoretical-link-rate comparison (needs iwinfo channel/bandwidth)
+// Step 46: history + label. Each run is stored in localStorage with a
+// user-chosen label (Auto / Wired / 5 GHz / 2.4 GHz / custom). Last 6
+// entries show below the current results. Lets users do a manual 2.4 vs
+// 5 comparison by running twice with different labels — no automated
+// SSID switching, but the visible side-by-side makes the comparison easy.
+//
+// Still deferred:
+//   - Automated SSID switching (browser can't do this anyway — Wi-Fi is
+//     a router config, not a browser action)
+//   - Theoretical-link-rate overlay (needs iwinfo channel/bandwidth)
 // ─────────────────────────────────────────────────────────────────────────────
+
+var STORAGE_KEY = 'design-speedtest-history-v1';
+var HISTORY_MAX = 6;
 
 var PING_COUNT      = 20;                 // 20 samples → median is robust to outliers
 var DOWNLOAD_BYTES  = 50 * 1024 * 1024;   // 50 MB — at 1 Gbps wired = 400ms (post TCP slow-start),
@@ -54,6 +63,35 @@ function withTimeout(promise, ms) {
 	var ctrl = new AbortController();
 	var t = setTimeout(function () { ctrl.abort(); }, ms);
 	return { signal: ctrl.signal, promise: promise(ctrl.signal).finally(function () { clearTimeout(t); }) };
+}
+
+// Step 46: history persistence — localStorage, best-effort, fails silent
+// on quota / private-mode.
+function loadHistory() {
+	try {
+		var raw = localStorage.getItem(STORAGE_KEY);
+		var arr = raw ? JSON.parse(raw) : [];
+		return Array.isArray(arr) ? arr : [];
+	} catch (e) { return []; }
+}
+function saveHistory(entries) {
+	try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); }
+	catch (e) { /* quota / disabled — discard */ }
+}
+function pushHistory(entry) {
+	var arr = loadHistory();
+	arr.unshift(entry);
+	if (arr.length > HISTORY_MAX) arr = arr.slice(0, HISTORY_MAX);
+	saveHistory(arr);
+	return arr;
+}
+
+function fmtAgo(ts) {
+	var s = Math.floor((Date.now() - ts) / 1000);
+	if (s < 60)    return _('just now');
+	if (s < 3600)  return Math.floor(s / 60)   + _(' min ago');
+	if (s < 86400) return Math.floor(s / 3600) + _(' h ago');
+	return Math.floor(s / 86400) + _(' d ago');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,16 +141,34 @@ return baseclass.extend({
 				])
 			]),
 			E('div', { 'class': 'speedtest-actions' }, [
+				// Step 46: label select lets the user tag the run so history
+				// shows side-by-side comparable entries. No automated SSID
+				// switching — that's not possible from a browser anyway.
+				E('select', {
+					'id':    'speedtest-label',
+					'class': 'speedtest-label-select',
+					'aria-label': _('Test label')
+				}, [
+					E('option', { 'value': 'Wired'   }, _('Wired')),
+					E('option', { 'value': '5 GHz', 'selected': 'selected' }, _('Wi-Fi 5 GHz')),
+					E('option', { 'value': '2.4 GHz' }, _('Wi-Fi 2.4 GHz')),
+					E('option', { 'value': 'Other'   }, _('Other'))
+				]),
 				E('button', {
 					'type':  'button',
 					'class': 'cbi-button cbi-button-action speedtest-run',
 					'id':    'speedtest-run',
 					'click': L.bind(this.runTest, this)
 				}, _('Run test'))
-			])
+			]),
+			// Step 46: history strip below the actions, hidden if empty.
+			// Rendered on inject and after every successful run.
+			E('div', { 'class': 'speedtest-history', 'id': 'speedtest-history' }, [])
 		]);
 		var view = document.getElementById('view');
 		view.appendChild(card);     // append at END (not first-fold)
+
+		this.renderHistory();
 	},
 
 	runTest: function () {
@@ -125,6 +181,12 @@ return baseclass.extend({
 		this.setStat('latency', '—');
 		this.setStat('jitter', '—');
 
+		// Step 46: capture label + results so we can save a history entry on
+		// success. Initialised as null sentinels; written inside each phase.
+		var labelEl = document.getElementById('speedtest-label');
+		var label   = labelEl ? labelEl.value : 'Other';
+		var result  = { t: Date.now(), label: label, latency: null, jitter: null, download: null, upload: null };
+
 		btn.textContent = _('Testing latency (%d samples)…').replace('%d', PING_COUNT);
 
 		this.testLatency()
@@ -132,17 +194,29 @@ return baseclass.extend({
 				if (l.median !== null) {
 					self.setStat('latency', l.median.toFixed(1) + ' ms');
 					self.setStat('jitter',  l.jitter.toFixed(1) + ' ms');
+					result.latency = l.median;
+					result.jitter  = l.jitter;
 				}
 				btn.textContent = _('Testing download (%d MB)…').replace('%d', DOWNLOAD_BYTES / 1024 / 1024);
 				return self.testDownload();
 			})
 			.then(function (mbps) {
 				self.setStat('download', mbps !== null ? mbps.toFixed(1) + ' Mbps' : _('error'));
+				if (mbps !== null) result.download = mbps;
 				btn.textContent = _('Testing upload (%d MB)…').replace('%d', UPLOAD_BYTES / 1024 / 1024);
 				return self.testUpload();
 			})
 			.then(function (mbps) {
 				self.setStat('upload', mbps !== null ? mbps.toFixed(1) + ' Mbps' : _('error'));
+				if (mbps !== null) result.upload = mbps;
+
+				// Step 46: persist + refresh history list. Only save if at
+				// least one number was captured (avoid littering on a totally
+				// failed run).
+				if (result.latency !== null || result.download !== null || result.upload !== null) {
+					pushHistory(result);
+					self.renderHistory();
+				}
 			})
 			.catch(function (e) {
 				if (window.toast) toast.error(_('Speed test failed') + ': ' + (e && e.message ? e.message : 'unknown'));
@@ -151,6 +225,50 @@ return baseclass.extend({
 				btn.disabled = false;
 				btn.textContent = _('Run test');
 			});
+	},
+
+	// Step 46: render the history strip from localStorage. Called once on
+	// inject and after every successful test. Hidden when empty so a fresh
+	// install doesn't waste vertical space.
+	renderHistory: function () {
+		var host = document.getElementById('speedtest-history');
+		if (!host) return;
+		var history = loadHistory();
+		host.innerHTML = '';
+		if (!history.length) {
+			host.style.display = 'none';
+			return;
+		}
+		host.style.display = '';
+
+		var self = this;
+		host.appendChild(E('div', { 'class': 'speedtest-history-head' }, [
+			E('span', { 'class': 'speedtest-history-title' }, _('Recent runs')),
+			E('button', {
+				'type':  'button',
+				'class': 'speedtest-history-clear',
+				'aria-label': _('Clear history'),
+				'click': function () {
+					saveHistory([]);
+					self.renderHistory();
+				}
+			}, _('Clear'))
+		]));
+
+		var list = E('ul', { 'class': 'speedtest-history-list' }, []);
+		history.forEach(function (entry) {
+			list.appendChild(E('li', { 'class': 'speedtest-history-item' }, [
+				E('span', { 'class': 'speedtest-history-label' }, entry.label),
+				E('span', { 'class': 'speedtest-history-when' }, fmtAgo(entry.t)),
+				E('span', { 'class': 'speedtest-history-metric speedtest-history-metric-d' },
+					entry.download !== null ? '↓ ' + entry.download.toFixed(0) + ' Mbps' : '↓ —'),
+				E('span', { 'class': 'speedtest-history-metric speedtest-history-metric-u' },
+					entry.upload   !== null ? '↑ ' + entry.upload.toFixed(0)   + ' Mbps' : '↑ —'),
+				E('span', { 'class': 'speedtest-history-metric speedtest-history-metric-l' },
+					entry.latency  !== null ? entry.latency.toFixed(1)         + ' ms'   : '— ms')
+			]));
+		});
+		host.appendChild(list);
 	},
 
 	testLatency: function () {

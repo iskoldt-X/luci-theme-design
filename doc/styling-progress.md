@@ -1589,3 +1589,83 @@ $ grep -nE 'snap\[|key\.split' apply-modal.js   # 确认 separator
 ```
 
 **回滚方式：** `git revert` 该 commit。前置 Step 44 不依赖它，独立可撤。
+
+---
+
+### Step 46 — Speedtest 历史 + label（手动 2.4G/5G 对比）
+
+**时间**：2026-05-23
+**文件**：
+- `htdocs/luci-static/resources/speedtest.js`（+80 行：label select + history persist + renderHistory）
+- `htdocs/luci-static/design/css/features.css`（+100 行：label select 样式 + history strip）
+
+**做了什么：**
+
+第五轮 MVP 把"2.4G vs 5G 对比 + 历史"显式 deferred。本 Step 用"label + history"组合实现 **manual** 对比（自动 SSID 切换从浏览器侧不可能 —— Wi-Fi 是路由器配置不是浏览器动作）。
+
+#### Label select
+
+`.speedtest-actions` 里在 Run button 前加一个 `<select>`：
+
+| Value | Label |
+|---|---|
+| `Wired` | Wired |
+| `5 GHz` | Wi-Fi 5 GHz （默认选中）|
+| `2.4 GHz` | Wi-Fi 2.4 GHz |
+| `Other` | Other |
+
+用户**自己**记得在测之前选当前连接的网络类型。测完结果带 label 入 history。
+
+#### History (localStorage)
+
+`STORAGE_KEY = 'design-speedtest-history-v1'`，存 `{ t, label, latency, jitter, download, upload }`，最多 6 条。
+
+新一次测试完成时 `pushHistory(entry)` → unshift + slice(0, 6)。
+
+#### history strip 渲染
+
+每行紧凑布局：
+
+```
+[label]   [N min ago]   ↓ 487 Mbps   ↑ 95 Mbps   1.2 ms
+[label]   [N min ago]   ↓ 312 Mbps   ↑ 78 Mbps   1.4 ms
+```
+
+CSS grid `minmax(80px, 1fr) auto auto auto auto`，全部 `tabular-nums + mono` —— 用户对比同位置数字时眼睛不用跳。
+
+`↓` 用 accent-600 / `↑` 用 info 蓝 / latency 用 muted —— 颜色编码 vs 阅读密度。
+
+#### 怎么对比 2.4G vs 5G
+
+用户的工作流：
+
+1. 把笔记本连 5 GHz Wi-Fi → label 选 "5 GHz" → Run
+2. 切换到 2.4 GHz Wi-Fi → label 选 "2.4 GHz" → Run
+3. 在 history strip 里直观对比
+
+没有花哨的 "side-by-side mode"，但是**够用**且诚实：浏览器无法替你切 Wi-Fi。
+
+#### Clear 按钮
+
+History head 右侧有 `Clear` 按钮，清 localStorage + 重渲染（即时 hide）。
+
+#### Honest 设计
+
+- localStorage 仅当前浏览器，不跨设备同步（同 Step 44 rename 限制）
+- 「2.4G/5G 对比」不是自动化 — 是 manual workflow 友好化
+- 历史项不显示 jitter（节省横向空间），但 detail 仍存在 entry 里供后续 UI 使用
+
+**没有破坏的事：**
+
+- ❌ Run test 流程（latency → download → upload）零改动
+- ❌ `/cgi-bin/design/{ping,download,upload}` CGI 协议零改动
+- ❌ 测试参数（PING_COUNT / DOWNLOAD_BYTES / UPLOAD_BYTES / TIMEOUT_MS）零改动
+- ❌ 失败时不写 history（避免污染）
+
+**验证：**
+
+```bash
+$ node --check speedtest.js     ✅
+$ CSS braces 213 == 213         ✅
+$ grep -rlP '\x01' (no SOH)     ✅
+```
