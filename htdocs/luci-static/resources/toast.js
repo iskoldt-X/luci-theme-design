@@ -93,14 +93,31 @@ return baseclass.extend({
 
 	_tryIntercept: function() {
 		var self = this;
-		if (typeof ui === 'undefined' || !ui.addNotification) {
+		// Step 55: probe both the require-local `ui` and the LuCI singleton
+		// `L.ui`. In LuCI 26.x they SHOULD reference the same object, but
+		// the user's probe couldn't see `window.ui` directly, so we use
+		// `L.ui` as the authoritative reference. Wrap both bindings to be
+		// safe against future LuCI versions diverging the two.
+		var localUi = (typeof ui !== 'undefined') ? ui : null;
+		var globalUi = (window.L && window.L.ui) ? window.L.ui : null;
+		// Pick whichever has addNotification ready
+		var primary = (localUi && localUi.addNotification) ? localUi
+		            : (globalUi && globalUi.addNotification) ? globalUi
+		            : null;
+
+		if (!primary) {
 			if ((self._interceptAttempts = (self._interceptAttempts || 0) + 1) > 40) return;
 			setTimeout(L.bind(self._tryIntercept, self), 250);
 			return;
 		}
-		// Idempotent — if interceptLuCI re-runs after a hot-reload or
-		// stuck-promise race, don't double-wrap.
-		if (ui.addNotification && ui.addNotification.__designWrapped) return;
+		if (primary.addNotification && primary.addNotification.__designWrapped) {
+			// Already wrapped — but still apply to the other ref if they diverge
+			if (globalUi && globalUi !== primary && globalUi.addNotification &&
+			    !globalUi.addNotification.__designWrapped) {
+				globalUi.addNotification = primary.addNotification;
+			}
+			return;
+		}
 
 		var wrapped = function(title, contents) {
 			// Type detection from variadic classes
@@ -135,7 +152,28 @@ return baseclass.extend({
 			return E('div', { 'class': 'cbi-notification-stub', 'style': 'display:none' });
 		};
 		wrapped.__designWrapped = true;
-		ui.addNotification = wrapped;
+
+		// Step 55: assign to BOTH refs. In LuCI 26.x both point to the same
+		// object so the second assignment is a no-op, but harmless.
+		primary.addNotification = wrapped;
+		if (globalUi && globalUi !== primary) {
+			globalUi.addNotification = wrapped;
+		}
+		if (localUi && localUi !== primary && localUi !== globalUi) {
+			localUi.addNotification = wrapped;
+		}
+
+		// Step 55: explicit success log — user's probe showed
+		// `toastWrapped: false` from window.ui check, but that was a
+		// misleading test (window.ui != L.ui in LuCI 26.x). This log
+		// gives us unambiguous "wrap landed" confirmation in DevTools.
+		if (console && console.log) {
+			console.log('toast: ui.addNotification wrap installed', {
+				wrappedLocal:  !!(localUi && localUi.addNotification && localUi.addNotification.__designWrapped),
+				wrappedGlobal: !!(globalUi && globalUi.addNotification && globalUi.addNotification.__designWrapped),
+				sameRef:       localUi === globalUi
+			});
+		}
 	},
 
 	show: function(type, message, opts) {
