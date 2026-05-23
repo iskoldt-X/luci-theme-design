@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  port_up.svg — active ethernet port indicator
+  Round 32 / Step 123 override for upstream LuCI icon
+  Path: /luci-static/resources/icons/port_up.svg (file-override via dev-sync)
+  Style: Lucide-ish RJ45 jack outline + filled accent dot for "live"
+  Color hardcoded #10b981 (success green) since <img> doesn't inherit CSS color
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
+     fill="none" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="6" y="6" width="12" height="14" rx="1.5"/>
+  <path d="M9 6V4h6v2"/>
+  <circle cx="12" cy="13" r="1.75" fill="#10b981" stroke="none"/>
+</svg>

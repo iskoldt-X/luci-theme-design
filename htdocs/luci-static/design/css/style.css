@@ -3195,6 +3195,39 @@ td > .ifacebadge,
 	color: var(--color-text);
 }
 
+/* Round 32 / Step 123 — file-override icons for ifacebox port indicators
+ *
+ * Upstream LuCI emits <img src="/luci-static/resources/icons/port_up.svg">
+ * for the chip's status icon. dev-sync.sh L160-167 syncs
+ *   htdocs/luci-static/resources/ → /www/luci-static/resources/
+ * WITHOUT --delete, so files we put at htdocs/luci-static/resources/icons/
+ * occupy the same path on the router as upstream's PNG/SVG icons and
+ * replace them at sync time. Zero JS, zero DOM, zero LuCI patching.
+ *
+ * Our SVGs hardcode stroke="#10b981" (success green) or "#a1a1aa" (zinc-400
+ * muted) because <img>-loaded SVGs don't inherit the surrounding CSS color
+ * cascade (each img is a sandboxed sub-document). CSS here just bumps
+ * brightness in dark mode where the green stroke can look a touch dim
+ * against the #18181b card bg.
+ *
+ * If upstream uses .png at these names instead of .svg on a given build,
+ * the override is a no-op — upstream PNG continues to display. Follow-up
+ * if user reports remaining "creepy gray chip" sightings: ship PNG
+ * versions of the same icons alongside the .svg.
+ */
+img[src*="/luci-static/resources/icons/port_"],
+img[src*="/luci-static/resources/icons/ethernet"],
+img[src*="/luci-static/resources/icons/wifi"] {
+	width: 32px;
+	height: 32px;
+}
+
+html[data-theme="dark"] img[src*="/luci-static/resources/icons/port_"],
+html[data-theme="dark"] img[src*="/luci-static/resources/icons/ethernet"],
+html[data-theme="dark"] img[src*="/luci-static/resources/icons/wifi"] {
+	filter: brightness(1.15);
+}
+
 .cbi-image-button {
 	margin-left: .5rem;
 }
