@@ -125,6 +125,24 @@
     --color-danger-bg:  #fee2e2;
     --color-info-bg:    #dbeafe;
 
+    /* ─── 1.10b Chart palette (Step 110, Round 26) ──────────────────
+       Identifier tokens for multi-line chart series. Semantically
+       NEUTRAL — chart-1 doesn't mean "success", it means "the first
+       series" (whatever it happens to be: 1-min load, inbound,
+       UDP, etc.). The 4 values are color-balanced for both light
+       and dark themes (dark mode lifts brightness +0.1 lightness).
+       Currently used by:
+         - LuCI realtime graphs polyline override (this file, §realtime)
+         - design tile sparklines via stroke="var(--chart-1)" (sparkline.js)
+       Adding new chart consumers should use these tokens, not the
+       semantic --color-success/-warning palette which carries
+       "is this good or bad?" meaning that doesn't apply to a
+       1m/5m/15m load average plot. */
+    --chart-1: #10b981;
+    --chart-2: #3b82f6;
+    --chart-3: #f59e0b;
+    --chart-4: #8b5cf6;
+
     /* ─── 1.11 阴影（浅色） ─── */
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
@@ -420,6 +438,12 @@ html[data-theme="dark"] {
     --color-warning-bg: rgba(251, 191, 36, 0.12);
     --color-danger-bg:  rgba(248, 113, 113, 0.12);
     --color-info-bg:    rgba(96, 165, 250, 0.12);
+
+    /* Dark-mode chart palette — same hues, +brightness for contrast on dark bg */
+    --chart-1: #34d399;
+    --chart-2: #60a5fa;
+    --chart-3: #fbbf24;
+    --chart-4: #a78bfa;
 
     --shadow-xs: none;
     --shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.05);
@@ -4707,3 +4731,65 @@ td.cbi-button, .cbi-button-apply,
    The separate <link> approach is spec-compliant, parallel-loadable,
    and faster. The cascade order is preserved because the link tag
    in header.htm sits AFTER the style.css link. */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Step 110 (Round 26): LuCI realtime graphs modernization
+ *
+ * /admin/status/realtime/{load,bandwidth,connections} all use LuCI's
+ * base `LuCI.ui.GraphImage` component, which generates SVG with inline
+ * CSS-named colors hardcoded in its JS:
+ *   Load        — rgb(255,0,0) / rgb(255,102,0) / rgb(255,170,0)
+ *   Bandwidth   — rgb(0,0,255) / rgb(0,128,0)
+ *   Connections — similar 3 deep colours
+ * Stroke 1px, fill-opacity 0.4 (muddy), grid lines rgb(0,0,0) 0.1px
+ * (invisible on dark, distracting on light). Total effect: looks like
+ * a 2007 munin / cacti graph.
+ *
+ * We patch in CSS only (no JS fork) — !important defeats the inline
+ * style attributes. Curves use --chart-1..--chart-4 palette via
+ * nth-of-type so consistency persists across the 3 sub-tabs.
+ *
+ * Skipped (out of scope, deferred):
+ *   - Bezier smoothing → polyline → path conversion (needs JS fork)
+ *   - drop-shadow glow filter (taste-dependent)
+ *   - hover crosshair / tooltip (LuCI base behavior was disabled for
+ *     reasons unknown, leave alone)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+[class*="node-admin-status-realtime"] #view svg polyline {
+    stroke-width: 2px !important;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    /* Lowered from LuCI's 0.4 to 0.15 — gives a soft area-fill effect
+       that doesn't compete with the line itself for visual weight. */
+    fill-opacity: 0.15 !important;
+    transition: stroke 200ms var(--ease-out);
+}
+
+[class*="node-admin-status-realtime"] #view svg polyline:nth-of-type(1) {
+    stroke: var(--chart-1) !important;
+    fill:   var(--chart-1) !important;
+}
+[class*="node-admin-status-realtime"] #view svg polyline:nth-of-type(2) {
+    stroke: var(--chart-2) !important;
+    fill:   var(--chart-2) !important;
+}
+[class*="node-admin-status-realtime"] #view svg polyline:nth-of-type(3) {
+    stroke: var(--chart-3) !important;
+    fill:   var(--chart-3) !important;
+}
+[class*="node-admin-status-realtime"] #view svg polyline:nth-of-type(4) {
+    stroke: var(--chart-4) !important;
+    fill:   var(--chart-4) !important;
+}
+
+/* Grid lines: LuCI draws them as <line> with stroke rgb(0,0,0) 0.1px
+   — invisible on dark mode, faintly distracting on light. Replace
+   with our subtle border token + dashed pattern for a "graph paper"
+   feel that recedes behind the data. */
+[class*="node-admin-status-realtime"] #view svg line {
+    stroke: var(--color-border-subtle) !important;
+    stroke-width: 1px !important;
+    stroke-dasharray: 3 3;
+    opacity: 0.7;
+}
