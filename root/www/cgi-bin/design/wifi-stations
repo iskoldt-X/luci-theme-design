@@ -1,0 +1,82 @@
+#!/bin/sh
+# Theme-provided CGI: Wi-Fi station data from iwinfo (via ubus).
+#
+# Returns JSON:
+#   {
+#     "available": true|false,
+#     "interfaces": {
+#       "wlan0": {
+#         "info":      { ssid, channel, frequency, mode, bitrate, ... },
+#         "assoclist": { results: [ { mac, signal, noise, rx, tx, ... }, ... ] }
+#       },
+#       "wlan1": { ... }
+#     }
+#   }
+#
+# When the router has no Wi-Fi or iwinfo isn't installed, returns
+# `{"available":false,"interfaces":{}}` — frontend treats every client
+# as wired in that case.
+#
+# Why not return a flat station list: keeping the per-interface
+# nesting gives the frontend channel + mode + frequency once per
+# interface (not duplicated per station), saves a few KB per
+# refresh on busy networks. JS does the mac→station lookup.
+#
+# Round 17 / Step 94 (2026-05-23). Companion to /cgi-bin/design/temp,
+# /cgi-bin/design/cpustat, /cgi-bin/design/devstats. Same install
+# pattern: chmod +x via Makefile + dev-sync.
+
+echo "Content-Type: application/json"
+echo "Cache-Control: no-store"
+echo ""
+
+# Probe: does ubus + iwinfo even exist on this device?
+if ! command -v ubus >/dev/null 2>&1; then
+	echo '{"available":false,"interfaces":{},"reason":"no-ubus"}'
+	exit 0
+fi
+
+# `ubus call iwinfo devices` returns { "devices": ["wlan0", "wlan1"] }
+# or `Command failed: Not found` if the iwinfo ubus module isn't loaded
+# (router has no Wi-Fi hardware, or the iwinfo package is missing).
+DEVICES_JSON=$(ubus call iwinfo devices 2>/dev/null)
+if [ -z "$DEVICES_JSON" ]; then
+	echo '{"available":false,"interfaces":{},"reason":"no-iwinfo"}'
+	exit 0
+fi
+
+# jsonfilter is OpenWrt's tiny JSON extractor (busybox-friendly).
+# `-e '@.devices[*]'` emits one line per array element.
+DEVICES=$(echo "$DEVICES_JSON" | jsonfilter -e '@.devices[*]' 2>/dev/null)
+if [ -z "$DEVICES" ]; then
+	echo '{"available":true,"interfaces":{}}'
+	exit 0
+fi
+
+# Build the interfaces object by emitting "name":{ info, assoclist }
+# pairs separated by commas. We let ubus emit the inner JSON verbatim —
+# no jsonfilter needed for the per-device payload, just stitching.
+printf '{"available":true,"interfaces":{'
+
+FIRST=1
+for dev in $DEVICES; do
+	# Some sanity on the device name to avoid command injection — ubus
+	# device names are kernel-assigned (wlanN, phy-apN, etc.) so only
+	# allow [A-Za-z0-9_-].
+	case "$dev" in
+		*[!A-Za-z0-9_-]*) continue ;;
+	esac
+
+	INFO=$(ubus call iwinfo info "{\"device\":\"$dev\"}" 2>/dev/null)
+	ASSOC=$(ubus call iwinfo assoclist "{\"device\":\"$dev\"}" 2>/dev/null)
+
+	# Default to empty object if ubus failed for either call
+	: "${INFO:={}}"
+	: "${ASSOC:={}}"
+
+	[ $FIRST -eq 0 ] && printf ','
+	printf '"%s":{"info":%s,"assoclist":%s}' "$dev" "$INFO" "$ASSOC"
+	FIRST=0
+done
+
+printf '}}\n'

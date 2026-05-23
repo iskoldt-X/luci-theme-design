@@ -134,6 +134,76 @@ function relativeAge(ageSec) {
 	return Math.floor(ageSec / 86400) + 'd';
 }
 
+// ── Wi-Fi station data (Step 94, Round 17) ───────────────────────────────────
+// Fetches the theme's /cgi-bin/design/wifi-stations CGI which shells out to
+// `ubus call iwinfo {devices,info,assoclist}` and returns:
+//   { available: true|false, interfaces: { wlanN: { info, assoclist } } }
+// On routers without Wi-Fi (the user's box is one) the CGI returns
+// {available:false} and we just treat everything as wired — current Step 93
+// behaviour, no regression.
+function fetchWifiStations() {
+	return fetch('/cgi-bin/design/wifi-stations', { cache: 'no-store' })
+		.then(function (r) { return r.ok ? r.json() : null; })
+		.catch(function () { return null; });
+}
+
+// Flatten the per-interface assoclist responses into a single
+// MAC → { iface, info, station } map for O(1) lookup by buildRow().
+// info carries per-interface fields (channel, frequency, mode);
+// station carries per-client fields (signal, noise, rx.rate, tx.rate, mhz).
+function buildStationMap(wifiData) {
+	var map = {};
+	if (!wifiData || !wifiData.available || !wifiData.interfaces) return map;
+	Object.keys(wifiData.interfaces).forEach(function (iface) {
+		var data = wifiData.interfaces[iface] || {};
+		var info = data.info || {};
+		var list = (data.assoclist && data.assoclist.results) || [];
+		list.forEach(function (s) {
+			var mac = (s.mac || '').toUpperCase();
+			if (mac) map[mac] = { iface: iface, info: info, station: s };
+		});
+	});
+	return map;
+}
+
+// dBm → visual signal-bars modifier class. Three tiers matches the
+// CSS scaffolding (Step 93). >=-55 strong (no modifier), -55..-65
+// medium (dim 4th bar), <-65 weak (yellow first 2, dim 3-4).
+function signalToBarsClass(dBm) {
+	if (dBm == null || !isFinite(dBm)) return '';
+	if (dBm >= -55) return '';
+	if (dBm >= -65) return 'devices-sig-bars-medium';
+	return 'devices-sig-bars-weak';
+}
+
+// Frequency (MHz) → human band label. 2.4 GHz APs report 2412–2484,
+// 5 GHz report 5180–5825, 6 GHz report 5955+ on Wi-Fi 6E.
+function formatBand(freqMHz) {
+	if (!freqMHz || !isFinite(freqMHz)) return '';
+	if (freqMHz < 3000) return '2.4 GHz';
+	if (freqMHz < 6000) return '5 GHz';
+	return '6 GHz';
+}
+
+// Compose "Wi-Fi 5 GHz · ch 149 · 80 MHz" from iwinfo info + station data.
+// ch comes from the iface's info (one channel per radio).
+// width comes from the station's rx.mhz (per-client negotiated width).
+function formatWifiConnection(info, station) {
+	var parts = [];
+	var band = formatBand(info.frequency);
+	if (band) parts.push(band);
+	if (info.channel != null)                  parts.push('ch ' + info.channel);
+	if (station && station.rx && station.rx.mhz) parts.push(station.rx.mhz + ' MHz');
+	return parts.length ? 'Wi-Fi · ' + parts.join(' · ') : 'Wi-Fi';
+}
+
+// Pretty-print iwinfo's rx/tx rate (in Kbps) as Mbps for the detail row.
+function formatRateKbps(kbps) {
+	if (kbps == null || !isFinite(kbps) || kbps <= 0) return '—';
+	if (kbps < 1000) return kbps + ' Kbps';
+	return Math.round(kbps / 1000) + ' Mbps';
+}
+
 // ── Custom names (Step 44) — localStorage persistence ────────────────────────
 // Best-effort: lost on browser clear, doesn't sync across browsers / devices.
 // UCI persistence is a follow-up (would need a new UCI section + reload-safe
@@ -170,6 +240,7 @@ return baseclass.extend({
 		this.iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design') + '/icons.svg';
 		this.expanded     = {};                   // mac → bool
 		this.customNames  = loadCustomNames();    // mac → string
+		this.stations     = {};                   // mac → { iface, info, station } (Step 94)
 		this.tryInject();
 	},
 
@@ -219,18 +290,31 @@ return baseclass.extend({
 
 	refresh: function () {
 		var self = this;
-		getDHCPLeases().then(function (data) {
-			var leases = (data && (data.dhcp_leases || data['dhcp_leases'])) || [];
-			// Some LuCI versions return v4/v6 separately
-			if (data && data.dhcp6_leases) leases = leases.concat(data.dhcp6_leases);
+		// Step 94 (Round 17): parallel fetch DHCP leases + Wi-Fi stations.
+		// Wi-Fi data is optional — its absence falls through to "Wired" pill
+		// rendering, so we wrap its fetch in .catch(null) so a missing CGI
+		// or network glitch doesn't blank the whole list.
+		Promise.all([
+			getDHCPLeases().then(function (d) { return d; }, function () { return null; }),
+			fetchWifiStations()
+		]).then(function (results) {
+			var leasesData = results[0];
+			var wifiData   = results[1];
+
+			if (!leasesData) {
+				var rowsEl = document.getElementById('devices-rows');
+				if (!rowsEl) return;
+				rowsEl.innerHTML = '';
+				rowsEl.appendChild(E('div', { 'class': 'devices-empty' },
+					_('Unable to read DHCP leases')));
+				return;
+			}
+
+			var leases = (leasesData.dhcp_leases || leasesData['dhcp_leases']) || [];
+			if (leasesData.dhcp6_leases) leases = leases.concat(leasesData.dhcp6_leases);
+
+			self.stations = buildStationMap(wifiData);
 			self.render(leases);
-		}).catch(function () {
-			// Step 93 (Round 17): container renamed devices-list → devices-rows
-			// when the inner DOM moved from <ul>/<li> to grid <div> rows.
-			var rowsEl = document.getElementById('devices-rows');
-			if (!rowsEl) return;
-			rowsEl.innerHTML = '';
-			rowsEl.appendChild(E('div', { 'class': 'devices-empty' }, _('Unable to read DHCP leases')));
 		});
 	},
 
@@ -288,14 +372,27 @@ return baseclass.extend({
 			|| l.hostname
 			|| (vendor ? vendor + ' ' + _('device') : _('Unknown device'));
 
-		// Step 93 (Round 17): Wi-Fi signal data is deferred to a follow-up
-		// CGI (Step 94+, reading iwinfo via ubus). Until then, every device
-		// renders the "Wired" pill — on routers that aren't access points
-		// this is the truth; on Wi-Fi routers it's a conservative fallback
-		// that will be upgraded to live signal bars when the CGI lands.
-		var sigCell = E('span', { 'class': 'devices-row-sig' }, [
-			E('span', { 'class': 'devices-sig-wired' }, _('Wired'))
-		]);
+		// Step 93/94 (Round 17): if this MAC appears in the Wi-Fi station
+		// map (built from /cgi-bin/design/wifi-stations on refresh), render
+		// signal-bars + dBm. Otherwise the client is wired or the router
+		// has no Wi-Fi — show the "Wired" pill. The map lookup is O(1) so
+		// rendering N rows stays linear.
+		var wifi = self.stations && self.stations[mac];
+		var sigCell;
+		if (wifi) {
+			var dBm = wifi.station && wifi.station.signal;
+			var barsClass = ('devices-sig-bars ' + signalToBarsClass(dBm)).trim();
+			sigCell = E('span', { 'class': 'devices-row-sig' }, [
+				E('span', { 'class': barsClass }, [
+					E('span'), E('span'), E('span'), E('span')
+				]),
+				E('span', { 'class': 'devices-sig-db' }, (dBm != null ? dBm + 'dBm' : ''))
+			]);
+		} else {
+			sigCell = E('span', { 'class': 'devices-row-sig' }, [
+				E('span', { 'class': 'devices-sig-wired' }, _('Wired'))
+			]);
+		}
 
 		var seenCell = E('span', {
 			'class': 'devices-row-seen ' + (seen.stale ? 'devices-seen-stale' : 'devices-seen-online')
@@ -330,18 +427,9 @@ return baseclass.extend({
 			// visual collapse/expand. Cheaper than rebuilding rows on each
 			// click.
 			E('div', { 'class': 'devices-row-detail' }, [
-				E('div', { 'class': 'devices-detail-grid' }, [
-					self.detailCell(_('Full IP'),    l.ipaddr || '—', /*mono*/ true),
-					self.detailCell(_('MAC'),        mac || '—',      /*mono*/ true),
-					self.detailCell(_('Vendor'),     vendor ? (vendor + ' (' + mac.substr(0, 8) + ')') : _('Unknown')),
-					self.detailCell(_('Type'),       type.label),
-					// Step 93: Connection placeholder — Step 94 (Wi-Fi CGI)
-					// will replace with "Wi-Fi 5GHz · ch 149 · 80MHz" etc.
-					self.detailCell(_('Connection'), _('Wired (Wi-Fi data pending iwinfo CGI)')),
-					self.detailCell(_('Lease expires'), l.expires
-						? new Date(l.expires * 1000).toLocaleString()
-						: _('static / no expiry'))
-				]),
+				E('div', { 'class': 'devices-detail-grid' },
+					self.detailCellsFor(l, mac, vendor, type, wifi)
+				),
 				E('div', { 'class': 'devices-actions' }, [
 					self.actionBtn('action',   _('Rename'),    function () { self.actionRename(mac, displayName); }),
 					self.actionBtn('action',   _('Whitelist'), function () { toastSafe('info',    _('Whitelist is not yet implemented')); }),
@@ -361,6 +449,41 @@ return baseclass.extend({
 			E('dt', {}, label),
 			E('dd', mono ? { 'class': 'mono' } : {}, value)
 		]);
+	},
+
+	// Step 94 (Round 17): build the variable-length cell list for the
+	// detail grid. Wired clients get 6 cells; Wi-Fi clients get 7 (extra
+	// Rate row showing rx/tx Mbps). Lease-expires always last so the
+	// grid's auto-fit wraps the optional Rate cell into the natural slot.
+	detailCellsFor: function (lease, mac, vendor, type, wifi) {
+		var cells = [
+			this.detailCell(_('Full IP'),    lease.ipaddr || '—', /*mono*/ true),
+			this.detailCell(_('MAC'),        mac || '—',          /*mono*/ true),
+			this.detailCell(_('Vendor'),     vendor
+				? (vendor + ' (' + mac.substr(0, 8) + ')')
+				: _('Unknown')),
+			this.detailCell(_('Type'),       type.label)
+		];
+
+		if (wifi) {
+			cells.push(this.detailCell(_('Connection'),
+				formatWifiConnection(wifi.info, wifi.station)));
+			var rxKbps = wifi.station && wifi.station.rx && wifi.station.rx.rate;
+			var txKbps = wifi.station && wifi.station.tx && wifi.station.tx.rate;
+			if (rxKbps || txKbps) {
+				cells.push(this.detailCell(_('Rate'),
+					_('Rx') + ' ' + formatRateKbps(rxKbps) + ' · ' +
+					_('Tx') + ' ' + formatRateKbps(txKbps)));
+			}
+		} else {
+			cells.push(this.detailCell(_('Connection'), _('Wired')));
+		}
+
+		cells.push(this.detailCell(_('Lease expires'), lease.expires
+			? new Date(lease.expires * 1000).toLocaleString()
+			: _('static / no expiry')));
+
+		return cells;
 	},
 
 	// Step 93: tiny button factory — keeps the verb (Rename / Limit / …)
