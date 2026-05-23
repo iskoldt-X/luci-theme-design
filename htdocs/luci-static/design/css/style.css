@@ -2918,19 +2918,28 @@ body.modal-overlay-active #modal_overlay {
 	text-align: center;
 }
 
+/* Round 32 / Step 122 — .ifacebadge token-ize
+ *
+ * 旧:padding 像素值 + 拟物 box-shadow(inset 0 1px 0 rgba(255,255,255,.2))
+ * 跟 .ifacebox 是同套拟物高光,在 dark mode 下顶部白线。删 shadow,
+ * 补背景 + border + radius,跟新的 ifacebox 视觉一致。 */
 .ifacebadge {
 	display: inline-flex;
 	gap: .2rem;
-	padding: .5rem .8rem;
-	box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), 0 1px 2px rgba(0, 0, 0, .05);
+	padding: var(--space-2) var(--space-3);
+	background: var(--color-surface-1);
+	color: var(--color-text);
+	border: 1px solid var(--color-border-subtle);
+	border-radius: var(--radius-sm);
 }
 
 td > .ifacebadge,
 .td > .ifacebadge {
 	font-size: .8rem;
 	background-color: var(--activecolor);
-	color: white;
-	border-radius: 8px;
+	color: var(--color-text-onaccent);
+	border-color: transparent;
+	border-radius: var(--radius-sm);
 }
 
 .ifacebadge > em,
@@ -3198,7 +3207,7 @@ td > .ifacebadge,
 .zonebadge .ifacebadge {
 	margin: .1rem .2rem;
 	padding: .2rem .3rem;
-	border: thin solid #6c6c6c;
+	border: 1px solid var(--color-border-subtle);
 }
 
 .zonebadge > input[type="text"] {
@@ -3211,6 +3220,45 @@ td > .ifacebadge,
 .zonebadge > strong {
 	display: inline-block;
 	margin: 0 .2rem;
+}
+
+/* Round 32 / Step 122 — override LuCI 上游 inline style HTML4 命名色
+ *
+ * Firewall / Network status / Zone overview 视图把 zone 颜色直接写在 inline
+ * style 上:
+ *   <span class="zonebadge" style="background-color: #90F090">LAN</span>
+ *   <span class="zonebadge" style="background-color: #F09090">WAN</span>
+ * (LuCI 老版本也用 named lightgreen / lightcoral。)
+ *
+ * 这些 1990s X11 命名色饱和度极高,在 dark mode 下高 luminance 抢戏。
+ * 属性选择器 + !important 是唯一能 win 过 inline style 的办法(class
+ * 选择器优先级敌不过 inline,无论加多少 !important)。
+ *
+ * 覆盖四种常见格式:named / hex / rgb()-with-space / rgb()-no-space。
+ * "i" flag 让属性匹配大小写不敏感(LightGreen / lightgreen 都中)。
+ */
+.zonebadge[style*="lightgreen" i],
+.zonebadge[style*="#90ee90" i],
+.zonebadge[style*="#90f090" i],
+.zonebadge[style*="rgb(144, 238, 144)"],
+.zonebadge[style*="rgb(144,238,144)"],
+.zonebadge[style*="rgb(144, 240, 144)"],
+.zonebadge[style*="rgb(144,240,144)"] {
+	background: var(--color-success-bg) !important;
+	color: var(--color-success) !important;
+	border: 1px solid var(--color-success) !important;
+}
+
+.zonebadge[style*="lightcoral" i],
+.zonebadge[style*="#f08080" i],
+.zonebadge[style*="#f09090" i],
+.zonebadge[style*="rgb(240, 128, 128)"],
+.zonebadge[style*="rgb(240,128,128)"],
+.zonebadge[style*="rgb(240, 144, 144)"],
+.zonebadge[style*="rgb(240,144,144)"] {
+	background: var(--color-danger-bg) !important;
+	color: var(--color-danger) !important;
+	border: 1px solid var(--color-danger) !important;
 }
 
 .cbi-value-field .cbi-input-checkbox,
@@ -3229,7 +3277,7 @@ td > .ifacebadge,
 .cbi-value-field > ul > li .ifacebadge {
 	margin-top: -.5rem;
 	margin-left: .4rem;
-	background-color: #eee;
+	background-color: var(--color-surface-1);
 }
 
 .cbi-section-table-row > .cbi-value-field .cbi-dropdown {
