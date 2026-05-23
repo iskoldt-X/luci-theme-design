@@ -3228,6 +3228,36 @@ html[data-theme="dark"] img[src*="/luci-static/resources/icons/wifi"] {
 	filter: brightness(1.15);
 }
 
+/* Round 33 / Step 125 — dark mode invert for upstream LuCI hardcoded-black
+ *   icons (P0 — Chrome-Claude reported overview tiles essentially invisible)
+ *
+ * luci-app-dockerman ships SVG icons with fill="#000000" hardcoded:
+ *   /luci-static/resources/dockerman/containers.svg
+ *   /luci-static/resources/dockerman/images.svg
+ *   /luci-static/resources/dockerman/networks.svg
+ *   /luci-static/resources/dockerman/volumes.svg
+ *   /luci-static/resources/dockerman/start.svg / stop.svg / restart.svg
+ *
+ * On dark mode the black-on-#18181b card gives contrast ~1.1:1 (WCAG
+ * needs ≥3:1 for UI graphics). Icons are effectively invisible.
+ *
+ * Fix: invert(0.85) + brightness(1.1) only in dark mode. invert(1) would
+ * push to pure white which feels harsh on flat dark cards; 0.85 keeps a
+ * hint of weight so multi-tone icons (Images store-front, Networks
+ * topology) preserve depth.
+ *
+ * Selector NOT extended to our own Step 123 icons at /resources/icons/
+ * (those have stroke #10b981 which would invert to pink #ef467e).
+ * Limited strictly to /dockerman/ paths to avoid collateral.
+ */
+html[data-theme="dark"] img[src*="/luci-static/resources/dockerman/"],
+html[data-theme="dark"] img[src*="dockerman/containers"],
+html[data-theme="dark"] img[src*="dockerman/images"],
+html[data-theme="dark"] img[src*="dockerman/networks"],
+html[data-theme="dark"] img[src*="dockerman/volumes"] {
+	filter: invert(0.85) brightness(1.1);
+}
+
 .cbi-image-button {
 	margin-left: .5rem;
 }
