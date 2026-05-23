@@ -1701,6 +1701,224 @@ td > table > tbody > tr > td,
     background-color: #dc2626 !important;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Step 106 (Round 22): preview-catalog button + input variants
+ *
+ * doc/style-preview.html §Components defines the canonical design-system
+ * vocabulary: .btn-primary / .btn-secondary / .btn-ghost / .btn-danger /
+ * .btn-link, with .btn-sm / .btn-lg size modifiers, plus .input / .toggle /
+ * .input-group widgets. The LuCI `.cbi-button-*` rules above keep working
+ * unchanged — these classes are NEW utility hooks for any non-LuCI-emitted
+ * markup our JS modules (devices.js, cmdk.js, …) want to use directly.
+ *
+ * Why both class systems coexist: LuCI's Lua-side view code emits cbi-
+ * button-* on its own; we can't rename those without rewriting LuCI core.
+ * The .btn-* aliases give us the cleaner preview API on the surface we
+ * DO control — newly-emitted UI from theme JS, README examples, future
+ * standalone widgets — without forcing a flag-day rewrite.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+/* —— Primary（主操作）—— accent green, same as cbi-button-positive */
+.btn-primary {
+    background-color: var(--color-accent-500);
+    color: var(--color-text-onaccent);
+    border-color: transparent;
+}
+.btn-primary:hover {
+    background-color: var(--color-accent-600);
+    border-color: transparent;
+    color: var(--color-text-onaccent);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+/* —— Secondary（次操作）—— surface-0 bg with border, default .btn look */
+.btn-secondary {
+    background-color: var(--color-surface-0);
+    color: var(--color-text);
+    border-color: var(--color-border-default);
+}
+.btn-secondary:hover {
+    background-color: var(--color-surface-1);
+    border-color: var(--color-border-strong);
+    color: var(--color-text);
+}
+
+/* —— Ghost（轻量按钮）—— transparent, hover lifts to surface-1 */
+.btn-ghost {
+    background-color: transparent;
+    color: var(--color-text-muted);
+    border-color: transparent;
+}
+.btn-ghost:hover {
+    background-color: var(--color-surface-1);
+    color: var(--color-text);
+    border-color: transparent;
+}
+
+/* —— Danger（危险操作）—— red, same as cbi-button-negative */
+.btn-danger {
+    background-color: var(--color-danger);
+    color: #fff;
+    border-color: transparent;
+}
+.btn-danger:hover {
+    background-color: #dc2626;
+    border-color: transparent;
+    color: #fff;
+}
+
+/* —— Link（文字链接式）—— accent text, no chrome, underline on hover.
+       Distinct from LuCI's .cbi-button-link which is rendered as a
+       solid blue action button (see line ~1659 above). Different name
+       avoids the collision. */
+.btn-link {
+    background-color: transparent;
+    color: var(--color-accent-600);
+    border-color: transparent;
+    padding: 0;
+    min-height: auto;
+}
+.btn-link:hover {
+    background-color: transparent;
+    border-color: transparent;
+    text-decoration: underline;
+    /* keep accent-600 hover same color — text-decoration is the signal */
+    transform: none;
+    box-shadow: none;
+}
+
+/* —— Size modifiers —— */
+.btn-sm {
+    padding: var(--space-1) var(--space-3);
+    min-height: 28px;
+    font-size: var(--text-xs);
+}
+.btn-lg {
+    padding: var(--space-3) var(--space-5);
+    min-height: 44px;
+    font-size: var(--text-base);
+}
+
+/* ─── Input — preview-catalog rule, with unified focus ring shared
+       between the new .input class and existing cbi-input-text family ─── */
+.input,
+.cbi-input-text,
+.cbi-input-password {
+    width: 100%;
+    background: var(--color-surface-1);
+    color: var(--color-text);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    font-family: inherit;
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    min-height: 40px;
+    transition:
+        border-color var(--motion-fast) var(--ease-out),
+        box-shadow var(--motion-fast) var(--ease-out),
+        background var(--motion-fast) var(--ease-out);
+}
+.input::placeholder,
+.cbi-input-text::placeholder,
+.cbi-input-password::placeholder {
+    color: var(--color-text-subtle);
+}
+.input:hover,
+.cbi-input-text:hover,
+.cbi-input-password:hover {
+    border-color: var(--color-border-strong);
+}
+.input:focus,
+.cbi-input-text:focus,
+.cbi-input-password:focus {
+    outline: none;
+    border-color: var(--color-accent-500);
+    box-shadow: var(--shadow-focus);
+    background: var(--color-surface-0);
+}
+
+/* ─── Toggle switch (iOS-style pill). Apply to input[type="checkbox"].
+       LuCI doesn't emit .toggle on its own — this is for our own widgets
+       or for future markup. Falls back to native checkbox appearance if
+       the .toggle class isn't applied. ─── */
+.toggle {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 44px;
+    height: 24px;
+    border-radius: var(--radius-pill);
+    background: var(--color-surface-2);
+    position: relative;
+    cursor: pointer;
+    transition: background var(--motion-fast) var(--ease-out);
+    border: 0;
+    flex-shrink: 0;
+    margin: 0;
+}
+.toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--motion-fast) var(--ease-out);
+}
+.toggle:checked {
+    background: var(--color-accent-500);
+}
+.toggle:checked::after {
+    transform: translateX(20px);
+}
+.toggle:focus-visible {
+    box-shadow: var(--shadow-focus);
+    outline: none;
+}
+
+/* ─── Input-group with leading icon + optional trailing button.
+       Used by cmdk-search-icon already, exposing as a reusable class. ─── */
+.input-group {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.input-group .leading,
+.input-group svg.leading {
+    position: absolute;
+    left: var(--space-3);
+    width: 16px;
+    height: 16px;
+    color: var(--color-text-subtle);
+    pointer-events: none;
+}
+.input-group .input,
+.input-group input {
+    padding-left: calc(var(--space-3) * 2 + 16px);
+}
+.input-group .trailing {
+    position: absolute;
+    right: var(--space-2);
+    background: transparent;
+    border: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--color-text-subtle);
+    transition: color var(--motion-fast) var(--ease-out);
+}
+.input-group .trailing:hover {
+    color: var(--color-text);
+}
+
 [data-page="admin-status-iptables"] .right {
     margin-bottom: var(--space-3) !important;
     margin-top: var(--space-3) !important;
