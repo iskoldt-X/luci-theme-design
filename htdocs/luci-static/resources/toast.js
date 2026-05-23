@@ -79,11 +79,30 @@ return baseclass.extend({
 	// We can't replace the return value perfectly (LuCI returns the rendered
 	// alert node and some callers .remove() it). We return a fake node that
 	// callers can manipulate without crashing; the real toast still works.
+	//
+	// Step 49: defer-patch retry. The original implementation did a single
+	// synchronous check on ui.addNotification at __init__ and silently
+	// bailed if it wasn't there. On ImmortalWrt 24.10 / LuCI 26.x the ui
+	// module is sometimes still wiring up addNotification at footer-script
+	// run time → our wrap never happened and notifications fell through
+	// to LuCI's inline banner. Poll for up to 10s (40 × 250ms).
 	interceptLuCI: function() {
-		if (typeof ui === 'undefined' || !ui.addNotification) return;
-		var self = this;
+		this._interceptAttempts = 0;
+		this._tryIntercept();
+	},
 
-		ui.addNotification = function(title, contents) {
+	_tryIntercept: function() {
+		var self = this;
+		if (typeof ui === 'undefined' || !ui.addNotification) {
+			if ((self._interceptAttempts = (self._interceptAttempts || 0) + 1) > 40) return;
+			setTimeout(L.bind(self._tryIntercept, self), 250);
+			return;
+		}
+		// Idempotent — if interceptLuCI re-runs after a hot-reload or
+		// stuck-promise race, don't double-wrap.
+		if (ui.addNotification && ui.addNotification.__designWrapped) return;
+
+		var wrapped = function(title, contents) {
 			// Type detection from variadic classes
 			var type = 'info';
 			for (var i = 2; i < arguments.length; i++) {
@@ -115,6 +134,8 @@ return baseclass.extend({
 			// Return a detached node so old callers that .remove() it work
 			return E('div', { 'class': 'cbi-notification-stub', 'style': 'display:none' });
 		};
+		wrapped.__designWrapped = true;
+		ui.addNotification = wrapped;
 	},
 
 	show: function(type, message, opts) {

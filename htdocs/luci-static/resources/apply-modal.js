@@ -119,14 +119,35 @@ return baseclass.extend({
 	},
 
 	patch: function () {
-		// Defensive: do nothing if LuCI's changes API isn't there yet
-		if (!window.L || !L.ui || !L.ui.changes || typeof L.ui.changes.displayChanges !== 'function') return;
+		// Step 49: defer-patch retry. The original implementation did a
+		// single synchronous check on L.ui.changes.displayChanges at
+		// __init__ and silently bailed if it wasn't there yet — exactly
+		// the case on ImmortalWrt 24.10 / LuCI 26.x where L.ui.changes
+		// is wired up *after* our module finishes loading, so our patch
+		// never landed and Save&Apply kept showing LuCI's stock blocking
+		// modal.
+		//
+		// Mirror the tryInject pattern used by wan-hero.js / sparkline.js
+		// etc: poll every 250ms for up to 10s (40 attempts). 10s is well
+		// past any plausible LuCI init time but caps the budget so we
+		// don't hold a timer forever on a LuCI version that genuinely
+		// lacks changes.displayChanges (we'll degrade to the native flow).
+		this._patchAttempts = 0;
+		this._tryPatch();
+	},
+
+	_tryPatch: function () {
+		var self = this;
+		if (!window.L || !L.ui || !L.ui.changes || typeof L.ui.changes.displayChanges !== 'function') {
+			if ((self._patchAttempts = (self._patchAttempts || 0) + 1) > 40) return;
+			setTimeout(L.bind(self._tryPatch, self), 250);
+			return;
+		}
 		// Already patched? Don't double-wrap.
 		if (L.ui.changes.__designPatched) return;
 		L.ui.changes.__designOriginal = L.ui.changes.displayChanges;
 		L.ui.changes.__designPatched  = true;
 
-		var self = this;
 		L.ui.changes.displayChanges = function () {
 			try {
 				return self.showDiff();

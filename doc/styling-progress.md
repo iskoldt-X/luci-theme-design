@@ -1766,3 +1766,119 @@ $ SOH scan clean                    ✅
 4. **Apply 配置**：成功后 10s 内可点 [Undo] 把 set 改动撤回
 5. **Speedtest**：测试前可选标签（5G/2.4G/Wired/Other），下方多出 Recent runs 历史条，方便手动对比
 6. **多 1 个 LuCI module**（wan-stats），footer 多 1 行 `L.require`
+
+---
+
+### Step 49 — apply-modal + toast 拦截器 defer-patch 修复（生产环境真 bug）
+
+**时间**：2026-05-23（用户实机对比 preview 后反馈）
+**文件**：
+- `htdocs/luci-static/resources/apply-modal.js`（patch 拆分为 `patch` + `_tryPatch`，加 polling）
+- `htdocs/luci-static/resources/toast.js`（interceptLuCI 拆分为 `interceptLuCI` + `_tryIntercept`，加 polling + 双重包装防护）
+
+**做了什么：**
+
+#### 真 bug 描述
+
+用户在 ImmortalWrt 24.10 上对比 preview html 与实机，发现：
+
+> "when i click some save button, it's still the original style"
+
+LuCI 的 "正在应用配置..." 全屏阻塞 modal 还在出，没被我们的 apply-modal diff modal + toast 替换。
+
+#### 根因
+
+`apply-modal.js` 和 `toast.js` 在 `__init__` 时**同步检查一次** `L.ui.changes.displayChanges` / `ui.addNotification` 是否已经准备好。`L.require(...)` 触发 `__init__` 的时机是 footer.htm 里的 `<script>` 标签执行，但**LuCI 26.x 的 `L.ui.changes` 单例是在 ui 模块异步初始化的尾巴上才挂上的**，footer 脚本跑到时 `L.ui.changes` 可能存在但 `displayChanges` 还是 `undefined`，或者 `ui.addNotification` 还没赋值。
+
+我们原来的写法：
+
+```js
+patch: function () {
+    if (!window.L || !L.ui || !L.ui.changes || typeof L.ui.changes.displayChanges !== 'function') return;
+    // ... patch logic
+}
+```
+
+是单次 fail-fast — 漏过就**永远漏过**，整个 Save&Apply 拦截全失效。
+
+#### 修复策略
+
+对齐 wan-hero.js / sparkline.js / devices.js 等模块用的 `tryInject` polling 模式：每 250ms retry，最多 40 次（10s 预算）。10s 比任何 LuCI 初始化时间都长得多，但又有上限 —— 不会在真的没这个 API 的老 LuCI 版本上吊住一个 timer 永远 polling。
+
+**apply-modal.js:**
+
+```js
+patch: function () {
+    this._patchAttempts = 0;
+    this._tryPatch();
+},
+_tryPatch: function () {
+    var self = this;
+    if (!window.L || !L.ui || !L.ui.changes || typeof L.ui.changes.displayChanges !== 'function') {
+        if ((self._patchAttempts = (self._patchAttempts || 0) + 1) > 40) return;
+        setTimeout(L.bind(self._tryPatch, self), 250);
+        return;
+    }
+    // ... actual patch
+}
+```
+
+**toast.js:** 同模式 + 额外 `__designWrapped` flag 防止意外双重包装（hot reload / require race）
+
+#### 验证逻辑
+
+| 场景 | 原行为 | 修复后行为 |
+|---|---|---|
+| LuCI 已就绪（apply-modal load 时 displayChanges 已有） | ✅ patch immediate | ✅ patch immediate（第一次 tick） |
+| LuCI 延迟（500ms 后才挂 displayChanges） | ❌ 永远不 patch | ✅ 第 2 次 tick patch |
+| LuCI 长期延迟（5s 后才挂） | ❌ 永远不 patch | ✅ 第 20 次 tick patch |
+| 老 LuCI 永远没 displayChanges | ❌ 不 patch（同新） | ✅ 10s 后放弃，degrade to native |
+
+#### 没有破坏的事
+
+- ❌ 原 `__designPatched` / `__designOriginal` 双重包装防护逻辑保留
+- ❌ try/catch 包 showDiff，失败时 fallback to original 的语义保留
+- ❌ 公共 API `patch()` 名字保留（baseclass __init__ 仍然 call this.patch()）
+- ❌ toast.js 的 4 种类型 / 默认 duration / ICONS / 全部保留
+
+#### Break change
+
+无可见。但 user-visible：Save&Apply 按钮**应该**现在能触发我们的 diff modal + 10s Undo toast 而不是 LuCI 原 modal。Toast 也应该接管 LuCI 的 ui.addNotification 调用流。
+
+#### 验证
+
+```bash
+$ node --check apply-modal.js   ✅
+$ node --check toast.js          ✅
+$ grep -rlP '\x01' (no SOH)     ✅
+```
+
+#### 部署依赖
+
+本 fix 是 **production 真 bug**，与 Step 41-48 视觉打磨独立。即使没有 Step 41-48，部署本 Step 后用户的 Save 也应该走我们的 modal。
+
+**回滚方式：** `git revert` 该 commit。降级为 Step 48 行为（拦截偶尔失效）。
+
+---
+
+## 📊 第七轮（Step 41-46 + 48 + 49）累计变化（更新）
+
+| 指标 | 第六轮后 | 第七轮 (Step 41-48) | 第七轮 + Step 49 |
+|---|---|---|---|
+| Overview tile 数 | 3 | 4 | 4 |
+| WAN Hero 打磨 | flat | gradient + glow + pulse + bars + ↑↓ | 同 |
+| apply-modal 拦截成功率 | 偶尔失效 | 偶尔失效 | **稳定** ✅ |
+| toast 拦截 ui.addNotification 成功率 | 偶尔失效 | 偶尔失效 | **稳定** ✅ |
+| 累计真实部署暴露 bug | 3 | 3 | **4** (新增"intercept 时机" bug C) |
+
+#### 教训 — 与 Step 21 / 22 同源
+
+Step 21 和 22 都是"静态审计 + lint 全过 + node --check 全过，但部署到实机才暴露的 bug"。本 Step 49 是第 4 例：
+
+| Step | 漏在哪 |
+|---|---|
+| 21 (minifier) | build pipeline 行为 |
+| 22 (li.active) | JS 与 CSS selector 对齐 |
+| 49 (intercept 时机) | LuCI 内部异步初始化顺序 |
+
+共同教训：**这些都是只能在真实部署中暴露的问题**。Visual regression test (T21) + 部署期 manual checklist 是唯一可靠防御。
