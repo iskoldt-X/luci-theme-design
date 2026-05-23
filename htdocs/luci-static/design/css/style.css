@@ -2575,11 +2575,16 @@ div.cbi-value > .cbi-value-description {
 	min-width: 13rem;
 }
 
+/* Step 133 — .cbi-dropdown 缺 border-radius → 全站直角缺口
+ * `<select>` 本身 L699 已经走 --radius-md,但 LuCI 把 select 替换成
+ * .cbi-dropdown 自定 div widget,该 div 没设 radius 默认就 0。统一加。
+ * .cbi-dynlist 拿到 radius 视觉无影响(它没 border/bg),不会破坏 Step 129。 */
 .cbi-dynlist,
 .cbi-dropdown {
 	position: relative;
 	display: inline-flex;
 	padding: 0;
+	border-radius: var(--radius-md);
 }
 
 .cbi-dropdown[placeholder*="select"] {
