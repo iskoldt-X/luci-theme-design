@@ -700,7 +700,13 @@
        and prevents jitter as values change. */
     font-family: var(--font-mono);
     margin: 0;
+    /* Step 97 (Round 18): word-break + overflow-wrap together cover both
+       long IPv4 / IPv6 strings (which break-all handles via the dot
+       separators) AND unbreakable tokens like "pppoe-wan-0123456789"
+       (which need overflow-wrap to force a break mid-token in a tight
+       grid track). min-width:0 already inherited from .wan-hero-stat. */
     word-break: break-all;
+    overflow-wrap: anywhere;
     line-height: 1.3;
 }
 
@@ -808,6 +814,23 @@
     }
     .wan-hero-throughput { gap: var(--space-3); }
     .wan-hero-throughput-value { font-size: var(--text-lg); }
+}
+
+/* Step 97 (Round 18): extra-narrow tier for foldables / split-screen /
+   ultra-small phones (≤360px). Even with box-sizing:border-box, a
+   2-column grid with text-xl .big stats can't fit a long IPv4 +
+   "PPPoE" + bars + interface name in <120 px each. Drop to single
+   column so each stat gets the full content width. Padding tightened
+   one more notch (space-3) so the card itself stays inside the
+   viewport. Below this tier the layout is no longer meant to be
+   "comfortable" — just "doesn't truncate". */
+@media (max-width: 360px) {
+    .wan-hero { padding: var(--space-3); }
+    .wan-hero-grid {
+        grid-template-columns: 1fr;
+        gap: var(--space-2);
+    }
+    .wan-hero-throughput { gap: var(--space-2); flex-direction: column; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
