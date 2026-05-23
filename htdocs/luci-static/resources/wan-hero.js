@@ -5,26 +5,11 @@
 'require network';
 'require wan-stats';
 
-// Step 83 (Round 13): SVG namespace helpers — see sparkline.js for the
-// full rationale. tl;dr E('svg',...) creates HTMLUnknownElement, so the
-// <use href="#i-globe"/> reference never renders.
-var __SVG_NS   = 'http://www.w3.org/2000/svg';
-var __XLINK_NS = 'http://www.w3.org/1999/xlink';
-function svgEl(tag, attrs, children) {
-	var el = document.createElementNS(__SVG_NS, tag);
-	if (attrs) Object.keys(attrs).forEach(function (k) {
-		if (k === 'xlink:href') el.setAttributeNS(__XLINK_NS, 'xlink:href', attrs[k]);
-		else el.setAttribute(k, attrs[k]);
-	});
-	if (children) {
-		var arr = Array.isArray(children) ? children : [children];
-		arr.forEach(function (c) { if (c) el.appendChild(c); });
-	}
-	return el;
-}
-function svgUse(href) {
-	return svgEl('use', { 'href': href, 'xlink:href': href });
-}
+// Step 92 (Round 16): SVG namespace helpers + #i-globe icon reference
+// removed. Pixel-parity rewrite drops the inline globe SVG in favour of a
+// CSS `::before` status dot on .wan-hero-status — same visual weight,
+// no sprite load, no SVGElement vs HTMLUnknownElement gotcha to worry
+// about. See features.css §12 for the dot + pulse rules.
 
 // Step 43: throughput formatter (rate in bps → number + unit) — kept inline
 // here rather than importing from a shared module, since the only other
@@ -174,8 +159,6 @@ function pingToBars(ms) {
 return baseclass.extend({
 	__init__: function () {
 		if (!document.body.classList.contains('node-admin-status-overview')) return;
-
-		this.iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design') + '/icons.svg';
 		this.tryInject();
 	},
 
@@ -189,56 +172,77 @@ return baseclass.extend({
 		this.injectCard();
 		this.refresh();
 		this._timer = setInterval(L.bind(this.refresh, this), REFRESH_MS);
+		// Step 92 (Round 16): the "Last check Xs ago" portion of the
+		// tagline updates every 5 s independently of the 30 s WAN-state
+		// refresh. Cheap text swap, no network calls — pure UI ticker.
+		this._taglineTimer = setInterval(L.bind(this.updateTagline, this), 5000);
 	},
 
 	injectCard: function () {
+		// Step 92 (Round 16): pixel-parity rewrite to match S0 of
+		// doc/upgrade-preview.html. Structural changes from prior shape:
+		//   - .wan-hero-head row removed entirely (no inline globe SVG,
+		//     no inline status pill, no inline ping — those collapse into
+		//     two single rows: .wan-hero-status + .wan-hero-tagline)
+		//   - Body grid renamed .wan-hero-body → .wan-hero-grid, switched
+		//     from div/div to semantic <dt>/<dd> markup
+		//   - Two stats (Public IP, Connection) get .big modifier — they
+		//     render at text-xl, sans-serif, semibold to emphasise the
+		//     two most important facts on the card
+		//   - Uptime moved out of grid into tagline ("Online for Xh Ym")
+		//   - Latency takes uptime's grid slot, with 5-bar indicator now
+		//     inline inside its <dd>
+		//   - Throughput strip: ↑ row before ↓ row (preview ordering),
+		//     wrapper divs lose their .wan-hero-throughput-cell class
 		var card = E('div', { 'class': 'wan-hero', 'id': 'wan-hero' }, [
-			E('div', { 'class': 'wan-hero-head' }, [
-				svgEl('svg', { 'class': 'svg-icon wan-hero-icon', 'aria-hidden': 'true' },
-					svgUse(this.iconBase + '#i-globe')),
-				E('span', { 'class': 'wan-hero-title' }, _('Internet')),
-				E('span', { 'class': 'wan-hero-status', 'id': 'wan-hero-status' }, _('Checking...')),
-				// Step 48: ping element gets a 5-bar signal indicator + text.
-			// Inner structure is filled by refresh(); empty until first
-			// measurement returns.
-			E('span', { 'class': 'wan-hero-ping', 'id': 'wan-hero-ping' }, [
-				E('span', { 'class': 'wan-hero-ping-bars', 'id': 'wan-hero-ping-bars', 'data-bars': '0' }, [
-					E('span'), E('span'), E('span'), E('span'), E('span')
+			// ── Status line: "Internet · Online" with coloured ::before dot
+			E('div', { 'class': 'wan-hero-status', 'id': 'wan-hero-status' }, _('Checking…')),
+
+			// ── Tagline: "Online for Xh Ym · Last check Xs ago" (updated by
+			//    updateTagline() — both on refresh and on the 5 s ticker)
+			E('div', { 'class': 'wan-hero-tagline', 'id': 'wan-hero-tagline' }, ''),
+
+			// ── 4-stat grid with dt/dd semantic markup
+			E('div', { 'class': 'wan-hero-grid' }, [
+				// Big stat #1: Public IP
+				E('div', { 'class': 'wan-hero-stat big' }, [
+					E('dt', {}, _('Public IP')),
+					E('dd', { 'id': 'wan-hero-ip' }, '—')
 				]),
-				E('span', { 'class': 'wan-hero-ping-text', 'id': 'wan-hero-ping-text' }, '')
-			])
-			]),
-			E('div', { 'class': 'wan-hero-body' }, [
-				E('div', { 'class': 'wan-hero-field' }, [
-					E('div', { 'class': 'wan-hero-field-label' }, _('Public IP')),
-					E('div', { 'class': 'wan-hero-field-value', 'id': 'wan-hero-ip' }, '—')
+				// Big stat #2: Connection method (DHCP / PPPoE / Static / …)
+				E('div', { 'class': 'wan-hero-stat big' }, [
+					E('dt', {}, _('Connection')),
+					E('dd', { 'id': 'wan-hero-proto' }, '—')
 				]),
-				E('div', { 'class': 'wan-hero-field' }, [
-					E('div', { 'class': 'wan-hero-field-label' }, _('Connection')),
-					E('div', { 'class': 'wan-hero-field-value', 'id': 'wan-hero-proto' }, '—')
+				// Stat #3: Gateway latency — 5-bar signal + ms text inline in <dd>
+				E('div', { 'class': 'wan-hero-stat' }, [
+					E('dt', {}, _('Latency')),
+					E('dd', {}, [
+						E('span', { 'class': 'wan-hero-ping-bars', 'id': 'wan-hero-ping-bars', 'data-bars': '0' }, [
+							E('span'), E('span'), E('span'), E('span'), E('span')
+						]),
+						E('span', { 'class': 'wan-hero-ping-text', 'id': 'wan-hero-ping-text' }, '—')
+					])
 				]),
-				E('div', { 'class': 'wan-hero-field' }, [
-					E('div', { 'class': 'wan-hero-field-label' }, _('Uptime')),
-					E('div', { 'class': 'wan-hero-field-value', 'id': 'wan-hero-uptime' }, '—')
-				]),
-				E('div', { 'class': 'wan-hero-field' }, [
-					E('div', { 'class': 'wan-hero-field-label' }, _('Interface')),
-					E('div', { 'class': 'wan-hero-field-value', 'id': 'wan-hero-iface' }, '—')
+				// Stat #4: WAN interface name (eth1 / pppoe-wan / …)
+				E('div', { 'class': 'wan-hero-stat' }, [
+					E('dt', {}, _('Interface')),
+					E('dd', { 'id': 'wan-hero-iface' }, '—')
 				])
 			]),
-			// Step 43: live throughput strip — fed by wan-stats every 2 s. Sits
-			// at the bottom with a border-top separator so it reads as "live
-			// telemetry" distinct from the static fields above.
+
+			// ── Live throughput strip (fed by wan-stats every 2 s)
+			//    Preview puts ↑ (upload) first, ↓ (download) second.
 			E('div', { 'class': 'wan-hero-throughput', 'id': 'wan-hero-throughput' }, [
-				E('div', { 'class': 'wan-hero-throughput-cell' }, [
-					E('span', { 'class': 'wan-hero-throughput-arrow' }, '↓'),
-					E('span', { 'class': 'wan-hero-throughput-value', 'id': 'wan-hero-down' }, '—'),
-					E('span', { 'class': 'wan-hero-throughput-unit',  'id': 'wan-hero-down-unit' }, '')
-				]),
-				E('div', { 'class': 'wan-hero-throughput-cell' }, [
+				E('div', {}, [
 					E('span', { 'class': 'wan-hero-throughput-arrow' }, '↑'),
 					E('span', { 'class': 'wan-hero-throughput-value', 'id': 'wan-hero-up' }, '—'),
 					E('span', { 'class': 'wan-hero-throughput-unit',  'id': 'wan-hero-up-unit' }, '')
+				]),
+				E('div', {}, [
+					E('span', { 'class': 'wan-hero-throughput-arrow' }, '↓'),
+					E('span', { 'class': 'wan-hero-throughput-value', 'id': 'wan-hero-down' }, '—'),
+					E('span', { 'class': 'wan-hero-throughput-unit',  'id': 'wan-hero-down-unit' }, '')
 				])
 			])
 		]);
@@ -275,6 +279,7 @@ return baseclass.extend({
 
 	refresh: function () {
 		var self = this;
+		this._refreshTime = Date.now();
 
 		// Per-field try/catch so one broken accessor doesn't blank the whole
 		// card. User report on ImmortalWrt 24.10: IP populated but Connection /
@@ -292,7 +297,9 @@ return baseclass.extend({
 
 		network.getWANNetworks().then(function (wans) {
 			if (!wans || !wans.length) {
-				self.setStatus('offline', _('No WAN configured'));
+				self.setStatus('offline', _('Internet · Offline'));
+				self._taglinePrefix = _('No WAN configured');
+				self.updateTagline();
 				return;
 			}
 			var w = wans[0];
@@ -300,31 +307,37 @@ return baseclass.extend({
 			// isUp() can throw on some forks if the interface is mid-restart
 			var up = safe(function () { return w.isUp(); }, null);
 			if (up === null) {
-				self.setStatus('unknown', _('WAN state transient'));
+				self.setStatus('unknown', _('Internet · Checking'));
+				self._taglinePrefix = _('WAN state transient');
+			} else if (up) {
+				self.setStatus('online', _('Internet · Online'));
+				// Step 92: uptime moved out of the grid into the tagline,
+				// rendered as "Online for 9d 14h" — matches preview phrasing.
+				var upSec = safe(function () { return w.getUptime(); }, null);
+				self._taglinePrefix = (upSec !== null)
+					? _('Online for ') + formatUptime(upSec)
+					: _('Online');
 			} else {
-				self.setStatus(up ? 'online' : 'offline', up ? _('Online') : _('Offline'));
+				self.setStatus('offline', _('Internet · Offline'));
+				self._taglinePrefix = _('No connectivity');
 			}
+			self.updateTagline();
 
+			// ── Grid stat #1: Public IP (IPv4 first, IPv6 fallback)
 			var ipv4 = safe(function () { return w.getIPAddrs(); }, []);
 			document.getElementById('wan-hero-ip').textContent =
 				(ipv4 && ipv4.length) ? ipv4[0].split('/')[0] : safe(function () {
-					// Fallback: try IPv6 if IPv4 missing
 					var v6 = w.getIP6Addrs();
 					return (v6 && v6.length) ? v6[0].split('/')[0] : '—';
 				}, '—');
 
-			// Step 50: proto fallback chain via getProtoLabel() — handles the
-			// LuCI 26.x case where w.getProtocol().getI18n() returns null on
-			// the Overview page (proto i18n strings registered by network-view
-			// only, which we don't load).
+			// ── Grid stat #2: Connection (Step 50 fallback chain — LuCI 26.x
+			//    omits proto i18n on Overview because network-view doesn't load)
 			document.getElementById('wan-hero-proto').textContent = safe(function () {
 				return getProtoLabel(w);
 			}, '—');
 
-			document.getElementById('wan-hero-uptime').textContent = safe(function () {
-				return formatUptime(w.getUptime());
-			}, '—');
-
+			// ── Grid stat #4: Interface name (eth1, pppoe-wan, …)
 			document.getElementById('wan-hero-iface').textContent = safe(function () {
 				var d = w.getDevice();
 				return d ? d.getName() : w.getName();
@@ -333,25 +346,47 @@ return baseclass.extend({
 			// Outer rejection: getWANNetworks itself failed. Only NOW do we
 			// claim full unknown. Single fields handled by per-field try/catch
 			// above.
-			self.setStatus('unknown', _('Unable to read WAN state'));
+			self.setStatus('unknown', _('Internet · Unknown'));
+			self._taglinePrefix = _('Unable to read WAN state');
+			self.updateTagline();
 			if (console && console.warn) console.warn('wan-hero: getWANNetworks failed:', e);
 		});
 
-		// Gateway/local ping — independent from WAN state since CGI is on the
-		// box itself; works even if WAN is down.
+		// ── Grid stat #3: Latency — 5-bar indicator + ms text, runs
+		//    independently of WAN state since the ping CGI is local and
+		//    works even when WAN is down.
 		measurePing().then(function (ms) {
-			// Step 48: split the display into 5-bar indicator + text. The
-			// bars are CSS-styled spans; we just update the data-bars
-			// attribute and let the cascade do the rest.
 			var bars = document.getElementById('wan-hero-ping-bars');
 			var text = document.getElementById('wan-hero-ping-text');
 			if (bars) bars.setAttribute('data-bars', String(pingToBars(ms)));
-			if (text) text.textContent = (ms === null) ? '' : ms.toFixed(1) + ' ms';
+			if (text) text.textContent = (ms === null) ? '—' : ms.toFixed(1) + ' ms';
 		});
+	},
+
+	// Step 92 (Round 16): renders the tagline below the status line.
+	// Shape: "{prefix} · Last check {age}". prefix is set by refresh()
+	// based on WAN state ("Online for 9d 14h" / "No connectivity" / …);
+	// age portion ticks every 5 s via the timer in tryInject() so it
+	// feels live without re-running expensive refreshes.
+	updateTagline: function () {
+		var el = document.getElementById('wan-hero-tagline');
+		if (!el) return;
+		var prefix = this._taglinePrefix || '';
+		var lastCheck = '';
+		if (this._refreshTime) {
+			var ageS = Math.floor((Date.now() - this._refreshTime) / 1000);
+			var ageStr;
+			if (ageS < 5)       ageStr = _('just now');
+			else if (ageS < 60) ageStr = ageS + 's ago';
+			else                ageStr = Math.floor(ageS / 60) + 'm ago';
+			lastCheck = _('Last check ') + ageStr;
+		}
+		el.textContent = (prefix && lastCheck) ? (prefix + ' · ' + lastCheck) : (prefix || lastCheck);
 	},
 
 	setStatus: function (kind, label) {
 		var el = document.getElementById('wan-hero-status');
+		if (!el) return;
 		el.className = 'wan-hero-status wan-hero-status-' + kind;
 		el.textContent = label;
 	}
