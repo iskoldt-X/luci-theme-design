@@ -56,16 +56,16 @@
 | **Phase 0 — 基础设施** | | **40 min** | **✅ 完成** |
 | T1 nightly pre-release 修复 | — | 30min | ✅ shipped (本批) — perms 移到 workflow-level |
 | T2 Node 24 actions 升级 | — | 10min | ✅ shipped (本批) — v4 → v5 + escape env |
-| **第二波 — CGI + 实时数据** | | **18h** | ⏳ 下批 |
-| T7 §0.5 CGI 基础设施（blocker） | §0.5 | 2h | ⏳ |
-| T8 S3 Sparkline / Live Metrics | §1.S3 | 6h | ⏳ |
-| T9 A1 WAN Hero | §2.A1 | 6h | ⏳ |
-| T10 A5 Wi-Fi/LAN 测速 | §2.A5 | 4h | ⏳ |
-| **第三波 — 交互深化** | | **15h** | ⏳ |
-| T11 A2 设备列表 + OUI | §2.A2 | 7h | ⏳ |
-| T12 A3 快速操作浮层 | §2.A3 | 3h | ⏳ |
-| T13 S2b 应用变更体验重塑 | §1.S2b | 5h | ⏳ |
-| **第四波 — 流量分析** | | **10h** | ⏳ |
+| **第二波 — CGI + 实时数据** | | **18h** | **✅ 完成（MVP）** |
+| T7 §0.5 CGI 基础设施（blocker） | §0.5 | 2h | ✅ shipped — `/www/cgi-bin/design/` + capability.js |
+| T8 S3 Sparkline / Live Metrics | §1.S3 | 6h | ✅ shipped (MVP, 3 tile) — 实时流量 tile 延后 |
+| T9 A1 WAN Hero | §2.A1 | 6h | ✅ shipped (MVP) — 实时上下行 + ISP opt-in 延后 |
+| T10 A5 Wi-Fi/LAN 测速 | §2.A5 | 4h | ✅ shipped (MVP) — 2.4/5G 对比 + 历史 + 理论上限延后 |
+| **第三波 — 交互深化** | | **15h** | **✅ 完成（MVP）** |
+| T11 A2 设备列表 + OUI | §2.A2 | 7h | ✅ shipped (MVP) — rename / iwinfo signal 合并延后 |
+| T12 A3 快速操作浮层 | §2.A3 | 3h | ✅ shipped — 4 个操作（Wi-Fi/防火墙/DHCP/重启） |
+| T13 S2b 应用变更体验重塑 | §1.S2b | 5h | ✅ shipped (MVP) — Undo 按钮延后 |
+| **第四波 — 流量分析** | | **10h** | ⏳ 下批 |
 | T14 D2 流量分析（渐进增强） | §5.D2 | 10h | ⏳ |
 | **长期 — 工程加固** | | **11h** | ⏳ |
 | T15 C1 CSS 拆分 | §4.C1 | 4h | ⏳ |
@@ -77,7 +77,7 @@
 | T20 Build-time CSS diff | finalplan §10.7 | 2h | ⏳ |
 | T21 Visual regression test | finalplan §10.7 | 6-8h | ⏳ |
 
-**进度**：6 / 21 task 完成（28.6%），16.7h / 70h 工时（24%）。
+**进度**：13 / 21 task 完成（62%），~50h / 70h 工时（71%）。剩余 Phase 4（流量分析）+ Phase 5（工程加固）+ Phase 6（部署期 future）。
 
 ---
 

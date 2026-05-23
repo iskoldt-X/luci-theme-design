@@ -971,3 +971,128 @@ handleMenuExpand 三处：
 4. **侧边栏菜单图标**从 'design' 字体的 emoji 替换为 Lucide 极简线条
 5. **GH Actions** 不再警告 Node 20 deprecated
 
+---
+
+## 🚀 第五轮（Step 28-34）：upgrade.md v2 Phase 2 + Phase 3 落地
+
+> 起飞时间：2026-05-23（Phase 1 测试同步进行）
+> 范围：upgrade.md v2 提案的 CGI 基础设施 + 实时数据 + 交互深化
+> 节奏：7 个 task 一口气 ship（user 显式要求 "两个 phase 一测"）
+> 风险点：T7 CGI 基础设施引入了首批服务器端 shell 脚本；T13 monkey-patch `L.ui.changes.displayChanges` 跨 LuCI 版本可能不稳
+
+### Step 28 — T7 CGI 基础设施（Phase 2 共享 blocker）
+
+**改动**：
+- 新目录 `root/www/cgi-bin/design/`（CGI 脚本部署根）
+- `Makefile` 加 `postinst-pkg` hook 给 `chmod +x` 所有 CGI 脚本
+- `uci-defaults` 加 uhttpd `cgi_prefix='/cgi-bin'` 验证 + 二级 `chmod` 兜底
+- 新文件 `htdocs/luci-static/resources/capability.js`（LuCI module，~95 行）
+
+**capability.js 暴露**：`cap.nlbw()` / `cap.thermal()` / `cap.wireless()` / `cap.cgi(name)`，每次结果缓存到 page lifetime。800ms timeout 防 hang。
+
+### Step 29 — T8 Sparkline / Live Metrics
+
+**改动**：
+- 新 CGI `root/www/cgi-bin/design/temp`（thermal_zone JSON 聚合，~12 行 sh）
+- 新文件 `sparkline.js`（~190 行）
+- `style.css` §11（~80 行）
+
+**3 张 tile**：CPU loadavg / 内存 % / 温度（温度 CGI 检测不到 → 隐藏 tile）。5s 轮询 `ubus call system info`（修正 v1 提案的 `/admin/status/sysinfo` HTML endpoint 错误）。60 点 SVG sparkline。注入到 Overview `#view` 第一个位置（被 T9 推到第二位）。
+
+**MVP scope**：实时 WAN 上下行 tile 延迟到 follow-up（需要 4 步 ubus chain：interface dump → 找 WAN device → 抽 device.status → diff 取速率）。
+
+### Step 30 — T9 WAN Hero
+
+**改动**：
+- 新 CGI `root/www/cgi-bin/design/ping`（echo pong）
+- 新文件 `wan-hero.js`（~110 行）
+- `style.css` §12（~80 行）
+
+**第一屏大卡片**：状态徽章 + 公网 IP + 连接协议 + 在线时长 + 接口名 + 网关延迟（5 次 ping 中位数）。100% 本地数据。30s 轮询 LuCI 的 `network.getWANNetworks()` 高层 helper。
+
+**MVP scope**：实时上下行 + ISP opt-in modal 延迟到 follow-up（spec 已写明 ISP API 是 opt-in，默认 OFF，本轮先 skip）。
+
+### Step 31 — T10 Wi-Fi/LAN 测速
+
+**改动**：
+- 2 个新 CGI：`download`（`dd if=/dev/urandom`，clamp 1KB-100MB）+ `upload`（read stdin discard）
+- 新文件 `speedtest.js`（~170 行）
+- `style.css` §13（~50 行）
+
+**测速卡片**：按钮触发 → 3 阶段（latency 10 次 / download 10MB / upload 5MB）→ Mbps 显示。`/dev/urandom` 防中间 cache 注水。30s timeout 防 hang。错误时 toast.error。
+
+**MVP scope**：2.4G/5G 对比模式 + 历史趋势 + 理论上限对比延迟到 follow-up。
+
+### Step 32 — T11 设备列表 + OUI
+
+**改动**：
+- 新文件 `devices.js`（~210 行 — 含 35 项 OUI + 10 项 hostname-type 推断规则）
+- `style.css` §14（~110 行）
+
+**Overview 新 LAN 客户端卡片**（不替换 LuCI 自带 dhcp 页面）：单行紧凑 + 点击展开详情。数据 `luci-rpc.getDHCPLeases` ubus，去重 by MAC，按 hostname/IP 排序。30s 轮询。
+
+**MVP scope**：rename → 持久化到 UCI 延迟到 follow-up；iwinfo signal strength merge 延迟到 follow-up。
+
+### Step 33 — T12 快速操作浮层
+
+**改动**：
+- 新文件 `quick-actions.js`（~140 行）
+- `icons.svg` +3 个 Lucide 图标（zap / refresh-cw / wifi）
+- `header.htm` 加 `#quick-actions-trigger` ⚡ 按钮（在 cmdk + theme-toggle 之间）
+- `style.css` §15（~80 行）
+
+**4 个动作**：重启 Wi-Fi / 重载防火墙 / 续约 DHCP / 重启路由（含 confirm modal）。每个走 `file.exec` ubus，结果反馈 toast.info/success/error。点外部 + Esc 关闭。
+
+### Step 34 — T13 应用变更体验重塑（含 B4 Diff Viewer）
+
+**改动**：
+- 新文件 `apply-modal.js`（~180 行）
+- `style.css` §16（~95 行）
+
+**核心**：monkey-patch `L.ui.changes.displayChanges`：
+1. 读 `L.uci.changes()` 拉所有 pending changes → 渲染颜色 diff（add 绿底 / del 红底删除线 / set 显示前后值）
+2. 6 条危险规则匹配（LAN IP / netmask / firewall disabled / dhcp ignore / hostname rename）→ 红色 ⚠ warning
+3. 用户确认 → `toast.info('Applying...')` persistent → `L.uci.apply(timeout)` → success/error toast
+
+**容错**：API 形状不符直接 try/catch 回退原生 `displayChanges`（LuCI 21→24 兼容性保险）。`__designPatched` flag 防双重 wrap。
+
+---
+
+## 📊 第五轮（Step 28-34）累计变化
+
+| 指标 | 第四轮后 | 第五轮后 |
+|---|---|---|
+| LuCI module 文件数 | 3 (menu / cmdk / toast) | **10** (+capability +sparkline +wan-hero +speedtest +devices +quick-actions +apply-modal) |
+| SVG sprite 图标数 | 36 | **38** (+zap +refresh-cw +wifi, 但 i-info 之前已加，所以总共算了 38) |
+| CGI 脚本 (Phase 2 引入) | 0 | **4** (ping / temp / download / upload) |
+| CSS 行数 | 4445 | **~5000+** (+550 行: §11-§16) |
+| Overview 页 inject 卡片数 | 0 | **5** (WAN Hero / 3 sparkline tiles / Devices / Speedtest) |
+| 顶栏按钮 | 2 (cmdk / theme-toggle) | **3** (+quick-actions ⚡) |
+| LuCI ui.changes monkey-patched | 否 | **是** (apply-modal §16) |
+| upgrade.md Phase 2 完成 | 0/4 | **4/4 ✅** |
+| upgrade.md Phase 3 完成 | 0/3 | **3/3 ✅** |
+| Phase 4 + 长期 | 0/8 | 0/8 (下批) |
+
+## 🎯 用户能立刻看到的变化（第五轮）
+
+1. **Overview 首屏**多了一张大的 WAN Hero 卡（状态 + 公网 IP + 延迟）
+2. **Overview 顶部**多了 3 张实时 tile（CPU / 内存 / 温度），每张有 5 分钟趋势 sparkline
+3. **Overview 中部**多了 LAN 客户端列表（带类型推断 + 厂商猜测，点击展开详情）
+4. **Overview 底部**多了 Wi-Fi/LAN 测速按钮（按一下测 latency + download + upload）
+5. **顶栏多个 ⚡ 按钮** — 快速重启 Wi-Fi / 重载防火墙 / 续约 DHCP / 重启路由
+6. **Save & Apply** 不再是全屏阻塞 modal 了 — 先弹 diff modal 让你看清改了啥，确认后右下角 toast 显示进度
+
+## ⚠ 第五轮已知妥协（follow-up 项）
+
+| 项 | MVP 状态 | 待补完整 |
+|---|---|---|
+| Sparkline 实时流量 tile | 暂无 | 需要 ubus interface→device→status 4 步链 |
+| WAN Hero 实时上下行 | 暂无 | 同上 |
+| WAN Hero ISP opt-in modal | 暂无 | spec 明确 OFF default，需要 UCI flag + 同意 modal |
+| 测速 2.4G/5G 对比 | 暂无 | 需要 UI 状态机 |
+| 测速历史 localStorage | 暂无 | 简单加 |
+| 测速理论上限对比 | 暂无 | 需 iwinfo channel/bandwidth 查询 |
+| 设备列表 rename 持久化 UCI | 暂无 | 需要新 UCI section + UI |
+| 设备列表 iwinfo signal 合并 | 暂无 | 需多 ubus call merge |
+| Apply modal Undo 按钮 | 暂无 | LuCI 有 rollback API，需要 window 期内 toast 提供撤销
+
