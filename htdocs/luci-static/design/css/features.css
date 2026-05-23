@@ -1794,6 +1794,18 @@
     padding: var(--space-3) 0;
 }
 
+/* Step 99 (Round 18): secondary diagnostic hint under the empty-state
+   message. One size smaller + more muted than the main line so it
+   reads as "by the way, here's what's usually wrong" rather than an
+   error indicator. Healthy installations see this for ≤60 s on first
+   load then it disappears. */
+.traffic-empty-hint {
+    color: var(--color-text-subtle);
+    font-size: var(--text-xs);
+    margin-top: var(--space-1);
+    line-height: 1.4;
+}
+
 .traffic-consumers {
     display: flex;
     flex-direction: column;

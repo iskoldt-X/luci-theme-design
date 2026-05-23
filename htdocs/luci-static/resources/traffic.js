@@ -271,8 +271,20 @@ return baseclass.extend({
 		container.innerHTML = '';
 
 		if (!consumers.length) {
-			container.appendChild(E('div', { 'class': 'traffic-empty' },
-				_('No traffic data yet — nlbwmon collects continuously, check back in a minute.')));
+			// Step 99 (Round 18): two-line empty state. Top line is the
+			// honest "still collecting" message; bottom line is a soft
+			// pointer at the most common root cause discovered in
+			// Chrome-Claude's Round 17 diagnostic — Software Flow
+			// Offloading bypasses conntrack, so nlbwmon's byte counters
+			// freeze near zero per flow. Phrased as a tip rather than an
+			// error so users on healthy setups don't think something's
+			// wrong.
+			container.appendChild(E('div', { 'class': 'traffic-empty' }, [
+				E('div', {},
+					_('No traffic data yet — nlbwmon collects continuously, check back in a minute.')),
+				E('div', { 'class': 'traffic-empty-hint' },
+					_('Tip: if still empty after a minute, check Network → Firewall → Routing/NAT Offloading — Software flow offloading bypasses the conntrack counters nlbwmon reads.'))
+			]));
 			if (summary) summary.textContent = '';
 			if (meta) meta.textContent = '';
 			return;
