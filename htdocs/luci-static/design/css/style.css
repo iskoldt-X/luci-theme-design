@@ -3858,6 +3858,24 @@ input[name="nslookup"] {
 	align-items: center;
 }
 
+/* Step 74 (Round 13): hide the mobile bottom-bar on desktop. README marks
+   the theme as 'mobile-optimised' and the .navbar is the iOS WebApp style
+   bottom nav (home / openclash / link / rank / user). On desktops > 992px
+   the left sidebar already handles all navigation, so the bottom bar just
+   occupies screen real estate and overlaps content. Hide cleanly.
+   Browser-side Claude agent flagged this 2026-05-23. */
+@media (min-width: 993px) {
+	.navbar {
+		display: none;
+	}
+	/* Reclaim the bottom space the navbar used to reserve on the
+	   content column. .main-right used to have padding-bottom to avoid
+	   the floating bar; on desktop that's no longer needed. */
+	.main-right {
+		padding-bottom: 0;
+	}
+}
+
 .navbar a {
 	flex: 1 1 0;
 	text-align: center;
@@ -4094,6 +4112,24 @@ td.cbi-button, .cbi-button-apply,
     color: var(--color-text);
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum';
+    /* Step 75 (Round 13): value column gets word-break so long paths
+       like '/opt/docker/overlay2/8ac621821c94e271...' wrap into the
+       card instead of overflowing the right edge. Reported by Chrome-
+       Claude agent inspection on the 存储 (Storage) cbi-section. */
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    /* Reset any inherited nowrap from white-space rules elsewhere. */
+    white-space: normal;
+}
+
+/* Step 75: also set min-width:0 on the grid cell. CSS Grid items default
+   to min-width:auto (= intrinsic content size), which makes long table
+   values force the column wider than its allotted track. min-width:0
+   lets the column actually respect the grid template + word-break on
+   the cell reflows long values into multiple lines. NOT using
+   overflow:hidden — that would clip future LuCI hover tooltips. */
+.node-admin-status-overview #view > .cbi-section {
+    min-width: 0;
 }
 
 /* 内存 / 缓存等进度条样式上的微调 */
