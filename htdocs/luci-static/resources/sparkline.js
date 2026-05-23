@@ -1,6 +1,7 @@
 'use strict';
 'require baseclass';
 'require ui';
+'require wan-stats';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sparkline / Live Metrics — upgrade.md §1.S3
@@ -120,6 +121,16 @@ function formatBytes(bytes) {
 	return (bytes / 1073741824).toFixed(2) + ' GB';
 }
 
+// Step 43: formatter for throughput rate (bps), broken into number+unit so
+// the tile can present them in two different font sizes / weights.
+function fmtBpsSplit(bps) {
+	if (bps === null || bps === undefined || !isFinite(bps)) return { num: '—', unit: '' };
+	if (bps < 1000)    return { num: bps.toFixed(0),       unit: 'bps' };
+	if (bps < 1e6)     return { num: (bps / 1000).toFixed(1),  unit: 'Kbps' };
+	if (bps < 1e9)     return { num: (bps / 1e6).toFixed(1),   unit: 'Mbps' };
+	return { num: (bps / 1e9).toFixed(2), unit: 'Gbps' };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 return baseclass.extend({
@@ -130,7 +141,8 @@ return baseclass.extend({
 		this.rings = {
 			cpu:  new MetricRing(RING_SIZE),
 			mem:  new MetricRing(RING_SIZE),
-			temp: new MetricRing(RING_SIZE)
+			temp: new MetricRing(RING_SIZE),
+			net:  new MetricRing(RING_SIZE)    // Step 43: 4th tile, fed by wan-stats
 		};
 
 		this.tryInject();
@@ -155,12 +167,14 @@ return baseclass.extend({
 		var grid = E('div', { 'class': 'design-tile-grid' }, [
 			makeTile('design-tile-cpu',  'i-cpu',         _('CPU Load'),    this.iconBase),
 			makeTile('design-tile-mem',  'i-memory',      _('Memory'),      this.iconBase),
+			makeTile('design-tile-net',  'i-activity',    _('WAN Traffic'), this.iconBase),
 			makeTile('design-tile-temp', 'i-thermometer', _('Temperature'), this.iconBase)
 		]);
 		view.insertBefore(grid, view.firstChild);
 
 		this.tileCpu  = document.getElementById('design-tile-cpu');
 		this.tileMem  = document.getElementById('design-tile-mem');
+		this.tileNet  = document.getElementById('design-tile-net');
 		this.tileTemp = document.getElementById('design-tile-temp');
 	},
 
@@ -171,8 +185,45 @@ return baseclass.extend({
 			if (!zones) self.tileTemp.style.display = 'none';
 		});
 
+		// Step 43: subscribe to the wan-stats singleton (Step 42). It polls
+		// every 2 s on its own cadence — independent of our 5 s sysInfo poll —
+		// so the Net tile updates twice as fast as CPU/Mem and feels "live".
+		L.require('wan-stats').then(function (ws) {
+			ws.subscribe(L.bind(self.onWanStats, self));
+		}).catch(function () {
+			// If wan-stats can't load, hide the Net tile — better than a dead "—"
+			if (self.tileNet) self.tileNet.style.display = 'none';
+		});
+
 		this.tick();
 		this._timer = setInterval(L.bind(this.tick, this), SAMPLE_INTERVAL_MS);
+	},
+
+	// Step 43: callback for wan-stats.subscribe. Updates the Net tile's value
+	// (download Mbps), meta (upload + device name), and rx-rate sparkline.
+	onWanStats: function (data) {
+		if (!this.tileNet) return;
+		// If the WAN device is missing or fully offline, hide the tile instead
+		// of showing dashes forever — keeps the dashboard honest.
+		if (data.deviceName === null) {
+			this.tileNet.style.display = 'none';
+			return;
+		}
+		this.tileNet.style.display = '';
+
+		if (data.rxBps !== null) this.rings.net.push(data.rxBps);
+
+		var d = fmtBpsSplit(data.rxBps);
+		var u = fmtBpsSplit(data.txBps);
+		// Use ↓ prefix on value so it visually matches the throughput row in
+		// the WAN Hero (Step 43 pairs these visually).
+		var displayValue = (d.num === '—') ? '—' : ('↓ ' + d.num + ' ' + d.unit);
+		var displayMeta  = (u.num === '—')
+			? (data.deviceName || '')
+			: ('↑ ' + u.num + ' ' + u.unit + (data.deviceName ? ' · ' + data.deviceName : ''));
+
+		setTile(this.tileNet, displayValue, displayMeta);
+		renderTileSpark(this.tileNet, this.rings.net);
 	},
 
 	tick: function () {

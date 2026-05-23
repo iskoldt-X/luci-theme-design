@@ -1322,3 +1322,85 @@ $ grep -c "wan-stats" luasrc/view/themes/design/footer.htm   1
 ```
 
 **回滚方式：** `git revert` 删除该 commit。消费者还没来（Step 43 后才会订阅），所以这个 Step 单独存在是无害的 dead code。
+
+---
+
+### Step 43 — 4 个 tile（Net 第 4 张）+ WAN Hero ↑↓ 行
+
+**时间**：2026-05-23
+**文件**：
+- `htdocs/luci-static/resources/sparkline.js`（+45 行：4th tile + subscribe to wan-stats + fmtBpsSplit）
+- `htdocs/luci-static/resources/wan-hero.js`（+40 行：throughput strip + onWanStats）
+- `htdocs/luci-static/design/css/features.css`（+45 行：`.wan-hero-throughput*` + `#design-tile-net` size override）
+
+**做了什么：**
+
+Step 42 的 `wan-stats.js` 单例终于有人订阅了。两个消费者：
+
+#### sparkline.js — 第 4 张 tile
+
+```
+┌──────────────┬──────────────┬──────────────┬──────────────┐
+│ CPU Load     │ Memory       │ WAN Traffic  │ Temperature  │  ← 第 4 张是新的
+│ 0.12         │ 68%          │ ↓ 45.2 Mbps  │ 52°C         │
+│ ▁▂▃▂▁▂       │ ████░░░░     │ ▂▅▇▅▃▇▆      │ ▂▂▂▂▂▂       │
+│ 1-min avg    │ 2.54/3.75 GB │ ↑ 12.4 Mbps  │ normal       │
+└──────────────┴──────────────┴──────────────┴──────────────┘
+```
+
+- 用 `i-activity` 图标
+- `L.require('wan-stats').then(ws => ws.subscribe(onWanStats))` 订阅
+- 回调 `onWanStats(data)` 把 rxBps push 进 `rings.net`，刷新 spark line / value / meta
+- 文字格式：`↓ XX.X Mbps`（value）/ `↑ XX.X Mbps · pppoe-wan`（meta，附设备名）
+- `font-size: text-xl` (不是 2xl) — "↓ 45.2 Mbps" 比 "0.12" 长很多，size 下调一档防止溢出
+- wan-stats 无 device 时（PPPoE 还没建立）整个 tile `display: none` — 显示 "—" 永远不变更不诚实
+
+#### wan-hero.js — 底部 throughput 行
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ 🌐 Internet  [● Online]                              1.4 ms       │   ← head
+├──────────────────────────────────────────────────────────────────┤
+│ Public IP   Connection   Uptime    Interface                     │   ← body
+│ 1.2.3.4     PPPoE         9d 14h    pppoe-wan                    │
+├──────────────────────────────────────────────────────────────────┤
+│ ↓ 487 Mbps                    ↑ 12 Mbps                           │   ← NEW throughput strip
+└──────────────────────────────────────────────────────────────────┘
+```
+
+- `.wan-hero-throughput` 横条加 `border-top` 分隔，与上方 body 静态字段语义不同（"live telemetry"）
+- 两个 `wan-hero-throughput-cell`：↓ 下行 / ↑ 上行
+- arrow（↓↑）用 accent 色 + bold，value 用 text-xl semibold tnum，unit 用 text-sm muted
+- `min-width: 3.5ch` 在 value 上 — `"8"` 和 `"456.2"` 切换不让 layout 抖动
+- 同样订阅 wan-stats，回调 `onWanStats(data)` 同步刷新两个 span 的 textContent
+
+**为什么单例订阅这么爽：**
+
+CPU 与 Memory 仍由原 `sysInfo()` 5s 节奏推动（Q16 fixed point 计算等逻辑保留）；Net tile 由 wan-stats 2s 节奏推动。两个 tile 在同一个 grid 里、不同 cadence — 视觉上 Net 更"live"，正好契合"实时流量"的语义。
+
+无 RPC duplication：sparkline + wan-hero 两个消费者订阅同一个 wan-stats，只发一份 `network.device.status` ubus call。CPU 闲不下来反而忙不过来这事不会发生。
+
+**关键防御：**
+
+- `wan-stats` 加载失败 → sparkline 隐藏 Net tile / wan-hero 隐藏 throughput 横条。**不**显示永久 "—"。
+- `data.deviceName === null` → 隐藏 Net tile（WAN 还没起来）。WAN Hero 自己仍能显示 ping / static fields，只是 throughput 一行空。
+- `data.rxBps === null` → push 跳过（MetricRing 自带 isFinite 检查），UI 显示 "—" 直到下次有效采样。
+- 全局 try/catch 在 wan-stats subscribe 内部，单个回调抛错不会连锁挂掉另一个消费者。
+
+**Break change：**
+
+- Overview 顶部 tile grid 从 3 列变 4 列（CSS Grid 用的 `auto-fit minmax(220px, 1fr)`，window 够宽自动 4 列，窄屏自动换行）
+- WAN Hero 卡片高度变高 ~50px（加了 throughput strip）
+- 第一次 ~2s 内 throughput 显示 "—"（需要 wan-stats 拿到两个 sample 才能 diff）。这是 wan-stats 设计的一部分，下次会持续 fresh
+
+**验证：**
+
+```bash
+$ node --check sparkline.js   ✅
+$ node --check wan-hero.js    ✅
+$ CSS braces 187 == 187      ✅
+$ rgb space syntax: 0        ✅
+$ camelCase tokens: 0        ✅
+```
+
+**剩余差距：** WAN Hero header 处的 5 根 latency bars（preview 里 ping 数字前的小信号条）留给 Step 48。Devices count 也留 Step 48。

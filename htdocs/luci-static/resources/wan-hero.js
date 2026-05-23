@@ -3,6 +3,18 @@
 'require ui';
 'require rpc';
 'require network';
+'require wan-stats';
+
+// Step 43: throughput formatter (rate in bps → number + unit) — kept inline
+// here rather than importing from a shared module, since the only other
+// consumer is sparkline.js and a 5-line helper isn't worth a module boundary.
+function fmtBpsSplit(bps) {
+	if (bps === null || bps === undefined || !isFinite(bps)) return { num: '—', unit: '' };
+	if (bps < 1000)    return { num: bps.toFixed(0),       unit: 'bps' };
+	if (bps < 1e6)     return { num: (bps / 1000).toFixed(1),  unit: 'Kbps' };
+	if (bps < 1e9)     return { num: (bps / 1e6).toFixed(1),   unit: 'Mbps' };
+	return { num: (bps / 1e9).toFixed(2), unit: 'Gbps' };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WAN Hero card — upgrade.md §2.A1
@@ -115,11 +127,52 @@ return baseclass.extend({
 					E('div', { 'class': 'wan-hero-field-label' }, _('Interface')),
 					E('div', { 'class': 'wan-hero-field-value', 'id': 'wan-hero-iface' }, '—')
 				])
+			]),
+			// Step 43: live throughput strip — fed by wan-stats every 2 s. Sits
+			// at the bottom with a border-top separator so it reads as "live
+			// telemetry" distinct from the static fields above.
+			E('div', { 'class': 'wan-hero-throughput', 'id': 'wan-hero-throughput' }, [
+				E('div', { 'class': 'wan-hero-throughput-cell' }, [
+					E('span', { 'class': 'wan-hero-throughput-arrow' }, '↓'),
+					E('span', { 'class': 'wan-hero-throughput-value', 'id': 'wan-hero-down' }, '—'),
+					E('span', { 'class': 'wan-hero-throughput-unit',  'id': 'wan-hero-down-unit' }, '')
+				]),
+				E('div', { 'class': 'wan-hero-throughput-cell' }, [
+					E('span', { 'class': 'wan-hero-throughput-arrow' }, '↑'),
+					E('span', { 'class': 'wan-hero-throughput-value', 'id': 'wan-hero-up' }, '—'),
+					E('span', { 'class': 'wan-hero-throughput-unit',  'id': 'wan-hero-up-unit' }, '')
+				])
 			])
 		]);
 		// Sparkline tiles were injected before view.firstChild; put hero BEFORE them
 		var view = document.getElementById('view');
 		view.insertBefore(card, view.firstChild);
+
+		// Step 43: subscribe to wan-stats for live throughput. Same singleton
+		// the Net tile uses — one RPC stream, two consumers.
+		var self = this;
+		L.require('wan-stats').then(function (ws) {
+			ws.subscribe(L.bind(self.onWanStats, self));
+		}).catch(function () {
+			// wan-stats unavailable — hide the throughput strip rather than
+			// show forever-"—" telemetry.
+			var strip = document.getElementById('wan-hero-throughput');
+			if (strip) strip.style.display = 'none';
+		});
+	},
+
+	// Step 43: render live ↑/↓ throughput from the wan-stats singleton.
+	onWanStats: function (data) {
+		var d = fmtBpsSplit(data.rxBps);
+		var u = fmtBpsSplit(data.txBps);
+		var setText = function (id, txt) {
+			var el = document.getElementById(id);
+			if (el) el.textContent = txt;
+		};
+		setText('wan-hero-down', d.num);
+		setText('wan-hero-down-unit', d.unit);
+		setText('wan-hero-up', u.num);
+		setText('wan-hero-up-unit', u.unit);
 	},
 
 	refresh: function () {
