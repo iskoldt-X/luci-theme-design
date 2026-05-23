@@ -1,0 +1,45 @@
+#!/bin/sh
+# Theme-provided CGI: raw CPU counters from /proc/stat first line.
+# Returns JSON: { "total": N, "idle": N, "busy": N, ... }
+#
+# Why a CGI: ubus call system info exposes load[0..2] (run-queue length)
+# but not CPU utilisation. loadavg can't drive a 0-100% percentage display
+# (load 0.8 on a 4-core router is 20%, on a 1-core router is 80%) — we
+# need raw scheduler counters to compute true utilisation.
+#
+# /proc/stat first line is the kernel's cumulative CPU time accounting:
+#   cpu user nice system idle iowait irq softirq steal guest guest_nice
+# in USER_HZ jiffies (typically 100 Hz, 1 jiffy = 10ms). Each field is
+# monotonically increasing since boot. The browser-side polls this CGI
+# every few seconds and computes (busyDiff / totalDiff) × 100 to get the
+# percentage utilisation over that window.
+#
+# Conventions:
+#   total = sum of all 8 standard fields
+#   busy  = total - idle - iowait
+#           (iowait counts as idle per kernel convention — the CPU isn't
+#            actually running anything while waiting for I/O completion)
+#
+# Counters are cumulative + monotonic so JS-side delta computation is
+# safe across polls (no risk of wrap on 64-bit kernels for ~10^11 years).
+#
+# Round 15 / Step 90 (2026-05-23). Companion to /cgi-bin/design/temp,
+# /cgi-bin/design/devstats. Same install pattern: chmod +x via Makefile.
+
+echo "Content-Type: application/json"
+echo "Cache-Control: no-store"
+echo ""
+
+# busybox ash supports multi-word `read` — single shot, no awk needed.
+read cpu user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+
+# Default any missing counters to 0 — guest / guest_nice / steal can be
+# absent on older kernels or non-virt-aware builds.
+: "${user:=0}"   "${nice:=0}"    "${system:=0}"  "${idle:=0}"
+: "${iowait:=0}" "${irq:=0}"     "${softirq:=0}" "${steal:=0}"
+
+total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+busy=$((total - idle - iowait))
+
+printf '{"user":%s,"nice":%s,"system":%s,"idle":%s,"iowait":%s,"irq":%s,"softirq":%s,"steal":%s,"total":%s,"busy":%s}\n' \
+	"$user" "$nice" "$system" "$idle" "$iowait" "$irq" "$softirq" "$steal" "$total" "$busy"

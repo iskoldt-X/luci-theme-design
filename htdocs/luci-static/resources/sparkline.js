@@ -294,6 +294,21 @@ function fetchTempZones() {
 		.catch(function () { return null; });
 }
 
+// Step 90 (Round 15): raw cumulative CPU counters from /proc/stat (via
+// theme CGI). Browser-side computes delta-over-delta to get percentage
+// utilisation between two polls. Returns null on transport error so the
+// caller can skip this tick gracefully.
+function fetchCpuStat() {
+	return fetch('/cgi-bin/design/cpustat', { cache: 'no-store' })
+		.then(function (r) { return r.ok ? r.json() : null; })
+		.then(function (data) {
+			if (!data || typeof data.total !== 'number' || typeof data.busy !== 'number') return null;
+			if (data.total <= 0) return null;
+			return data;
+		})
+		.catch(function () { return null; });
+}
+
 function formatBytes(bytes) {
 	if (bytes < 1024) return bytes + ' B';
 	if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
@@ -363,10 +378,14 @@ return baseclass.extend({
 
 	injectTiles: function () {
 		var view = document.getElementById('view');
-		// Step 89 (Round 15): memory tile opts in to the progress bar
-		// (4th makeTile arg). Other tiles use the default (sparkline only).
+		// Step 89 + 90 (Round 15): CPU and memory both opt into the progress
+		// bar — both are natural 0-100% utilisation metrics. Net is throughput
+		// (no upper bound) and temp doesn't have a meaningful 0-100 range, so
+		// those keep just the sparkline. Step 90 also renamed CPU 'Load' →
+		// 'Usage' to match the new data source (CPU% from /proc/stat, no
+		// longer loadavg from ubus).
 		var grid = E('div', { 'class': 'design-tile-grid' }, [
-			makeTile('design-tile-cpu',  'i-cpu',         _('CPU Load'),    this.iconBase),
+			makeTile('design-tile-cpu',  'i-cpu',         _('CPU Usage'),   this.iconBase, /*hasProgress*/ true),
 			makeTile('design-tile-mem',  'i-memory',      _('Memory'),      this.iconBase, /*hasProgress*/ true),
 			makeTile('design-tile-net',  'i-activity',    _('WAN Traffic'), this.iconBase),
 			makeTile('design-tile-temp', 'i-thermometer', _('Temperature'), this.iconBase)
@@ -445,39 +464,54 @@ return baseclass.extend({
 	tick: function () {
 		var self = this;
 
-		// CPU + memory in one ubus call
+		// ── Memory via ubus (CPU has moved to /cgi-bin/design/cpustat — see
+		//    next block). sysInfo().load[] is still emitted but we no longer
+		//    consume it: CPU% from raw /proc/stat counters is the right
+		//    primitive for a 0-100% display.
 		sysInfo().then(function (info) {
-			if (!info) return;
+			if (!info || !info.memory || !info.memory.total) return;
+			var used    = info.memory.total - (info.memory.available || info.memory.free || 0);
+			var pct     = (used / info.memory.total) * 100;
+			var prevMem = self.rings.mem.last();
+			self.rings.mem.push(pct);
+			setTile(self.tileMem, {
+				num:      pct.toFixed(0),
+				unit:     '%',
+				trend:    deltaToTrend(pct, prevMem, { threshold: 1.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
+				progress: pct,
+				meta:     formatBytes(used) + ' / ' + formatBytes(info.memory.total)
+			});
+			renderTileSpark(self.tileMem, self.rings.mem);
+		}).catch(function () { /* keep stale display */ });
 
-			// ── CPU (Step 89: still loadavg here; Step 90 swaps in CPU% data
-			//    source). loadavg[0] is 1-min average, ubus encodes as Q16
-			//    fixed point.
-			var load1   = (info.load && info.load[0]) ? info.load[0] / 65536 : 0;
-			var prevCpu = self.rings.cpu.last();
-			self.rings.cpu.push(load1);
+		// ── CPU% (Step 90, Round 15): replaces the old loadavg-based display.
+		//    Read raw cumulative counters from /proc/stat via theme CGI, diff
+		//    against the previous sample to derive busyDiff / totalDiff =
+		//    percentage utilisation over that ~5 s window. First poll just
+		//    anchors the counters; second poll onwards renders a real %.
+		fetchCpuStat().then(function (stat) {
+			if (!stat) return;
+			var prev = self._lastCpuStat;
+			self._lastCpuStat = stat;
+			if (!prev) return;  // first sample — anchor only, no display yet
+
+			var totalDiff = stat.total - prev.total;
+			var busyDiff  = stat.busy  - prev.busy;
+			// Counter wrap / process reset / impossibly-short window — skip
+			// this sample, anchor stays put for the next diff.
+			if (totalDiff <= 0 || busyDiff < 0) return;
+
+			var pct     = Math.max(0, Math.min(100, (busyDiff / totalDiff) * 100));
+			var prevPct = self.rings.cpu.last();
+			self.rings.cpu.push(pct);
 			setTile(self.tileCpu, {
-				num:   load1.toFixed(2),
-				unit:  '',
-				trend: deltaToTrend(load1, prevCpu, { threshold: 0.05, format: function (v) { return v.toFixed(2); } }),
-				meta:  _('1-min loadavg') + ' · ' + _('Avg') + ' ' + self.rings.cpu.avg().toFixed(2)
+				num:      pct.toFixed(0),
+				unit:     '%',
+				trend:    deltaToTrend(pct, prevPct, { threshold: 1.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
+				progress: pct,
+				meta:     _('Past 5 min · Avg %s%%').format(self.rings.cpu.avg().toFixed(1))
 			});
 			renderTileSpark(self.tileCpu, self.rings.cpu);
-
-			// ── Memory used %
-			if (info.memory && info.memory.total) {
-				var used    = info.memory.total - (info.memory.available || info.memory.free || 0);
-				var pct     = (used / info.memory.total) * 100;
-				var prevMem = self.rings.mem.last();
-				self.rings.mem.push(pct);
-				setTile(self.tileMem, {
-					num:      pct.toFixed(0),
-					unit:     '%',
-					trend:    deltaToTrend(pct, prevMem, { threshold: 1.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
-					progress: pct,
-					meta:     formatBytes(used) + ' / ' + formatBytes(info.memory.total)
-				});
-				renderTileSpark(self.tileMem, self.rings.mem);
-			}
 		}).catch(function () { /* keep stale display */ });
 
 		// ── Temperature
