@@ -1449,6 +1449,12 @@
     z-index: 9999 !important;
     /* Step 51: wider so the pending pill + Apply button fit on one line. */
     min-width: 280px;
+    /* Step 95 (Round 18): cap width on narrow viewports so the panel can
+       never exceed (viewport − 16 px). Pairs with the rAF edge-collision
+       clamp in quick-actions.js: with this cap, the clamp can always
+       find a valid right value that keeps the panel ≥8 px from both
+       edges, no matter how narrow the viewport. */
+    max-width: calc(100vw - 16px);
     background: var(--color-surface-0);
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-lg);

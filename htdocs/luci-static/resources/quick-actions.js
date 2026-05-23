@@ -188,6 +188,27 @@ return baseclass.extend({
 			self.dropdown.style.top  = (rect.bottom + 4) + 'px';
 			self.dropdown.style.right = (window.innerWidth - rect.right) + 'px';
 			self.dropdown.classList.add('open');
+
+			// Step 95 (Round 18): edge-collision clamp. The right-anchored
+			// positioning above pins the dropdown's right edge to align with
+			// the trigger's right edge — fine on desktop, but on narrow
+			// viewports (≤480 px) the 280-px-wide panel hangs off the LEFT
+			// edge of the screen, hiding most of its options. Chrome-Claude
+			// Round-17 responsive sweep caught this at vw=199.
+			//
+			// Fix: defer to next frame so the dropdown has been laid out
+			// with its actual width (after CSS `max-width: calc(100vw - 16px)`
+			// in Step 95's features.css change kicks in), then if its left
+			// edge is <8 px from the viewport, shift `right` so left lands
+			// at exactly 8 px.
+			requestAnimationFrame(function () {
+				if (!self.dropdown) return;
+				var ddRect = self.dropdown.getBoundingClientRect();
+				if (ddRect.left < 8) {
+					self.dropdown.style.right =
+						Math.max(8, window.innerWidth - 8 - ddRect.width) + 'px';
+				}
+			});
 		});
 	},
 
