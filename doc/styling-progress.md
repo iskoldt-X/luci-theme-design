@@ -1700,6 +1700,185 @@ preview 里 "本次会话流量 ↓ 4.8 GB · ↑ 32 MB (Netflix?)" 这种 "Netf
 
 ---
 
+## 🤝 第十八轮(Step 95-99):多 viewport 响应式 sweep + nlbwmon 诊断 hint
+
+> 触发:Chrome-Claude 主动跑了一遍 13 个不同 viewport 尺寸(2560 → 199px),catalog 出 6 个真 bug + 2 个 cosmetic。同时调查用户 Bandwidth Monitor / Overview Traffic Analysis 卡为空的根因 — 发现是路由器的 Software Flow Offloading 绕过 conntrack 让 nlbwmon 拿不到字节计数,**不是主题 bug**。
+
+### 🔴 Step 95 — QA dropdown 窄屏左侧溢出
+
+`.quick-actions-dropdown` 是 `position: fixed; min-width: 280px`,JS 在 `open()` 把它 `right` 锚到 trigger 的右缘。在 vw=199 这种极窄视口,trigger 自身距左 40px,280px 宽的 dropdown 算出 `left=-204px` —— **整个 ~204px 飞出左边屏外**,只剩右侧 76px 可见 ≈ 75% 选项不可见也不可点。
+
+**修法**:
+- CSS:`max-width: calc(100vw - 16px)`,极窄屏自动缩窄到 viewport - 16
+- JS:`requestAnimationFrame` 延一帧让 CSS 应用,然后测 `getBoundingClientRect().left`,若 `<8` 重设 `right` 让 `left = 8`
+
+### 🔴 Step 96 — Bottom nav 盖住底部 hero 内容
+
+Step 74 加了桌面 `@media (min-width: 993px) { .main-right { padding-bottom: 0 } }` 但**没加 mobile-side counterpart**。`.navbar { position: fixed; bottom: 0; height: 50px + safe-area }` 在 mobile 下显示,但 `.main-right` 没 padding-bottom 让出空间,所以最后 50-60px 内容(hero 最后一行字段)永久被盖。
+
+**修法**:对称加 `@media (max-width: 992px) { .main-right { padding-bottom: calc(50px + env(safe-area-inset-bottom) + var(--space-4)) } }`。匹配 navbar 自身高度公式 + 一个 var(--space-4) 的呼吸 buffer。
+
+### 🔴 Step 97 — WAN hero 极窄 viewport(≤360px)溢出
+
+`.wan-hero-grid` 在 ≤640px 已经降到 `1fr 1fr` 2 列。但 vw=199 时连 2 列也撑不住:`grid-template-columns: 1fr 1fr` 加 `gap: var(--space-3)` 让每列 ~95px,长 IPv4 `91.229.203.238` 被硬换行成 `91.229.20` + `3.238`,Connection / Interface 截到 `DH` / `eth`。
+
+**修法**:加 `@media (max-width: 360px)` 第二档断点:
+- `.wan-hero { padding: var(--space-3) }` (再降一档)
+- `.wan-hero-grid { grid-template-columns: 1fr }` (单列)
+- `.wan-hero-throughput { flex-direction: column }` (↑/↓ 行竖叠)
+- 基础 dd 加 `overflow-wrap: anywhere` 以兜底其他不可预知的长串
+
+### 🟡 Step 98 — 桌面 breakpoint 992 → 1100 px
+
+Step 74 把 mobile 断点设在 992。问题是 **1366×768 笔记本** + 现代浏览器 chrome(devtools 一开占 250-400 px)= 实际 viewport 1000-1100,正好踩进 mobile 模式 —— sidebar 收起,bottom navbar 出现。但 1366 笔记本完全有空间放 17rem sidebar + 内容,被强塞进 mobile 是浪费。
+
+**修法**:断点上调到 1100/1101。`@media (max-width: 992px)` → `1100px`(5 处),`@media (min-width: 993px)` → `1101px`(1 处),`menu-design.js` `width <= 992` 比较 → `<= 1100`(3 处)。共 9 处。
+
+**副作用**:这个改动 **意外把 Round 20 的 .showSide P0 bug 暴露给主流用户**。详见 Round 20。
+
+### 🟢 Step 99 — nlbwmon empty state 加 flow-offload 诊断 hint
+
+不是 bug,是 UX 防御。Chrome-Claude 帮用户调试 Traffic Analysis 卡为空时,确认主题渲染逻辑正确(`data: []` → empty state),根因是路由器 Network → Firewall → Software flow offloading 把 LAN-WAN TCP 流绕过 conntrack 走 fastpath,nlbwmon 订阅的 conntrack 计数被冻结。
+
+**修法**:`traffic.js` empty state 从单一文字 → 两行 — 主行 "No traffic data yet" 不变,新增灰色细小副行 "Tip: if still empty after a minute, check Network → Firewall → Routing/NAT Offloading"。`.traffic-empty-hint` 用 `text-xs` + `color: text-subtle`,健康部署不会看到(60s 内填满 = 副行消失)。
+
+### 📊 第十八轮(Step 95-99)累计
+
+| 指标 | 第十七轮后 | 第十八轮后 |
+|---|---|---|
+| QA dropdown 窄屏可达性 | ≤480px 飞出左侧 75% | 全 viewport 完整可见 |
+| Bottom navbar 内容遮挡 | mobile 底部 50px 永久被盖 | padding-bottom 让出空间 |
+| WAN hero 极窄(≤360px) | 内容横向溢出 + 文字硬截断 | 单列堆叠,完全 fit |
+| Desktop breakpoint | 992(1366 笔记本被强塞 mobile) | 1100(1366 笔记本回桌面) |
+| nlbwmon empty 诊断 | 用户无线索可排查 | 第二行 hint 指向 flow offloading |
+
+---
+
+## 🚀 第十九轮(Step 100 + 101):登录页 11px 偏移 + glow 对称化
+
+> 触发:Chrome-Claude 顺手帮用户 audit 了登录页 "感觉歪",做精确几何测量发现 form 左边距 315px 右边距 326px = 11px 偏左。同时发现 `body::before` 的两个 radial-gradient 不对称(20%/25% + 80%/75%),视觉上**放大**了这 11px 的偏移感。A/B 测试关掉 glow → 偏移感"几乎消失"。
+
+### Step 100 — 11px 几何偏移修复
+
+**DOM 链**:
+```
+body (1061)  →  .main-right (1061)  →  #maincontent (1050, -11)  →  .container (420, centered)
+```
+
+`.main-right` 由 `menu-design.js:198` 在运行时设 `overflow: auto`(为 dashboard 滚动)。登录页 form 短不需要滚,但浏览器仍 reserve ~11px scrollbar gutter,把 `.main-right` 内容盒右侧缩 11px。`#maincontent` width:auto 继承缩窄的内容盒 → 1050px。form 在 1050px 内 centered,但 `.main-right` 自己是 1061px,所以**视觉中心偏左 5.5px**。
+
+**修法**(scoped to `.node-main-login`):
+- `.main-right { overflow: visible !important }` —— login form 永远 fit,不需要 scrollbar,直接撤销 JS 设的 auto。`!important` 因为 JS 是 inline style,specificity 总是赢
+- `#maincontent { width: 100% }` —— belt-and-suspenders,防任何继承的 dashboard rule
+
+### Step 101 — Glow 对称化
+
+`.node-main-login::before` 原是两个 radial-gradient:`circle at 20% 25%`(左上)+ `circle at 80% 75%`(右下)。左上 glow 在视觉焦点区,亮且大,光晕"吸引"眼睛偏左,大脑把"那块亮的"当参照物 → form 在视觉重心上显得"被推向右"。同时几何位置略偏左,两个矛盾信号叠加 = "说不清的歪"。
+
+**修法**:换成单个 `circle at 50% 40%`(略高于真中心,让 glow halo 落在 login card 后方,不抢眼)。视觉重心对称 → 任何残余亚像素几何漂移都"消失"在 ambient backdrop 里。
+
+### 📊 第十九轮(Step 100-101)累计
+
+| 指标 | 第十八轮后 | 第十九轮后 |
+|---|---|---|
+| Login form 左右边距 | 315 / 326(差 11px) | 对称 |
+| 视觉感受 | "明显歪" | dead center |
+| Glow 布局 | 双 radial,非镜像 | 单中心 radial |
+
+---
+
+## 🔥 第二十轮(Step 102):P0 .showSide hit-target 劫持 cmdk/QA/theme 三按钮
+
+> 触发:Chrome-Claude 在 Round 19 末的 sweep 里**重新用 `elementFromPoint()` 测试** `.showSide`(他 Round 17 sweep 时只看视觉重叠,judge 为 "无功能影响" 是错的)。这次发现 cmdk-trigger / quick-actions-trigger / theme-toggle 三个按钮的中心点 `elementFromPoint()` **全部返回 `.showSide` button** —— 即所有 ≤1100px 视口的用户点这 3 个图标都触发"侧栏滑出",不是命令面板 / Quick Actions / 主题切换。
+
+### 根因
+
+`@media (max-width: 1100px)` 块里:
+```css
+.showSide {
+    position: absolute;
+    width: 300px;        ← 300×50 = 15000 px² invisible hit-target
+    height: 50px;
+    padding: 17px 27px;  ← visible icon (::before) 只有 22×16 在中心
+}
+```
+
+heritage:luci-theme-bootstrap 时代 hamburger 紧贴大块 brand logo,300×50 的透明命中区方便手指点。我们的主题把右侧塞进了 cmdk/QA/theme 三个 36×36 图标,**几何上完全撞车**,但 CSS 一直没更新。
+
+Step 98 把断点从 992 上调到 1100 后,**1366×768 笔记本 + 中等浏览器宽度** 这群主流用户被新拖入受影响范围。所以这一刀**触发条件其实是 Step 98 间接造成的 P0 升级** —— bug 一直在,但只在窄屏(≤992px)触发,影响面小。Step 98 把影响面扩大了 ~3 倍。
+
+### 修法
+
+把 `.showSide` 改为 `position: static; display: inline-flex; width: 36px; height: 36px; padding: 0`。inline-flex 让 22×16 的 ::before 在 36×36 box 内自动 center。`.showSide` 在 DOM 里是 `header > .fill > .container` 第一个子元素,所以 static 后自然落在最左,brand 接在它后面。
+
+顺手清掉 `@media (max-width: 370px) { .showSide { height: 45px } }` —— 那是为 50px 基线降高度做兼容的,新 36px 基线不需要。
+
+### 教训
+
+> **"看不见的大元素覆盖在可见 UI 上 = 哪怕透明也要 `elementFromPoint` 测试"**
+
+Round 17 Chrome-Claude 给 `.showSide` 的判断:"transparent, no z-index 抢占, 和真正的 QA trigger 不重叠, 所以**没有功能影响**" —— 错了。重叠判断只看了几何 bounding box,没用 hit-test API。Round 19/20 的方法论升级:对一切"绝对定位 + 大于可见 icon 区域"的元素,都该跑 elementFromPoint 至 click event 路径验证。
+
+### 📊 第二十轮(Step 102)累计
+
+| 指标 | 第十九轮后 | 第二十轮后 |
+|---|---|---|
+| ≤1100px 视口 cmdk 按钮 | 点击 → 侧栏滑出(劫持) | 点击 → 命令面板打开 |
+| ≤1100px QA 按钮 | 点击 → 侧栏滑出 | 点击 → QA dropdown |
+| ≤1100px theme 按钮 | 点击 → 侧栏滑出 | 点击 → 主题切换 |
+| .showSide 命中区 | 300×50 = 15000 px² | 36×36 = 1296 px² |
+| .showSide 视觉布局 | position:absolute 飞出流 | 自然 inline-flex 在最左 |
+
+---
+
+## 🎯 第二十一轮(Step 103):全站 11px 偏移系统性修复
+
+> 触发:Round 19 修了 login 后,Chrome-Claude 自动做了一次全站 audit —— 测量 12 个 LuCI 页面的 `#maincontent` 几何。报告了非常干净的**二元分布**:8 个 admin 页面 dw=11,4 个特殊页面 dw=0。
+
+### Chrome-Claude 的假设 + 我的源码证伪
+
+他猜根因是 LuCI cbi-map / cbi-section 模板里有 `width: calc(100% - 11)` 或 `margin-right: 11px` 这类规则。`grep -rn "calc(100% - 11\|1050px\|margin-right:.*11px"` 项目内 **0 hit** —— 假设错。
+
+但他的**二元数据是金子**。8 个"歪"页面有共性:`overview / network / firewall / dhcp / system/system / nlbw / realtime / openclash` —— 都是**内容垂直溢出的页面**。4 个"干净"页面:`wireless`(JS render,短)/ `admin`(tabs,短)/ `syslog`(textarea 内部滚)/ `login`(Round 19 已修)—— 都是**内容不溢出**的页面。
+
+→ 真根因 = **Round 19 我对 login 的诊断同源,只是不同触发条件**。`.main-right { overflow: auto }`(menu-design.js 运行时设)在内容溢出时浏览器 reserve scrollbar gutter ~11-17px,缩窄 `.main-right` 内容盒右侧 → `#maincontent` width:auto 继承 → 偏左居中。
+
+### 修法
+
+`scrollbar-gutter: stable both-edges` 加在 `.main-right`。**单行 CSS**。语义:浏览器在 inline-start AND inline-end **两侧**始终 reserve scrollbar gutter,无论 scrollbar 实际有没有渲染。
+
+平台行为矩阵:
+| 平台 | Before | After |
+|---|---|---|
+| macOS (overlay scrollbars) | 全部 dw=0 | 无变化 — overlay 永远不 reserve gutter |
+| Windows / Linux (传统 scrollbar) | 8 dw=11 / 4 dw=0(二元) | 全部对称 dw≈22-34, drift=0 |
+
+权衡:Windows/Linux 用户内容区净宽减少 11-17 px(双侧 gutter reserve)。换来视觉一致性 —— 翻页时不再"有的偏左有的居中"的 jitter。
+
+浏览器支持:Chrome 94+ / Firefox 97+ / Safari 14.1+,全在我们的 evergreen 范围内。老浏览器忽略未知 property,行为退化为现在的二元状态 —— graceful degradation。
+
+### 📊 第二十一轮(Step 103)累计
+
+| 指标 | 第二十轮后 | 第二十一轮后(Win/Linux) | 第二十一轮后(macOS) |
+|---|---|---|---|
+| 全站 `#maincontent` drift | 8 页 -11px / 4 页 0 | 0(全对称) | 0(无变化,overlay) |
+| 内容区净宽 | 全宽减 0-11 | 全宽减 22-34 | 全宽(overlay 不占) |
+| 翻页 jitter | 有(歪/正切换) | 无 | 无 |
+
+---
+
+## 🎯 Round 18-21 横向观察
+
+**Chrome-Claude 的"现象数据"vs"根因假设"分离**:Round 21 最典型 —— 他给的二元矩阵(8 dw=11 / 4 dw=0)是金子,但他的根因 CSS-rule 假设错了。**有源码访问 = 我可以 grep 证伪**,Chrome-Claude 只能从外部观察推测,无法触碰内部数据。两边各有不可替代的角色:他**找现象**,我**对源码**。Round 20 的 .showSide elementFromPoint 也是这模式 —— 他用 hit-test API 找出**功能性 bug**(Round 17 时他只用几何判断 mis-rated 为 cosmetic),我用 CSS 源码 grep 锁定**确切修改点**。
+
+**"Bug 触发条件可被另一修复无意扩大"**:Step 98 把 mobile 断点从 992 上调到 1100 完全是好事(1366 笔记本回桌面模式)。但 .showSide P0 bug 之前只在 ≤992 触发,影响面小;Step 98 一刀把影响面扩到 1100,**主流 1366×768 用户都中招**。Round 20 一查就是 P0。教训:**任何拓宽 viewport 影响面的改动,顺手把那个 viewport 范围内的已知 hover/click hit-test 都跑一遍**。回想起来 Step 98 commit message 那个"audit 992 references"我只 audit 了 CSS 选择器,**没 audit 这个 range 里的 absolute-position invisible buttons**。
+
+**"修 A 不一定能修 B"**:Round 19 的 login 修法用 `overflow: visible !important` 杀掉 scrollbar 来解决 11px gutter。Round 21 audit 发现 8 个 logged-in 页面**也是 11px 同样症状**,但**不能套同样修法** —— 那些页面真的需要垂直滚动。同源问题,不同环境约束,需要不同 mechanism(`scrollbar-gutter` 而非 kill the scrollbar)。**修 bug 时弄清"我们修的是 mechanism 还是 visible 部分"** —— 后者扩散性差。
+
+**响应式 viewport 测试覆盖度**:Chrome-Claude 在 Round 18 跑了 13 个 viewport(2560 → 199px),Round 19 又跑了 12 个页面。这种"网格 sweep"产出价值远超"我现场看着觉得这里不对"。**未来 release 前应该至少跑一次:N 个页面 × M 个 viewport 的矩阵 sweep**,即使只是手动开 N×M 个浏览器窗口。
+
+---
+
 
 
 
