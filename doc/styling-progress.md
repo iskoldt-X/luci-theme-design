@@ -1983,6 +1983,337 @@ future theme code(devices.js / cmdk.js / 新的 standalone widget)想用这套 v
 
 ---
 
+## 🔧 第二十三轮(Step 107):Step 105 selector regression — `<td>` + `.cbi-section` wrapper
+
+> 触发:Chrome-Claude Round 22 verify pass 在 `/admin/system/mounts`(Disk Man)和 `/admin/system/flash`(Backup/Restore)上抓到 2 个 regression。两个都是 Step 105 form-row grid 的副作用 —— 这就是 Round 22 横向观察里那条 "cross-cutting CSS 重写应该独立 round" 教训的现报。
+
+### 两个 regression 同源
+
+**Disk Man 错位**:Disks 表的每行 `<td class="cbi-value-field">` 中 8 个数据 cell 全部垂直堆叠在 x=338,只有 `<th>` 表头还横排。
+
+**Backup/Flash 卡缩成 200px**:`/admin/system/flash` 的 3 个 section 卡片每个挤在屏幕左侧 200px 宽,"Generate archive" 按钮被裁切。
+
+**根因都是 Step 105 写的两条裸类选择器**:
+```css
+.cbi-value { display: grid; grid-template-columns: 200px 1fr; ... }
+.cbi-value-field { display: block; ... }
+```
+
+- 第一条命中**任何**带 `.cbi-value` 类的元素 —— LuCI 用 `<div class="cbi-value">` 做 simpleform 包装 `<div class="cbi-section">`。grid 把 inner section 塞进 200px label 列,squished。
+- 第二条命中**任何**带 `.cbi-value-field` 类的元素 —— LuCI 在 `<table class="cbi-section-table">` 里发 `<td class="cbi-value-field">` 数据格,`display: block` 杀了 native table-cell 横向流。
+
+### 修法:双层 selector scope
+
+```css
+/* 只在 div 父 + 有 label 子 的情况下 grid */
+div.cbi-value:has(> .cbi-value-title) {
+    display: grid;
+    grid-template-columns: minmax(140px, 200px) 1fr;
+    ...
+}
+/* 子规则全部 scope 到 div.cbi-value 直接子,td 永远不匹配 */
+div.cbi-value > .cbi-value-title { ... }
+div.cbi-value > .cbi-value-field { ... }
+```
+
+`:has()` 浏览器支持:Chrome 105+/Safari 15.4+/Firefox 121+,LuCI 26.x 用户基本都过线。老浏览器走 LuCI 默认 35/65 layout —— graceful degradation。
+
+### 📊 第二十三轮(Step 107)累计
+
+| 指标 | 第二十二轮后 | 第二十三轮后 |
+|---|---|---|
+| Disk Man 表格行 | 8 个 td 全垂直堆叠在 x=338 | 横向恢复 |
+| Backup/Flash section 宽度 | 200px(squished),"Generate archive" 裁切 | 全宽,按钮完整 |
+| Normal config form rows | 不受影响,Step 105 grid 继续生效 | 不变 |
+| `.cbi-value-field` selector 命中范围 | 全文档(含 td) | 只 `div.cbi-value` 直接子 |
+
+---
+
+## 🔧 第二十四轮(Step 108):realtime graphs typography + global svg text
+
+> 触发:用户说"realtime graphs 页面的字体我不太喜欢"。Chrome-Claude 全 audit 3 个 sub-tab(Load / Bandwidth / Connections)字体状态,出了大段 hypothesis,**但他大部分假设错了** —— 只有 1 处 orphan declaration 是真的,grep 证伪了其他几条。
+
+### 验真:Chrome-Claude 4 个假设的命中率
+
+| 他怀疑 | grep 实际 |
+|---|---|
+| `.svg-icon` 被钉死 Arial | ❌ 我们 `.svg-icon` 没设 family,Arial 是浏览器 UA fallback |
+| 多处 orphan `-apple-system` | ❌ **只有 1 处**(style.css:4415,realtime 页 scoped) |
+| 无 `svg text` rule | ✓ 确实缺,SVG `<text>` 走 UA `sans-serif` |
+| Arial 硬编码 | ❌ 无 |
+
+### 真凶 + 修法
+
+**Line 4415**:
+```css
+.node-admin-status-realtime-load #view div,
+.node-admin-status-realtime-bandwidth #view div,
+.node-admin-status-realtime-connections #view div {
+    font-family: -apple-system;     /* ← 裸 apple-system 无 fallback */
+}
+```
+
+非 Apple 系统下 `-apple-system` 是未知关键字 → UA fallback 到 serif(Times-like)。realtime 页 `#view` 下**每个 div** 都中,所以 descr / td / strong 全部受影响。
+
+**修法 1**:`-apple-system` → `var(--font-sans)`(完整 12 名 stack)。
+
+**修法 2**(SVG text 继承缺):新加全局规则
+```css
+svg text, svg tspan {
+    font-family: var(--font-sans) !important;
+    fill: currentColor;
+}
+```
+`!important` 防 LuCI graph 内联 attribute 覆盖。
+
+**修法 3**(bonus):line 2855 `font-family: Menlo, Mono` → `var(--font-mono)`("Mono" 不是真 fontname)。
+
+### 我没做但 Chrome-Claude 建议的
+
+跳过给 `.cbi-map-descr / td / strong / .cbi-value-title` 加 `var(--font-base)` —— grep 证实**那些 selector 没有 orphan**,他在 DOM 看到 Times 是**从 line 4415 cascade 下来的 inherited 值**。修了 4415 一处,cascade 自然正确。多加规则是 redundant noise。
+
+### 📊 第二十四轮(Step 108)累计
+
+| 指标 | 第二十三轮后 | 第二十四轮后 |
+|---|---|---|
+| Realtime 页 descr / td / strong | UA serif fallback(Times-like) | `var(--font-sans)` 一致 |
+| SVG `<text>` 轴标签 | SVG UA `sans-serif`(Helvetica/Arial) | `var(--font-sans)` 跟周围文字一致 |
+| `Menlo, Mono` 假 fontname | UA-default monospace | `var(--font-mono)` 完整 6-fallback |
+
+---
+
+## 🎯 第二十五轮(Step 109):topbar 4 个按钮中线偏 10px + poll-status 神秘小灰条
+
+> 触发:Chrome-Claude 给 topbar 4 个 trigger(≡ 🔍 ⚡ 🌙)做 `elementFromPoint` + 精确几何测量,发现**两个**问题。
+
+### Bug 1:按钮 y=18,header centerline y=28(差 10px)
+
+**几何**:`header.h = 55px` / `.fill.h = 37px`(没占满 header)/ 按钮 36×36 静态居中在 `.fill` 顶部 → y=18 vs header 中线 y=28 差 10px。
+
+**根因**:`header > .fill > .container` **没设 `align-items: center` / height**,children 自然 inline-flow 在 `.fill` 顶部。
+
+**修法(根因 fix)**:
+```css
+header > .fill,
+header > .fill > .container {
+    display: flex;
+    align-items: center;
+    height: 55px;
+}
+```
+现在每个 children(brand / icon buttons / 未来加的 notification / avatar)**自动垂直居中**,无需 per-element margin patch。顺手把 indicators push 右:
+```css
+header > .fill > .container > .status { margin-left: auto; }
+```
+brand 左 / actions 右,经典 topbar 布局。
+
+### Bug 2:poll-status indicator 16×4 几乎不可见的小灰条
+
+LuCI 的 polling pause/resume 控件被发 `<span data-indicator="poll-status">` 但**没有内容**,只靠 CSS padding 撑出 16×4 灰色矩形,极易忽略 —— 即使有 `data-clickable="true"`。
+
+**修法**:reshape 成 8px 圆点(match WAN hero 上 `● Online` style):
+```css
+[data-indicator="poll-status"] {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--color-success);
+    cursor: pointer;
+}
+[data-indicator="poll-status"][data-style="inactive"] {
+    background: var(--color-text-subtle);
+    opacity: 0.5;
+}
+```
++ style.js 扩展 MutationObserver 给 poll-status 加 `title="Auto-refresh active — click to pause"` —— observer 同时监听 `data-style` 属性变化让 tooltip 跟 LuCI 状态同步。
+
+### 📊 第二十五轮(Step 109)累计
+
+| 指标 | 第二十四轮后 | 第二十五轮后 |
+|---|---|---|
+| 4 个 topbar 按钮中线 | y=18(偏上 10px) | y=27.5(header centerline) |
+| poll-status indicator | 16×4 灰条不可见 | 8px 圆点,active 绿/inactive 灰 + hover tooltip |
+| `.status` 横向位置 | inline-flow 紧贴 brand | margin-left:auto 推到右,brand 左 / actions 右 |
+| 未来 header 加东西 | 需要 per-element margin patch | 自动居中(flex 根因 fix) |
+
+---
+
+## 🎨 第二十六轮(Step 110):chart palette + realtime graphs CSS override
+
+> 触发:Chrome-Claude 全站 curves audit,发现 3 种独立绘图系统各用不同调色板。给了一个大方案 —— 我选择**只做最高 ROI 的 80%**,跳过 bezier smoothing / drop-shadow glow / SVG linearGradient(都是 scope creep)。
+
+### 现状
+
+| 图表类型 | 颜色 | 笔触 | 视觉 |
+|---|---|---|---|
+| Overview tile sparklines(我们的) | accent-500 (#10b981) | 2px round-cap | 已经现代 |
+| Realtime Load(LuCI base) | red(255,0,0) / orange(255,102,0) / yellow(255,170,0) | 1px butt-cap | 2007 munin/cacti 风 |
+| Realtime Bandwidth | blue(0,0,255) / green(0,128,0) | 1px butt-cap | 同上 |
+| Realtime Connections | 3 种浏览器 named color | 1px butt-cap | 同上 |
+| Grid lines | `stroke: rgb(0,0,0); stroke-width: 0.1px` | nominally drawn | dark mode 看不见,light mode 又干扰 |
+
+### 修法
+
+**两步**:
+
+1. **加 chart palette tokens**(identifier-based,非语义):
+```css
+--chart-1: #10b981;  --chart-2: #3b82f6;
+--chart-3: #f59e0b;  --chart-4: #8b5cf6;
+```
++ dark mode brighter 变体。**故意不用 `--color-success/-warning`** —— 那些是语义 token("是好是坏"),chart line 是身份 token("第几条线"),应分开。
+
+2. **CSS override realtime polyline + grid**:
+```css
+[class*="node-admin-status-realtime"] #view svg polyline {
+    stroke-width: 2px !important;
+    stroke-linecap: round;
+    fill-opacity: 0.15 !important;
+}
+[class*="..."] svg polyline:nth-of-type(1) { stroke: var(--chart-1) !important; ... }
+[class*="..."] svg polyline:nth-of-type(2) { stroke: var(--chart-2) !important; ... }
+[class*="..."] svg polyline:nth-of-type(3) { stroke: var(--chart-3) !important; ... }
+[class*="..."] svg polyline:nth-of-type(4) { stroke: var(--chart-4) !important; ... }
+[class*="..."] svg line {
+    stroke: var(--color-border-subtle) !important;
+    stroke-dasharray: 3 3;
+    opacity: 0.7;
+}
+```
+`!important` 防 LuCI graph JS 内联 attribute 覆盖。
+
+### Chrome-Claude 又错了一处
+
+他说 "tile sparklines 没有 `stroke-linecap`"。**grep sparkline.js:149** 显示我 Step 80 早就加了 `stroke-linecap: round` + `stroke-linejoin: round` 在 makeTile() 里。他在 DOM computed style 没看见可能是因为 svgEl() 设的是 SVG presentation attribute,不是 CSS,某些 query path 漏掉。**这次 audit 我们的代码已经做对了**,跳过 sparkline 改动。
+
+### 📊 第二十六轮(Step 110)累计
+
+| 指标 | 第二十五轮后 | 第二十六轮后 |
+|---|---|---|
+| Chart palette tokens | 无 | `--chart-1` 到 `--chart-4`(light + dark) |
+| Realtime Load 三条线 | red/orange/yellow CSS named | green/blue/amber chart palette |
+| Realtime Bandwidth | blue/green CSS named | green/blue chart palette |
+| Realtime polyline 笔触 | 1px butt-cap 锯齿明显 | 2px round-cap 圆润 |
+| Grid lines | 黑 0.1px 实线 | border-subtle dashed opacity 0.7 |
+
+---
+
+## 💫 第二十七轮(Step 111):overview-card hover lift 统一
+
+> 触发:Chrome-Claude DOM hover audit 报告:`.cbi-section` 卡(System / Memory / Storage / DHCP / UPnP)hover 时有 translateY(-2px) + shadow-md(Step 41 加的),但我们 Round 4-17 加的 5 个自定义卡(`.wan-hero` / `.design-tile` / `.devices-card` / `.speedtest-card` / `.traffic-card`)**完全没 hover 规则**,computed `transform: none`。视觉效果:静态卡跟 lifting 卡并排 = 半死半活。
+
+### 修法
+
+13 行 CSS,加在 features.css 末尾:
+```css
+.wan-hero, .design-tile, .devices-card, .speedtest-card, .traffic-card {
+    transition:
+        transform var(--motion-fast) var(--ease-out),
+        box-shadow var(--motion-fast) var(--ease-out);
+}
+.wan-hero:hover, .design-tile:hover, .devices-card:hover,
+.speedtest-card:hover, .traffic-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+```
+
+**timing 跟现有 `.cbi-section:hover` 一致**(`--motion-fast` 120ms + `--ease-out` cubic-bezier),不主观调速。`transition` 显式列 `transform + box-shadow` 不用 `all`,避免触发 layout-affecting 属性(width/height etc.)的意外动画。
+
+### Chrome-Claude 几个 polish 提议我都 skip 了
+
+- `will-change: transform` — 现代浏览器自动 GPU 加速,permanent will-change 反而占 compositor layer
+- 0.12s → 0.18s timing bump — 主观,用户没抱怨现速度
+- Dark-mode `--shadow-md` 升级 — 触动所有 shadow consumer,scope creep
+- `.wan-hero` 特例(只换 shadow 不 translateY)— 一致性优先,gradient 跟卡一起移没问题
+- 子元素 hover 抑制 — 那些子元素本就没自己的 `:hover` rule
+
+### 📊 第二十七轮(Step 111)累计
+
+| 指标 | 第二十六轮后 | 第二十七轮后 |
+|---|---|---|
+| `.cbi-section` 卡 hover | ✅ lift 已有(Step 41) | 不变 |
+| 5 个自定义卡 hover | ❌ `transform: none` | ✅ translateY(-2px) + shadow-md |
+| Overview 22 个卡的 hover 一致性 | ~14 活 / ~8 死 | 22 个全活,同 timing |
+
+---
+
+## 🔥 第二十八轮(Step 112):杀掉 `.status` icon-font + 绝对定位 — "Unsaved Changes: 1" 渲染为 Times serif
+
+> 触发:UCI 有未保存改动时 topbar 出现 "Unsaved Changes: 1" 字样,但字体是**衬线 Times-like**,跟整站 sans-serif 风格冲突,而且 "C" 那个字母被替换成一个**绿色数据库小图标**。Chrome-Claude DOM hover 抓到根因。
+
+### 一条 rule,四个 cascading bug
+
+style.css:1083(luci-theme-bootstrap 老祖宗规则,可能从 Round 0 就在):
+```css
+header > .fill > .container > .status {
+    position: absolute;            /* 从 flex 流移除 */
+    top: 25%; right: 1em; float: right;
+    font-size: 1.5rem;             /* 24px */
+    font-family: 'design';         /* icon font 级联到所有 children */
+    line-height: unset !important;
+}
+```
+
+**4 个 cascading bug**:
+1. `font-family: 'design'`(主题的 icon-glyph @font-face)级联到 LuCI 发的 `<span data-indicator="uci-changes">Unsaved Changes: 1</span>`。icon font 里大部分字母 codepoint 没定义 → UA serif fallback(Times)。**字母 "C" 偶然在 icon font 里被定义成 db 图标** → 文字中间出现绿色小数据库图标。
+2. `font-size: 1.5rem` (24px) 容器,子元素没覆写时继承超大字号。
+3. `position: absolute; top: 25%; right: 1em; float: right` 把 `.status` 从 flex 流移除 → **我 Step 109 加的 `margin-left: auto`**(line 1013)对 absolute 元素无效,默默被忽略两轮(从 Step 109 一直到现在)。`.status` 看起来"对" 是靠老 absolute coords 飘到右上角,不是靠 flex 推。
+4. `line-height: unset !important` —— 为 1.5rem 字号防御的,bug 1+2 修了它就不需要了。
+
+### 修法
+
+```css
+header > .fill > .container > .status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+header > .fill > .container > .status > * {
+    cursor: pointer;
+}
+```
+
+外加给 uci-changes 加 pill 样式:
+```css
+span[data-indicator="uci-changes"] {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-accent-600);
+    background: var(--color-accent-500-12);
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-pill);
+}
+```
+
+`-tinted` 12% 背景 + accent-600 文字色 = "你有 unsaved" 的柔和提示,跟 WAN hero status row 的 badge family 一致。
+
+### 解锁连带:Step 109 的 margin-left:auto 终于生效
+
+Step 109 时我加的 `header > .fill > .container > .status { margin-left: auto }` 之前**一直没工作** —— 被 line 1083 的 `position: absolute` 默默 neutralize 了两轮。Step 112 删 absolute → Step 109 的 flex push 终于生效:**brand 左 / pill + 3 icon button 右**。
+
+### 📊 第二十八轮(Step 112)累计
+
+| 指标 | 第二十七轮后 | 第二十八轮后 |
+|---|---|---|
+| "Unsaved Changes: 1" 字体 | icon font fallback → Times serif | `var(--font-sans)` 正常 |
+| "C" 字母 | 被替换成 db 图标 | 真的 C |
+| pill 视觉 | 24px 巨大无背景 | text-xs accent-tinted pill |
+| Step 109 `margin-left:auto` | 失效(被 abs 屏蔽) | 生效 → flex push 工作 |
+
+---
+
+## 🎯 Round 23-28 横向观察
+
+**Chrome-Claude 假设的命中率约 60-70%**:Round 24(他给的 4 个 hypothesis 中 1 真 3 假)、Round 26(他说 sparkline 没 linecap,grep 证实早就有了)、Round 23(他没诊断到 Step 105 的 selector 自身问题,只看到 regression 现象)。**他擅长找 phenomena,不擅长写 root cause**。**有源码 grep 是不可替代的中间步骤** —— 把他的诊断当 hypothesis,grep 当 verification gate,然后**对的部分采纳、错的部分 skip**。每轮采用一半建议都是赚的。
+
+**Heritage CSS 是定时炸弹**:Round 28 那条 `header > .fill > .container > .status { font-family: 'design' }` 在仓库里**多少 round 了?** 至少从 Round 0(luci-theme-bootstrap 时代)就在。每次新 indicator 加进来都被 cascade 毒 ——但 LuCI 没在 default polling 状态下显示 uci-changes 提示文字,所以 22 个 Round 都没人发现。**类似 Round 22 删 `.showSide` 300×50 invisible button、Round 28 删 `.status` icon-font 容器 —— 这些"老祖宗规则"应该在某轮专门做一次大 sweep**,grep 所有 `position: absolute` / `float: left/right` / `font-family: 'design'` 之类的 antipattern 集中处理。**TODO 项:Round N+1 — heritage CSS sweep**。
+
+**Bug fix 之间会相互 unlock**:Round 28 删 .status absolute → Step 109 的 `margin-left: auto` 终于生效。"Step 109 完全 ship 了" 跟 "Step 109 实际工作" 之间隔了 3 轮才被发现 —— 因为它的副作用(indicator 位置)在 vw=1440 desktop 上跟老 absolute 行为视觉一样,**没有显著差别可观察**。教训:**ship 之后的 verify 不应只看"看起来对吗",还要看"是我的修法在起作用,还是顺位让位的某条老 rule 在起作用"**。差分式 verify 比表面 verify 更可靠。
+
+**"skip 优秀建议"也是工程纪律**:Chrome-Claude 在 Round 26/27/28 每轮都给了 3-5 个 polish 建议,如果都做工作量翻倍。但很多是品味问题(timing 0.12 vs 0.18s)/ 微优化(will-change)/ 跨 scope 改动(dark-mode shadow tweak)。**有意识地 skip 那些"看起来合理但 ROI 不高"的提议**,保持每 Step 范围小、可 revert。每次 Step ship 都是"做了一件确定有用的事",而不是"做了一堆可能有用的事"。
+
+---
+
 
 
 
