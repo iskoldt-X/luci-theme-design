@@ -1505,3 +1505,87 @@ $ Total CSS lines: 1283 (+54)
 | UCI 持久化 rename | 新 UCI section + reload-safe schema + cross-browser sync 语义。值得 standalone PR |
 | 实际 Block 写防火墙规则 | uci.firewall.add 新 rule 需要 careful 不要锁住自己（block 自己 MAC = lock out admin），后续 confirm-modal + safety check |
 | 实际 Limit 写 QoS 规则 | 类似，需要 luci-app-qos 集成 |
+
+---
+
+### Step 45 — Apply-modal Undo 按钮（10s 撤销窗口）
+
+**时间**：2026-05-23
+**文件**：`htdocs/luci-static/resources/apply-modal.js`（+60 行 / -10 行）
+
+**做了什么：**
+
+upgrade-preview §S2b 的"Save & Apply"流程一直缺最后一脚 —— Undo。第五轮 ship MVP 时 apply-modal.js 的 header comment 写着 `MVP: diff modal + apply via uci.apply(). Undo TBD`。本 Step 补齐：
+
+#### 流程
+
+```
+1. 用户点 Save & Apply 触发的 LuCI displayChanges
+2. 我们 monkey-patch 拦截 → showDiff() 显示 diff modal
+3. 用户点 "Confirm & Apply"
+4. ★ NEW: snapshotForUndo(changes) — 把所有 'set' op 的 *旧值* 抓出存
+5. L.uci.apply(timeout) 走原流程
+6. ★ NEW: 成功后弹 success toast 带 [Undo] 按钮，10s 窗口
+7a. 用户在 10s 内点 [Undo] → undoChanges(snapshot) 反向 set + 重新 apply
+7b. 用户没点 / 10s 过 → toast 自动消失，12s 后页面 reload
+```
+
+#### snapshotForUndo（关键技术决策）
+
+读取的是 `L.uci.values` —— LuCI uci 客户端**私有但稳定**的"已读取自磁盘"的 shadow。`L.uci.set(c, s, o, v)` 只写 `L.uci.state`，不动 `values`，所以在 apply 之前 `values` 仍是 pre-change 状态。
+
+```js
+snapshotForUndo: function (changes) {
+    var snap = {};
+    try {
+        var values = L.uci && L.uci.values;
+        if (!values) return snap;
+        changes.forEach(function (c) {
+            if (c.op !== 'set' || !c.option) return;
+            // ...
+            snap[c.config + '.' + c.section + '.' + c.option] = orig;
+        });
+    } catch (e) { /* swallow → degrade to no-undo */ }
+    return snap;
+}
+```
+
+`L.uci.values` 不在公开 API 文档里但 LuCI 20.x → 26.x 都是这名字。`try/catch` 包外层 —— 任何 LuCI 版本里它不存在或 schema 变了，就 `return {}`，下游识别为"没有 snapshot → 不显示 Undo 按钮"。**永远不崩**。
+
+#### Undo 限制（诚实文档）
+
+snapshot 只捕获 **`set`** op。**`add` / `remove` / `rename` 不可逆**（没有 transactional log）：
+
+- 用户改了 `network.lan.ipaddr` 从 192.168.1.1 到 192.168.5.1 → snapshot 存 1.1，Undo 可还原 ✅
+- 用户**新增**了一个 wifi-iface → snapshot 不动它，Undo 不会删除新增的 ✗
+- 用户**删除**了一条 firewall rule → snapshot 不动它，Undo 不会还原 ✗
+
+如果用户的 pending changes 全是 add/remove/rename，snapshot 是 `{}`，apply 成功后**不显示 Undo 按钮**，直接走原版流程（1.5s reload）。
+
+#### 节奏调整
+
+原 success toast 后 1.5s 就 `location.reload()`。Undo path 把 reload 推迟到 12s（10s 窗口 + 2s 余量），这样用户有充足时间看清"我刚改了什么 / 要不要 Undo"。
+
+#### Bug fix 中的 bug fix
+
+写 Edit 的时候 paste 出现 SOH (0x01) 把 `'.'` 替换成了 `'\001'`，导致 snapshot key 用空白拼成 `networklanipaddr` 而 split 又当字符切，整个 Undo 路径连一帧都跑不到。Python byte-level scan 抓到后修复。
+
+教训：之后大 string concat 用 Python 多写一行 `assert old_substring in src` 而不是只信 Edit 工具。
+
+**没有破坏的事：**
+
+- ❌ displayChanges 的 monkey-patch 入口不动，已有的 try/catch fallback to native displayChanges 保留
+- ❌ DANGEROUS 危险规则检测保留
+- ❌ flattenChanges / changeRow / 50 行 diff truncation 保留
+- ❌ 没改 toast.js（已经在 Step 24 时就支持 `action: { label, onClick }`，免费用上）
+
+**验证：**
+
+```bash
+$ node --check apply-modal.js           ✅
+$ grep -nE 'snap\[|key\.split' apply-modal.js   # 确认 separator
+214:	snap[c.config + '.' + c.section + '.' + c.option] = orig;
+270:	var parts = key.split('.');
+```
+
+**回滚方式：** `git revert` 该 commit。前置 Step 44 不依赖它，独立可撤。

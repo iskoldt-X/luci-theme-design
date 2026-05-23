@@ -17,8 +17,19 @@
 // We monkey-patch L.ui.changes.displayChanges. LuCI's internal API is not a
 // stable contract, so if anything goes wrong we fall back to the original.
 //
-// MVP: diff modal + apply via uci.apply(). Undo TBD (would need uci.revert
-// after the fact, which LuCI's API does support post-apply within a window).
+// Step 45: Undo button. The previous MVP toast had no Undo. We now:
+//   - Before apply, snapshot the original (pre-change) values via the
+//     L.uci.values shadow (private but stable in LuCI 20.x → 26.x).
+//   - Apply normally. On success, show a 10s Undo toast.
+//   - If clicked, re-set the snapshotted values + save + apply, surfacing
+//     a "Reverted to previous configuration" toast on success.
+//   - Page reload is deferred past the Undo window (12s) so the toast
+//     isn't dismissed mid-click.
+//
+// Limitations (documented honestly): Undo only restores 'set' ops with
+// captured pre-values. 'add' / 'remove' / 'rename' are not reversible
+// through this mechanism (would need a fuller transactional log) — in
+// that case the toast is shown without the Undo button.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Risk patterns — if any change matches these, show a red warning in the diff.
@@ -138,6 +149,12 @@ return baseclass.extend({
 
 		var dangers = detectDangers(changes);
 
+		// Step 45: capture pre-apply state for the Undo button. Must happen
+		// BEFORE apply — once L.uci.apply commits, the "old" values are gone
+		// from the in-memory shadow. snapshotForUndo() is defensive (returns
+		// {} if L.uci.values is unavailable on this LuCI version).
+		var snapshot = self.snapshotForUndo(changes);
+
 		// Build the modal body
 		var rows = changes.slice(0, 50).map(changeRow);
 		if (changes.length > 50) {
@@ -168,7 +185,7 @@ return baseclass.extend({
 					'class': 'cbi-button cbi-button-positive',
 					'click': function () {
 						ui.hideModal();
-						self.applyAndProgress();
+						self.applyAndProgress(snapshot);
 					}
 				}, _('Confirm & Apply'))
 			])
@@ -177,22 +194,98 @@ return baseclass.extend({
 		return Promise.resolve();
 	},
 
-	applyAndProgress: function () {
+	// Step 45: capture pre-change values from the L.uci.values shadow.
+	// We only snapshot 'set' ops — 'add' / 'remove' / 'rename' aren't
+	// reversible through simple key restoration. Returns {} on any error
+	// or unavailable API, which downstream interprets as "no Undo button".
+	snapshotForUndo: function (changes) {
+		var snap = {};
+		try {
+			var values = L.uci && L.uci.values;
+			if (!values) return snap;
+			changes.forEach(function (c) {
+				if (c.op !== 'set' || !c.option) return;
+				var cfg = values[c.config];
+				if (!cfg) return;
+				var sec = cfg[c.section];
+				if (!sec) return;
+				var orig = sec[c.option];
+				if (orig === undefined) return;
+				snap[c.config + '.' + c.section + '.' + c.option] = orig;
+			});
+		} catch (e) { /* swallow — degrade to no-undo */ }
+		return snap;
+	},
+
+	applyAndProgress: function (snapshot) {
+		var self = this;
 		// LuCI's uci.apply takes a "rollback timeout" in seconds. Default 90 from
 		// the env (apply_rollback). If after that the box doesn't get a confirm,
 		// it rolls back — protects against the user locking themselves out.
 		var timeout = (L.env && L.env.apply_rollback) ? L.env.apply_rollback : 90;
 		var progressId = toastSafe('info', _('Applying configuration...'), { duration: 0 });
 
+		// Step 45: Undo window — show the toast for 10s before reloading the
+		// page. Beyond 10s the toast self-dismisses and the page reloads to
+		// pick up the new state.
+		var UNDO_WINDOW_MS = 10000;
+		var POST_UNDO_RELOAD_MS = UNDO_WINDOW_MS + 2000;
+
 		L.uci.apply(timeout).then(function () {
 			if (progressId !== null && window.toast) toast.dismiss(progressId);
-			toastSafe('success', _('Configuration applied'));
-			// Some pages need a reload to reflect the new state — emulate LuCI's
-			// behaviour. Wait 1.5s so the success toast is visible first.
-			setTimeout(function () { location.reload(); }, 1500);
+
+			var canUndo = snapshot && Object.keys(snapshot).length > 0 && window.toast;
+			if (canUndo) {
+				window.toast.success(_('Configuration applied'), {
+					duration: UNDO_WINDOW_MS,
+					action: {
+						label: _('Undo'),
+						onClick: function () { self.undoChanges(snapshot); }
+					}
+				});
+				setTimeout(function () { location.reload(); }, POST_UNDO_RELOAD_MS);
+			} else {
+				// No-undo path: original behaviour (no Undo for add/remove/rename or
+				// when the snapshot couldn't be captured — keeps the LuCI flow honest).
+				toastSafe('success', _('Configuration applied'));
+				setTimeout(function () { location.reload(); }, 1500);
+			}
 		}).catch(function (err) {
 			if (progressId !== null && window.toast) toast.dismiss(progressId);
 			toastSafe('error', _('Apply failed') + ': ' + ((err && err.message) ? err.message : 'unknown'));
+		});
+	},
+
+	// Step 45: re-apply the snapshotted pre-change values. Best-effort
+	// "logical" undo: works for 'set' ops only, may race if the user made
+	// further changes in the 10s window (rare in practice). Surfaces
+	// success/failure via toast so the user knows what happened.
+	undoChanges: function (snapshot) {
+		var self = this;
+		var timeout = (L.env && L.env.apply_rollback) ? L.env.apply_rollback : 90;
+		var progressId = toastSafe('info', _('Reverting…'), { duration: 0 });
+
+		try {
+			Object.keys(snapshot).forEach(function (key) {
+				var parts = key.split('.');
+				var config = parts[0], section = parts[1], option = parts[2];
+				L.uci.set(config, section, option, snapshot[key]);
+			});
+		} catch (e) {
+			if (progressId !== null && window.toast) toast.dismiss(progressId);
+			toastSafe('error', _('Failed to prepare revert: ') + ((e && e.message) ? e.message : 'unknown'));
+			return;
+		}
+
+		L.uci.save().then(function () {
+			return L.uci.apply(timeout);
+		}).then(function () {
+			if (progressId !== null && window.toast) toast.dismiss(progressId);
+			toastSafe('success', _('Reverted to previous configuration'));
+			setTimeout(function () { location.reload(); }, 1500);
+		}).catch(function (err) {
+			if (progressId !== null && window.toast) toast.dismiss(progressId);
+			toastSafe('error', _('Revert failed: ') + ((err && err.message) ? err.message : 'unknown'));
 		});
 	}
 });
