@@ -2714,7 +2714,7 @@ div.cbi-value > .cbi-value-description {
 
 .cbi-progressbar::after {
     font-size: var(--text-xs) !important;
-    font-weight: var(--weight-medium);
+    font-weight: var(--weight-semibold);
     font-variant-numeric: tabular-nums;
     line-height: 24px !important;
     position: absolute !important;
@@ -2724,9 +2724,24 @@ div.cbi-value > .cbi-value-description {
     text-align: center !important;
     white-space: pre !important;
     text-overflow: ellipsis !important;
-    color: var(--color-text);
-    mix-blend-mode: difference;     /* 数字在浅/深进度条上都可读 */
-    filter: invert(1);
+    letter-spacing: 0.02em;
+    /* Round 32 / Step 120 — 弃 mix-blend-mode: difference + filter: invert(1)
+     *
+     * 旧方案的初衷是让 ::after 文字自动适配 fill / 未填 两段 bg。理论 OK,但实际
+     * 在 dark 模式下数学崩:
+     *   text = --color-text = #fafafa
+     *   difference over surface-2 #27272a  → (211,211,208) 浅灰
+     *   invert(1)                          → (44,44,47) 深灰 ≈ #2c2c2f
+     *   在 #27272a 上对比度 ≈ 1.05:1,几乎不可见
+     *
+     * 改用"白字 + 强 dark halo"标准 overlay 文本套路:white + double text-shadow
+     * 在 fill(accent green #10b981/#34d399)和未填(surface-2 任何深浅)上都靠 halo
+     * 维持局部对比度。Spotify / macOS / YouTube 在叠加文字时都用同一套路。
+     */
+    color: var(--color-text-onaccent);
+    text-shadow:
+        0 0 3px rgba(0, 0, 0, 0.7),
+        0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 #modal_overlay {
