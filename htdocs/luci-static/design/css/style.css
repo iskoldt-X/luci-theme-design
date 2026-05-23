@@ -4614,10 +4614,19 @@ td.cbi-button, .cbi-button-apply,
     white-space: normal;
 }
 
-/* Grid 容器：所有 .cbi-section 兄弟节点 */
+/* Grid 容器：所有 .cbi-section 兄弟节点
+   Step 114 (Round 30): minmax floor bumped 360 → 440 so the 3 non-
+   spanning custom cards (devices / speedtest / traffic) get enough
+   room for their internal layouts when auto-fit places them 3-up
+   on wide screens. Devices card especially needs ≥440 px (its
+   6-column grid sums to 326 + 1fr for hostname). Floor decides the
+   responsive breakpoints:
+     main < 880 px        → 1 track  (cards stack)
+     880 ≤ main < 1320 px → 2 tracks (2-up + wrap)
+     main ≥ 1320 px       → 3 tracks (full 3-up row) */
 .node-admin-status-overview #view {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
     gap: var(--space-4);
     align-items: start;
 }
@@ -4646,24 +4655,28 @@ td.cbi-button, .cbi-button-apply,
     grid-column: 1 / -1;
 }
 
-/* Theme-injected feature cards (Phase 2+3+4) span the full grid width so
-   they don't fight with LuCI native cbi-sections for horizontal real
-   estate. `order` then arranges visual sequence regardless of DOM
-   insertion timing (multiple L.require modules race to inject; load order
-   isn't guaranteed). User feedback 2026-05-23: without these rules our
-   WAN Hero ended up the same cell width as LuCI's "System" — lost the
-   hero feel. See preview/upgrade-preview.html for the target layout. */
+/* Theme-injected feature cards. WAN Hero + the sparkline tile band
+   are visual anchors and stay full-width. Step 114 (Round 30):
+   devices / speedtest / traffic NO LONGER force full-width — they
+   auto-fit into the parent's grid tracks. On wide screens (main ≥
+   1320 px) the 3 cards land in a single 3-up row; on medium they
+   become 2 + wrap; on narrow they stack. User explicitly requested
+   the "putting LAN clients / Wi-Fi test / Traffic Analysis together
+   1/3" arrangement; this is the auto-degrading variant of that.
+   `order` still arranges visual sequence regardless of DOM
+   insertion timing (multiple L.require modules race to inject;
+   load order isn't guaranteed). */
 .node-admin-status-overview #view > .wan-hero,
-.node-admin-status-overview #view > .design-tile-grid,
-.node-admin-status-overview #view > .devices-card,
-.node-admin-status-overview #view > .speedtest-card,
-.node-admin-status-overview #view > .traffic-card {
+.node-admin-status-overview #view > .design-tile-grid {
     grid-column: 1 / -1;
 }
 .node-admin-status-overview #view > .wan-hero         { order: -3; }
 .node-admin-status-overview #view > .design-tile-grid { order: -2; }
 /* LuCI's .cbi-section elements default to order: 0 — they fall between
-   our hero/tiles and our extras (devices/speedtest/traffic). */
+   our hero/tiles and our extras (devices/speedtest/traffic).
+   The 3 extras (10/11/12) all share a positive order, so they land
+   adjacent at the bottom of the grid and lay out together in a row
+   when auto-fit gives ≥3 tracks. */
 .node-admin-status-overview #view > .devices-card     { order: 10; }
 .node-admin-status-overview #view > .speedtest-card   { order: 11; }
 .node-admin-status-overview #view > .traffic-card     { order: 12; }
