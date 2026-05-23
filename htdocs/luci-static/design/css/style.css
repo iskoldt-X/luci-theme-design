@@ -3457,18 +3457,40 @@ input[name="nslookup"] {
         width: 100%;
     }
 
+    /* Step 102 (Round 20): P0 click-hijack fix.
+       The old rule had `position: absolute; width: 300px; height: 50px;
+       left/implicit-via-stacking: 252px` — a 300×50 invisible hit
+       target that completely covered #cmdk-trigger, #quick-actions-
+       trigger, and #theme-toggle (which sit at x=252-368 in the
+       topbar). Result: on any viewport ≤ 1100 px, clicking any of
+       those three icons opened the sidebar instead of doing the
+       intended action (search / QA / theme toggle). Chrome-Claude
+       responsive sweep mis-rated this as "no functional impact"
+       in Round 17 then re-tested with elementFromPoint() in Round 19
+       and confirmed full hijack.
+       Fix: drop the absolute positioning entirely. .showSide is the
+       first DOM child of header > .fill > .container so static
+       positioning + inline-flex makes it render at the natural
+       leftmost slot of the topbar, immediately followed by .brand.
+       36×36 matches the size of the three right-side icon buttons,
+       so the hamburger reads as a peer rather than a giant blob.
+       The 22×16 ::before icon stays unchanged — flex centering
+       inside 36×36 places it correctly. */
     .showSide {
-        margin: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        position: static;
+        width: 36px;
+        height: 36px;
         padding: 0;
-        display: inline-block;
-        position: absolute;
-        width: 300px;
-        height: 50px;
-        padding: 17px 27px;
+        margin: 0 var(--space-1) 0 0;
+        left: auto;
+        top: auto;
     }
 
     /* Hamburger menu drawn in pure CSS — 3 horizontal lines via gradients
-     * (replaces icomoon \e20e). 22×16 box centered in 50×50 button. */
+     * (replaces icomoon \e20e). 22×16 box flex-centered in the 36×36 button. */
     .showSide:before {
         content: '';
         display: block;
@@ -3686,9 +3708,10 @@ input[name="nslookup"] {
     background-position: 0;
     } */
 
-    .showSide {
-        height: 45px;
-    }
+    /* Step 102 (Round 20): the prior `.showSide { height: 45px }`
+       override here was sized for the old 50px baseline; now that
+       baseline is 36×36 (a peer of the right-side icon buttons) we
+       don't need a per-tier shrink. Removed. */
 
     #maincontent > .container {
         margin: 20px 20px;
