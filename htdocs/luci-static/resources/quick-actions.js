@@ -7,16 +7,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Quick Actions popover — upgrade.md §2.A3
 //
-// Header lightning-bolt button → dropdown with common one-click operations:
-//   - Reload Wi-Fi
-//   - Reload firewall
-//   - Reboot router (confirms first)
-//   - Renew DHCP on WAN (release + renew)
+// Header lightning-bolt button → dropdown with common one-click operations.
+// Step 51: rebuilt to match upgrade-preview.html §A3:
+//   - Pending changes pill at the top (warning bg + Apply button), only
+//     visible when L.uci.changes() reports pending entries
+//   - Four action rows with icons: Restart Wi-Fi / Renew DHCP /
+//     Reload firewall / Run speedtest
+//   - Divider
+//   - Reboot router (red, with confirm modal)
 //
-// Each action goes through toast.info → toast.success/error so the user
-// sees what happened (replaces the old "page reloads silently" UX).
+// The dropdown is rebuilt on every open() so the pending count refreshes
+// without needing a separate uci.changes subscription.
 //
-// MVP: 4 actions. Reboot has confirm. Add more in follow-up.
+// z-index bumped from var(--z-overlay) (40) to a guaranteed-on-top 9999
+// because the cbi-section grid's stacking context was painting over the
+// popover on some layouts (user-reported bug).
 // ─────────────────────────────────────────────────────────────────────────────
 
 var execShell = rpc.declare({
@@ -28,7 +33,20 @@ var execShell = rpc.declare({
 
 function toast(type, msg) {
 	if (window.toast && window.toast[type]) return window.toast[type](msg);
-	console[type === 'error' ? 'error' : 'log'](msg);
+	if (console && console[type === 'error' ? 'error' : 'log']) {
+		console[type === 'error' ? 'error' : 'log'](msg);
+	}
+}
+
+function countPendingChanges() {
+	try {
+		var changes = L.uci.changes();
+		var n = 0;
+		Object.keys(changes || {}).forEach(function (cfg) {
+			n += (changes[cfg] || []).length;
+		});
+		return n;
+	} catch (e) { return 0; }
 }
 
 return baseclass.extend({
@@ -38,27 +56,51 @@ return baseclass.extend({
 	},
 
 	mount: function () {
-		// Need to add header button — header.htm already has one, just wire it up
 		var btn = document.getElementById('quick-actions-trigger');
-		if (!btn) return;     // theme template hasn't been updated yet
+		if (!btn) return;
 		btn.addEventListener('click', L.bind(this.toggle, this));
 		document.addEventListener('click', L.bind(this.onOutsideClick, this));
 		document.addEventListener('keydown', L.bind(this.onKey, this));
 
-		// Build dropdown lazily (only when opened first time)
 		this.dropdown = null;
 		this.trigger  = btn;
 	},
 
+	// Step 51: rebuild dropdown contents fresh every time it opens so the
+	// pending-changes count is always current. The old code built once and
+	// cached forever, which meant if the user saved a form while the popover
+	// was closed, the count stayed at 0 next time they opened it.
 	buildDropdown: function () {
 		var self = this;
-		var d = E('div', { 'class': 'quick-actions-dropdown', 'role': 'menu' }, [
-			E('div', { 'class': 'quick-actions-header' }, _('Quick actions')),
-			this.actionRow('i-wifi',      _('Restart Wi-Fi'),    'wifi'),
-			this.actionRow('i-shield',    _('Reload firewall'),  'firewall'),
-			this.actionRow('i-globe',     _('Renew DHCP'),       'dhcp'),
-			this.actionRow('i-power',     _('Reboot router'),    'reboot', true)
-		]);
+		var pending = countPendingChanges();
+
+		var children = [];
+
+		if (pending > 0) {
+			children.push(E('div', { 'class': 'quick-actions-pending' }, [
+				E('svg', { 'class': 'svg-icon quick-actions-pending-icon', 'aria-hidden': 'true' },
+					E('use', { 'href': self.iconBase + '#i-alert-triangle' })),
+				E('span', { 'class': 'quick-actions-pending-text' }, [
+					_('Pending'), ' ',
+					E('strong', {}, String(pending)), ' ',
+					_('changes')
+				]),
+				E('button', {
+					'type':  'button',
+					'class': 'cbi-button cbi-button-positive quick-actions-pending-apply',
+					'click': function () { self.close(); self.runApply(); }
+				}, _('Apply'))
+			]));
+		}
+
+		children.push(self.actionRow('i-wifi',     _('Restart Wi-Fi'),    'wifi'));
+		children.push(self.actionRow('i-server',   _('Renew DHCP'),       'dhcp'));
+		children.push(self.actionRow('i-shield',   _('Reload firewall'),  'firewall'));
+		children.push(self.actionRow('i-zap',      _('Run speedtest'),    'speedtest'));
+		children.push(E('div', { 'class': 'quick-actions-divider' }));
+		children.push(self.actionRow('i-power',    _('Reboot router'),    'reboot', true));
+
+		var d = E('div', { 'class': 'quick-actions-dropdown', 'role': 'menu' }, children);
 		document.body.appendChild(d);
 		this.dropdown = d;
 	},
@@ -72,15 +114,14 @@ return baseclass.extend({
 			'click': function () { self.run(kind); }
 		}, [
 			E('svg', { 'class': 'svg-icon quick-actions-item-icon', 'aria-hidden': 'true' },
-				E('use', { 'href': this.iconBase + '#' + iconName })),
+				E('use', { 'href': self.iconBase + '#' + iconName })),
 			E('span', {}, label)
 		]);
 	},
 
 	toggle: function (ev) {
 		if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-		if (!this.dropdown) this.buildDropdown();
-		if (this.dropdown.classList.contains('open')) {
+		if (this.dropdown && this.dropdown.classList.contains('open')) {
 			this.close();
 		} else {
 			this.open();
@@ -88,8 +129,14 @@ return baseclass.extend({
 	},
 
 	open: function () {
-		if (!this.dropdown) this.buildDropdown();
-		// Position under the trigger button
+		// Step 51: rebuild every open so pending-changes count is fresh.
+		// Cheap (10 lines of DOM) and avoids subscribing to uci-changes events.
+		if (this.dropdown) {
+			this.dropdown.remove();
+			this.dropdown = null;
+		}
+		this.buildDropdown();
+
 		var rect = this.trigger.getBoundingClientRect();
 		this.dropdown.style.top  = (rect.bottom + 4) + 'px';
 		this.dropdown.style.right = (window.innerWidth - rect.right) + 'px';
@@ -110,6 +157,19 @@ return baseclass.extend({
 		if (ev.key === 'Escape' && this.dropdown && this.dropdown.classList.contains('open')) {
 			this.close();
 		}
+	},
+
+	// Step 51: Apply pending changes — re-route through our patched
+	// displayChanges so the user gets the diff modal + Undo flow from
+	// Step 45, not LuCI's stock blocking modal.
+	runApply: function () {
+		try {
+			if (L.ui && L.ui.changes && typeof L.ui.changes.displayChanges === 'function') {
+				L.ui.changes.displayChanges();
+				return;
+			}
+		} catch (e) { /* fall through */ }
+		toast('warning', _('Apply not available — try Save & Apply on a config page'));
 	},
 
 	run: function (kind) {
@@ -142,6 +202,19 @@ return baseclass.extend({
 				}).catch(function (e) {
 					toast('error', _('DHCP renewal failed') + ': ' + (e.message || 'unknown'));
 				});
+				break;
+
+			// Step 51: Run speedtest — scroll the speedtest card into view
+			// and click its Run button. Cheap deep-link without coupling
+			// the modules.
+			case 'speedtest':
+				var card = document.getElementById('speedtest-card');
+				if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				setTimeout(function () {
+					var btn = document.getElementById('speedtest-run');
+					if (btn && !btn.disabled) btn.click();
+					else toast('info', _('Open the Overview page to run a speedtest'));
+				}, 350);
 				break;
 
 			case 'reboot':
