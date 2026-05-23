@@ -111,6 +111,31 @@ function toastSafe(type, msg, opts) {
 	return null;
 }
 
+// Step 54: L.uci.changes() returns a Promise in LuCI 26.x (confirmed by
+// user-supplied probe `typeof uciChangesRaw.then === 'function'`). Earlier
+// LuCI versions returned a sync map. Wrap both shapes into a uniform
+// Promise so callers don't have to think about it.
+//
+// Without this, flattenChanges(L.uci.changes()) gets a Promise and
+// Object.keys(promise) is always empty → every diff modal shows "No
+// pending changes" + immediately bails. That was the entire mystery of
+// "diff viewer never appears even though patch landed".
+function getChangesPromise() {
+	var raw;
+	try { raw = L.uci.changes(); }
+	catch (e) {
+		if (console && console.warn) console.warn('apply-modal: L.uci.changes() threw', e);
+		return Promise.resolve({});
+	}
+	if (raw && typeof raw.then === 'function') {
+		return raw.catch(function (e) {
+			if (console && console.warn) console.warn('apply-modal: changes() promise rejected', e);
+			return {};
+		});
+	}
+	return Promise.resolve(raw || {});
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 return baseclass.extend({
@@ -160,59 +185,72 @@ return baseclass.extend({
 
 	showDiff: function () {
 		var self = this;
-		// Read pending uci changes (LuCI keeps these in memory between Save and Apply)
-		var changes = flattenChanges(L.uci.changes());
+		// Step 54: changes is now retrieved via Promise (LuCI 26.x). The whole
+		// rest of showDiff used to assume sync access — which silently broke
+		// the diff modal because Object.keys(promise) === [] → 0 changes →
+		// "No pending changes" toast → bail.
+		return getChangesPromise().then(function (raw) {
+			var changes = flattenChanges(raw);
 
-		if (!changes.length) {
-			toastSafe('info', _('No pending changes'));
-			return Promise.resolve();
-		}
+			if (!changes.length) {
+				toastSafe('info', _('No pending changes'));
+				return;
+			}
 
-		var dangers = detectDangers(changes);
+			var dangers = detectDangers(changes);
 
-		// Step 45: capture pre-apply state for the Undo button. Must happen
-		// BEFORE apply — once L.uci.apply commits, the "old" values are gone
-		// from the in-memory shadow. snapshotForUndo() is defensive (returns
-		// {} if L.uci.values is unavailable on this LuCI version).
-		var snapshot = self.snapshotForUndo(changes);
+			// Step 45: capture pre-apply state for the Undo button. Must happen
+			// BEFORE apply — once L.uci.apply commits, the "old" values are gone
+			// from the in-memory shadow. snapshotForUndo() is defensive (returns
+			// {} if L.uci.values is unavailable on this LuCI version).
+			var snapshot = self.snapshotForUndo(changes);
 
-		// Build the modal body
-		var rows = changes.slice(0, 50).map(changeRow);
-		if (changes.length > 50) {
-			rows.push(E('div', { 'class': 'apply-diff-row apply-diff-more' },
-				_('… and %d more changes').replace('%d', changes.length - 50)));
-		}
+			// Build the modal body
+			var rows = changes.slice(0, 50).map(changeRow);
+			if (changes.length > 50) {
+				rows.push(E('div', { 'class': 'apply-diff-row apply-diff-more' },
+					_('… and %d more changes').replace('%d', changes.length - 50)));
+			}
 
-		var dangerEl = null;
-		if (dangers.length) {
-			dangerEl = E('div', { 'class': 'apply-diff-warnings' },
-				dangers.map(function (d) {
-					return E('div', { 'class': 'apply-diff-warning' }, '⚠ ' + d);
-				}));
-		}
+			var dangerEl = null;
+			if (dangers.length) {
+				dangerEl = E('div', { 'class': 'apply-diff-warnings' },
+					dangers.map(function (d) {
+						return E('div', { 'class': 'apply-diff-warning' }, '⚠ ' + d);
+					}));
+			}
 
-		ui.showModal(_('Apply pending changes?'), [
-			E('p', { 'class': 'apply-diff-summary' },
-				_('%d changes ready to apply.').replace('%d', changes.length)),
-			E('div', { 'class': 'apply-diff-list' }, rows),
-			dangerEl,
-			E('div', { 'class': 'right' }, [
-				E('button', {
-					'class': 'cbi-button',
-					'click': ui.hideModal
-				}, _('Cancel')),
-				' ',
-				E('button', {
-					'class': 'cbi-button cbi-button-positive',
-					'click': function () {
-						ui.hideModal();
-						self.applyAndProgress(snapshot);
-					}
-				}, _('Confirm & Apply'))
-			])
-		]);
-
-		return Promise.resolve();
+			ui.showModal(_('Apply pending changes?'), [
+				E('p', { 'class': 'apply-diff-summary' },
+					_('%d changes ready to apply.').replace('%d', changes.length)),
+				E('div', { 'class': 'apply-diff-list' }, rows),
+				dangerEl,
+				E('div', { 'class': 'right' }, [
+					E('button', {
+						'class': 'cbi-button',
+						'click': ui.hideModal
+					}, _('Cancel')),
+					' ',
+					E('button', {
+						'class': 'cbi-button cbi-button-positive',
+						'click': function () {
+							ui.hideModal();
+							self.applyAndProgress(snapshot);
+						}
+					}, _('Confirm & Apply'))
+				])
+			]);
+		}).catch(function (err) {
+			if (console && console.error) console.error('apply-modal: showDiff failed', err);
+			// Last-ditch fallback: surface the error and run the native modal
+			// rather than silently doing nothing.
+			toastSafe('error', _('Diff modal failed: ') + ((err && err.message) ? err.message : 'unknown'));
+			// Try original display fn — Step 58 renames this, but during
+			// rollout both names may coexist for one build.
+			var orig = L.ui && L.ui.changes && (
+				L.ui.changes.__designOriginalDisplay || L.ui.changes.__designOriginal);
+			if (orig) return orig.call(L.ui.changes);
+		});
 	},
 
 	// Step 45: capture pre-change values from the L.uci.values shadow.

@@ -38,15 +38,28 @@ function toast(type, msg) {
 	}
 }
 
-function countPendingChanges() {
-	try {
-		var changes = L.uci.changes();
-		var n = 0;
-		Object.keys(changes || {}).forEach(function (cfg) {
-			n += (changes[cfg] || []).length;
-		});
-		return n;
-	} catch (e) { return 0; }
+// Step 54: L.uci.changes() returns a Promise in LuCI 26.x. Synchronous
+// `Object.keys(promise)` was always [] so the pending pill never appeared.
+// Refactored to async callback; quick-actions.open() now awaits it
+// before building the dropdown.
+function walkCount(changes) {
+	var n = 0;
+	Object.keys(changes || {}).forEach(function (cfg) {
+		n += (changes[cfg] || []).length;
+	});
+	return n;
+}
+
+function countPendingChangesAsync(cb) {
+	var raw;
+	try { raw = L.uci.changes(); }
+	catch (e) { cb(0); return; }
+	if (raw && typeof raw.then === 'function') {
+		raw.then(function (c) { cb(walkCount(c)); })
+		   .catch(function () { cb(0); });
+	} else {
+		cb(walkCount(raw));
+	}
 }
 
 return baseclass.extend({
@@ -70,9 +83,12 @@ return baseclass.extend({
 	// pending-changes count is always current. The old code built once and
 	// cached forever, which meant if the user saved a form while the popover
 	// was closed, the count stayed at 0 next time they opened it.
+	//
+	// Step 54: pending count now comes from this._pendingCount which open()
+	// fetches asynchronously via countPendingChangesAsync before calling us.
 	buildDropdown: function () {
 		var self = this;
-		var pending = countPendingChanges();
+		var pending = self._pendingCount || 0;
 
 		var children = [];
 
@@ -129,18 +145,25 @@ return baseclass.extend({
 	},
 
 	open: function () {
-		// Step 51: rebuild every open so pending-changes count is fresh.
-		// Cheap (10 lines of DOM) and avoids subscribing to uci-changes events.
-		if (this.dropdown) {
-			this.dropdown.remove();
-			this.dropdown = null;
-		}
-		this.buildDropdown();
+		// Step 54: pending count is async in LuCI 26.x. Wait for it before
+		// rendering so the pill (when shown) always reflects truth. Cheap —
+		// L.uci.changes() promise resolves in <50ms typically since LuCI
+		// already polled the count for its top-right indicator badge.
+		var self = this;
+		countPendingChangesAsync(function (n) {
+			self._pendingCount = n;
+			// Step 51: rebuild every open so pending-changes count is fresh.
+			if (self.dropdown) {
+				self.dropdown.remove();
+				self.dropdown = null;
+			}
+			self.buildDropdown();
 
-		var rect = this.trigger.getBoundingClientRect();
-		this.dropdown.style.top  = (rect.bottom + 4) + 'px';
-		this.dropdown.style.right = (window.innerWidth - rect.right) + 'px';
-		this.dropdown.classList.add('open');
+			var rect = self.trigger.getBoundingClientRect();
+			self.dropdown.style.top  = (rect.bottom + 4) + 'px';
+			self.dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+			self.dropdown.classList.add('open');
+		});
 	},
 
 	close: function () {
