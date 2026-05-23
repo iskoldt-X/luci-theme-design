@@ -4112,17 +4112,26 @@ td.cbi-button, .cbi-button-apply,
     color: var(--color-text);
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum';
-    /* Step 75 (Round 13): value column gets word-break so long paths
-       like '/opt/docker/overlay2/8ac621821c94e271...' wrap into the
-       card instead of overflowing the right edge. Reported by Chrome-
-       Claude agent inspection on the 存储 (Storage) cbi-section.
-       Step 78 (Round 13 follow-up): Chrome-Claude reported Step 75
-       didn't take — white-space: nowrap was still computing on these
-       cells, meaning LuCI's own rule was winning the specificity war.
-       Force with !important. */
-    word-break: break-all !important;
-    overflow-wrap: anywhere !important;
+}
+
+/* Step 81 (Round 13): broad overflow protection for ALL text content in
+   Overview cbi-section cards.
+   Steps 75 + 78 tried targeted selectors like '... table > tbody > tr >
+   td:nth-child(2)' but Chrome-Claude verification showed those selectors
+   didn't match the actual storage section DOM at all (its computed
+   white-space stayed nowrap, meaning our rule never fired). The actual
+   element is some other shape — maybe span, maybe div, maybe a custom
+   class we can't see from this side.
+   Cast a wider net: every descendant of an Overview cbi-section, EXCEPT
+   form controls / buttons (which need to keep their natural wrapping).
+   overflow-wrap:anywhere is the conservative wrap mode — only splits a
+   word when the line would otherwise overflow, so 'QEMU Standard PC'
+   stays intact while '/opt/docker/overlay2/8ac6...' splits. */
+.node-admin-status-overview #view .cbi-section,
+.node-admin-status-overview #view .cbi-section :not(button):not(.cbi-button):not(input):not(select):not(textarea) {
     white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: normal;
 }
 
 /* Step 75: also set min-width:0 on the grid cell. CSS Grid items default

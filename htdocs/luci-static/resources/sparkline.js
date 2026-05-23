@@ -24,6 +24,36 @@ var RING_SIZE         = 60;          // 5 min at 5s = 60 samples
 var SPARK_W           = 220;
 var SPARK_H           = 40;
 
+// Step 80 (Round 13 verify-pass): SVG namespace helpers. LuCI's generic
+// E('svg', ...) creates HTMLUnknownElement (HTML namespace), which the
+// browser doesn't render as SVG even when path attributes are pinned
+// correctly. Same root cause as Step 77's menu icon fix.
+//
+// Browser-side Claude verified Step 79's <path stroke="#a1a1aa" ...>
+// attributes landed perfectly but the sparkline area was still visually
+// blank — because the parent <svg> wasn't an actual SVGElement. This
+// helper ensures every element ends up in the SVG namespace.
+var SVG_NS   = 'http://www.w3.org/2000/svg';
+var XLINK_NS = 'http://www.w3.org/1999/xlink';
+
+function svgEl(tag, attrs, children) {
+	var el = document.createElementNS(SVG_NS, tag);
+	if (attrs) {
+		Object.keys(attrs).forEach(function (k) {
+			if (k === 'xlink:href') {
+				el.setAttributeNS(XLINK_NS, 'xlink:href', attrs[k]);
+			} else {
+				el.setAttribute(k, attrs[k]);
+			}
+		});
+	}
+	if (children) {
+		var arr = Array.isArray(children) ? children : [children];
+		arr.forEach(function (c) { if (c) el.appendChild(c); });
+	}
+	return el;
+}
+
 // ── Ring buffer for sparkline data ────────────────────────────────────────────
 function MetricRing(max) { this.max = max; this.data = []; }
 MetricRing.prototype.push = function (v) {
@@ -67,62 +97,71 @@ MetricRing.prototype.path = function (w, h) {
 
 // ── Tile creation ─────────────────────────────────────────────────────────────
 //
-// Step 76 (Round 13): pre-bake the empty-state baseline path so the
-// sparkline area shows SOMETHING even before the first tick() arrives.
-// Step 79 (Round 13 follow-up): Chrome-Claude reported that even with
-// Step 76 in place, the WAN Traffic tile rendered completely blank.
-// Inspection showed the path elements had NO stroke / stroke-dasharray
-// attributes — the CSS class .design-tile-spark-line / -line-empty
-// wasn't actually applying its styling for some reason (CSS specificity
-// war, or LuCI base svg rules, or the agent's snapshot caught a moment
-// before CSS settled). Force the attributes inline on the path element
-// so they don't depend on stylesheet application timing at all.
+// Step 76 / 79 / 80 evolution:
+//  - Step 76: pre-bake the empty baseline so the spark area never starts blank
+//  - Step 79: pin every visual attribute on <path> inline (don't rely on CSS)
+//  - Step 80 (THIS): switch every SVG element to createElementNS via svgEl()
+//    because LuCI's E('svg', ...) creates HTMLUnknownElement (HTML namespace)
+//    — the browser doesn't paint that as SVG, so even perfectly-attributed
+//    <path> children render to nothing. Same fix the menu icons needed in
+//    Step 77; we missed it here.
 function makeTile(id, iconName, label, iconBase) {
 	var baseY = (SPARK_H / 2).toFixed(1);
 	var initPath = 'M 0,' + baseY + ' L ' + SPARK_W + ',' + baseY;
+
+	// Icon SVG — proper SVG namespace, xlink+href both set
+	var iconSvg = svgEl('svg', {
+		'class':         'svg-icon design-tile-icon',
+		'aria-hidden':   'true',
+		'width':         '16',
+		'height':        '16',
+		'viewBox':       '0 0 24 24',
+		'fill':          'none',
+		'stroke':        'currentColor',
+		'stroke-width': '1.5'
+	}, svgEl('use', {
+		'href':       iconBase + '#' + iconName,
+		'xlink:href': iconBase + '#' + iconName
+	}));
+
+	// Sparkline SVG + its two paths — all real SVGElements now
+	var fillPath = svgEl('path', {
+		'class': 'design-tile-spark-fill',
+		'd':     '',
+		'fill':  'rgba(16, 185, 129, 0.18)',
+		'stroke':'none'
+	});
+	var linePath = svgEl('path', {
+		'class':            'design-tile-spark-line design-tile-spark-line-empty',
+		'd':                initPath,
+		'fill':             'none',
+		'stroke':           '#a1a1aa',
+		'stroke-width':     '1.5',
+		'stroke-dasharray': '4 4',
+		'stroke-linecap':   'round',
+		'stroke-linejoin':  'round',
+		'opacity':          '0.85'
+	});
+	var sparkSvg = svgEl('svg', {
+		'class':              'design-tile-spark',
+		'viewBox':            '0 0 ' + SPARK_W + ' ' + SPARK_H,
+		'preserveAspectRatio':'none',
+		'aria-hidden':        'true',
+		'width':              '100%',
+		'height':             '40',
+		'fill':               'none',
+		'stroke':             'currentColor'
+	}, [fillPath, linePath]);
+
+	// Tile container stays HTML — only the SVG bits need namespace fix
 	return E('div', { 'class': 'design-tile', 'id': id }, [
 		E('div', { 'class': 'design-tile-head' }, [
-			E('svg', { 'class': 'svg-icon design-tile-icon', 'aria-hidden': 'true' },
-				E('use', { 'href': iconBase + '#' + iconName })),
+			iconSvg,
 			E('span', { 'class': 'design-tile-label' }, label)
 		]),
 		E('div', { 'class': 'design-tile-value' }, '—'),
 		E('div', { 'class': 'design-tile-meta' }, ''),
-		E('svg', {
-			'class':   'design-tile-spark',
-			'viewBox': '0 0 ' + SPARK_W + ' ' + SPARK_H,
-			'preserveAspectRatio': 'none',
-			'aria-hidden': 'true',
-			// Step 79: pin presentation attrs on the SVG element itself
-			// so even if CSS gets dropped on the floor we still get a
-			// visible chart. fill=none + stroke=currentColor inherit
-			// downward to the paths.
-			'fill': 'none',
-			'stroke': 'currentColor'
-		}, [
-			// Fill area below the curve. fill is applied inline so it
-			// renders even before CSS lands.
-			E('path', {
-				'class': 'design-tile-spark-fill',
-				'd':     '',
-				'fill':  'rgba(16, 185, 129, 0.18)',
-				'stroke':'none'
-			}),
-			// Line itself. Initial state is the empty baseline (a flat
-			// dashed line in the middle); renderTileSpark() flips it to
-			// the real curve once the ring has 2+ samples.
-			E('path', {
-				'class':            'design-tile-spark-line design-tile-spark-line-empty',
-				'd':                initPath,
-				'fill':             'none',
-				'stroke':           '#a1a1aa',
-				'stroke-width':     '1.5',
-				'stroke-dasharray': '4 4',
-				'stroke-linecap':   'round',
-				'stroke-linejoin':  'round',
-				'opacity':          '0.85'
-			})
-		])
+		sparkSvg
 	]);
 }
 
