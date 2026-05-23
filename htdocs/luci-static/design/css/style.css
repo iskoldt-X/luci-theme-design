@@ -332,6 +332,23 @@ header > .fill > .container > .brand {
 .svg-icon-lg { font-size: 24px; }
 .svg-icon-xl { font-size: 32px; }
 
+/* Step 108 (Round 24): SVG <text> / <tspan> elements DO NOT inherit
+   HTML's font-family — they default to the SVG UA stylesheet's
+   `sans-serif`, which resolves to Helvetica on macOS and Arial /
+   Liberation Sans elsewhere. That makes axis labels in LuCI's
+   Realtime Graphs (Load / Bandwidth / Connections) look visually
+   inconsistent with the rest of the page (different shape, different
+   metrics).
+   Explicit rule cascades the theme stack into every chart text node.
+   !important defeats any inline font-family attribute LuCI's graph
+   generator might set on the <text> element itself (SVG presentation
+   attributes have higher specificity than non-!important CSS). */
+svg text,
+svg tspan {
+    font-family: var(--font-sans) !important;
+    fill: currentColor;
+}
+
 /* ═════════════════════════════════════════════════════════════════════════
  * §7 THEME TOGGLE BUTTON
  * 顶栏右侧的明/暗/自动切换。三态：auto / light / dark
@@ -2852,7 +2869,13 @@ td > .ifacebadge,
     outline-style: none;
     vertical-align: baseline;
     border-radius: 8px;
-    font-family: Menlo, Mono;
+    /* Step 108 (Round 24): was `Menlo, Mono` — "Mono" is not a real
+       font family name, so on systems without Menlo (Linux, Windows
+       without dev tools) the browser falls through to the UA default
+       monospace which can be anything from Courier to Lucida Console.
+       Use our existing --font-mono token for consistent monospace
+       across all platforms. */
+    font-family: var(--font-mono);
     font-size: 0.9rem;
     white-space: pre;
     margin-bottom: 5px;
@@ -4407,12 +4430,20 @@ td.cbi-button, .cbi-button-apply,
     background-color: #617486 !important;
 }
 
-/* fix node-admin-status-realtime-load */
+/* fix node-admin-status-realtime-load
+   Step 108 (Round 24): swap bare `-apple-system` declaration to
+   var(--font-sans). The bare form provides no fallback chain — on
+   non-Apple OSes (Linux / Windows / Android), `-apple-system` is
+   an unknown CSS keyword and the browser falls through to UA
+   serif (Times-like on most setups). Chrome-Claude verify pass on
+   Realtime Graphs saw the descr line + td/strong rendering as
+   serif-ish because every <div> inside #view on these 3 pages
+   inherited this orphan rule. */
 .node-admin-status-realtime-load #view div,
 .node-admin-status-realtime-bandwidth #view div,
 .node-admin-status-realtime-connections #view div{
     border: var(--sectionborder) !important;
-    font-family: -apple-system;
+    font-family: var(--font-sans);
     background: none !important;
 }
 
