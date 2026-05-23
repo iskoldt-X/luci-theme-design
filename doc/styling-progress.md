@@ -856,6 +856,125 @@ handleMenuExpand 三处：
 
 ---
 
+## 🚀 第八轮（Step 50-52）：用户实机第二轮反馈（ImmortalWrt 24.10 vs preview）
+
+> 触发：用户在 ImmortalWrt 24.10 上 flash 完 Step 41-49 后再次对比 preview。
+> 真 bugs 发现：Connection 显示"—"、WAN 上下行"—"、Quick Actions 视觉只剩纯文本且被 cbi-section 盖在底下、Speedtest 没有 preview 里的 gauge 视觉化。
+
+### Step 50 — WAN Hero Connection fallback + wan-stats 多形状探测
+
+**真 bug：**
+- `w.getProtocol().getI18n()` 在 LuCI 26.x Overview 页返回 null（dhcp Protocol class 的 i18n 字符串是 luci-app-network 视图模块注册的，Overview 不加载）→ Connection 永久显示 "—"
+- `network.device.status` RPC 在 LuCI 26.x 不同 build 返回**不同 shape**——原本 `rpc.declare({expect: {'': {}}})` 假设的扁平 `{eth1: {...}}` 不一定成立。
+
+**修法：**
+
+wan-hero.js `getProtoLabel(w)` 三档 fallback：
+```js
+1. p.getI18n()                        // 本地化标签（首选）
+2. p.getProtocol()                    // Protocol 对象的 raw proto 字符串
+3. w.get('proto')                     // 直接从 uci 读
++ PROTO_LABELS map (21 个常见 proto)  // 'dhcp' → 'DHCP', 'pppoe' → 'PPPoE'
++ TitleCase fallback                  // 未知 proto → 首字母大写
+```
+
+wan-stats.js `pickDeviceStats(response, deviceName)` 四形状探测：
+```js
+1. response[deviceName].statistics              // 扁平
+2. response[''][deviceName].statistics          // expect wrapper
+3. response.devices[deviceName].statistics      // 老 wrapper
+4. response.statistics                          // per-device 调用直接
+```
+
++ 新增 `deviceStatusOne(name)` 单设备 RPC fallback —— all-devices 不行时 try single
++ 各 fallback 路径都加 `console.warn('wan-stats: ...')` —— 实机 debug 时直接 F12 看 console 能知道当前 LuCI 返回什么 shape
+
+### Step 51 — Quick Actions 完整 UI 重建 + z-index 修复
+
+**真 bugs：**
+- 弹层只显示纯文本"Restart Wi-Fi / Reload firewall / Renew DHCP / Reboot router"——没有 preview 里的待应用变更 pill、没有 action 图标、没有分隔线
+- 弹层 z-index `var(--z-overlay)` = 40 不够高，被 cbi-section grid 的 stacking context 盖在底下（cbi-section :hover 的 transform 创建了 stacking context）
+
+**修法：**
+
+quick-actions.js 重建 `buildDropdown`：
+
+```
+[!  待应用 3 项变更               [Apply] ]  ← warning-bg pill (条件渲染)
+[wifi]    Restart Wi-Fi
+[server]  Renew DHCP
+[shield]  Reload firewall
+[zap]     Run speedtest          ← 新增
+─────────────
+[power]   Reboot router          ← 红色
+```
+
+- `countPendingChanges()` 走 `L.uci.changes()`，try/catch 兜底；> 0 时渲染 pill
+- pill 里的 Apply 按钮调用 `L.ui.changes.displayChanges()` —— **路由到 Step 45 patch 过的 diff modal + Undo flow**，不是 LuCI 原阻塞 modal
+- 每次 `open()` rebuild 整个 dropdown —— pending 计数即刻新鲜（原代码 cache once forever，Save&Apply 后计数永久卡 0）
+- 新增 `'speedtest'` action：scrollIntoView 到 speedtest card + 自动点 Run 按钮，跨模块 deep-link
+
+features.css §15 重写：
+- `z-index: 9999 !important` —— 不让任何 LuCI 表面盖过去
+- `min-width: 280px` 容纳 pill + Apply 按钮一行
+- `.quick-actions-pending` warning-bg flex row + 紧凑 Apply 按钮
+- `.quick-actions-divider` 分隔 reboot
+- icon hover state（默认 muted，hover 变 text）
+
+### Step 52 — Speedtest gauge 视觉化 + 丢包率追踪
+
+**用户反馈：**"the same goes with the wifi link test. where are the graphics?" —— preview 有两个 SVG 半圆 dial，real 只有 4 个文字数字。
+
+**修法：**
+
+speedtest.js `injectCard` 重写为：
+```
+┌─────────────────┬─────────────────┐
+│   DOWNLOAD      │    UPLOAD       │
+│   ╭───────╮     │   ╭───────╮     │
+│  ◯ ↓ 487 ◯    │  ◯ ↑ 92 ◯     │   ← SVG semicircle gauges
+│  Mbps          │  Mbps           │
+└─────────────────┴─────────────────┘
+┌─────────┬─────────┬─────────┐
+│ LATENCY │ JITTER  │ LOSS    │     ← 3 small stat cards
+│ 1.2 ms  │ 0.3 ms  │ 0%      │
+└─────────┴─────────┴─────────┘
+[ Wi-Fi 5 GHz ▼ ]  [ Run test ]
+─────────── Recent runs ──────
+…
+```
+
+- SVG path `M 20,100 A 80,80 0 0 1 180,100` = 半圆 (radius 80, length≈251)
+- `stroke-dasharray="251"` + `stroke-dashoffset=251` = 完全隐藏
+- `setGauge(kind, mbps)` 算 `offset = 251 × (1 - mbps/1000)`，CSS transition 自动 fill 动画
+- Download gauge bar = accent-500（绿），Upload = info（蓝），视觉上区分
+- `testLatency()` 现在追踪丢包率：`.catch()` 累加 failures，返回 `loss: failures/PING_COUNT × 100`。Loss 100% 时（CGI 不可达）显示 "100%" 而不是空"—"
+- Stat 数字 + 单位拆成两个 span，CSS 控制大小不同，TabularNums 防跳位
+
+features.css §13 重写：
+- 删除 `.speedtest-results` grid 死规则
+- 新 `.speedtest-gauges` 2 列 grid + `.speedtest-gauge*` 系列（label, svg, track, bar, value, arrow, num, unit）
+- 新 `.speedtest-stats` 3 列 grid + `.speedtest-stat*` 系列（label, value, unit）
+- @media 移动端：gauges 单列 stack，stats 仍 3 列但缩 padding
+
+---
+
+## 📊 第八轮（Step 50-52）累计变化
+
+| 指标 | 第七轮后 | 第八轮后 |
+|---|---|---|
+| Connection 字段（DHCP 等）显示 | "—" | **正确 proto 标签** |
+| WAN 上下行 throughput | 卡在 "—" | **2 形状 fallback + 单设备 fallback + console diagnostic** |
+| Quick Actions UI | 纯文本 4 项 | **pending pill + 5 actions + divider + reboot** |
+| Quick Actions z-index | 40（被盖） | **9999 !important** |
+| Speedtest 视觉 | 4 文字栏 | **2 SVG gauge + 3 stat cards** |
+| 丢包率指标 | 不追踪 | **追踪 + 显示** |
+| CSS 行数（features.css） | 1433 | **1604** (+171) |
+| 累计真实部署 bug 数 | 4 (Bug A/B/C 时机) | **6** (新增 Connection fallback、wan-stats shape) |
+
+
+---
+
 ## 📊 第三轮（Step 21 + 22）累计变化（更新）
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
