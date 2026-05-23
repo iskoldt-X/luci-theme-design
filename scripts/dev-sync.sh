@@ -28,6 +28,14 @@ set -euo pipefail
 ROUTER="${ROUTER:-luci-router}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Step 62: silence the OpenSSH 9.9+ post-quantum warning. It's informational
+# ("the server doesn't support ML-KEM/SNTRU PQ kex") and not actionable for
+# us — dropbear on the router talks plain X25519. With 4 rsync calls per
+# sync, each spawning a fresh SSH connection, we'd otherwise print that
+# warning 4× every save. LogLevel=ERROR keeps real errors visible.
+SSH_OPTS=(-o LogLevel=ERROR -o ConnectTimeout=10)
+export RSYNC_RSH="ssh ${SSH_OPTS[*]}"
+
 # ──────────────────────────────────────────────────────────────────────
 # Output helpers — color if attached to a terminal
 # ──────────────────────────────────────────────────────────────────────
@@ -96,7 +104,7 @@ check_router() {
     # exit 0 regardless of which probes succeeded. Connectivity itself is
     # detected by the presence of CONNECT_OK line in the captured output.
     local probe
-    probe=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$ROUTER" "
+    probe=$(ssh -o LogLevel=ERROR -o ConnectTimeout=5 -o BatchMode=yes "$ROUTER" "
         echo CONNECT_OK
         test -d /www/luci-static/design && echo DESIGN_OK
         test -d /usr/lib/lua/luci/view/themes/design && echo VIEW_OK
