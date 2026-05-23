@@ -757,6 +757,11 @@
 .speedtest-gauge-svg {
     width: 100%;
     max-width: 220px;
+    /* Step 56: explicit aspect-ratio. height:auto on inline SVG can compute
+       to 0 in some Chromium builds (and apparently does on the user's Edge)
+       when the parent flex container doesn't propagate intrinsic sizing.
+       aspect-ratio guarantees the arc gets vertical space. */
+    aspect-ratio: 200 / 110;
     height: auto;
     display: block;
     margin-bottom: var(--space-2);
@@ -764,7 +769,12 @@
 
 .speedtest-gauge-track {
     fill: none;
-    stroke: var(--color-surface-2);
+    /* Step 56: track stroke bumped from --color-surface-2 (#e4e4e7) which
+       was nearly indistinguishable from the gauge card's --color-surface-1
+       (#f4f4f5) background — user reported "where are the gauges". Switched
+       to --color-border-default (#d4d4d8) for visible contrast on both
+       light and dark mode. */
+    stroke: var(--color-border-default);
     stroke-width: 10;
     stroke-linecap: round;
 }
