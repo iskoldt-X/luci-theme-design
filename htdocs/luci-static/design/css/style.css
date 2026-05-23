@@ -3353,18 +3353,32 @@ span[data-tooltip] .label {
 	cursor: help !important;
 }
 
+/* Round 32 / Step 124 — .cbi-tooltip token-ize + white-bg fix
+ *
+ * Hover-tooltip used by .ifacebadge + zonebadge + various LuCI widgets.
+ * Old:
+ *   padding: 2px 5px            — tight,跟其他控件不一致
+ *   border-radius: 3px          — pre-token-era
+ *   background: #fff            — dark mode 闪瞎眼
+ *   box-shadow: 0 0 2px #444    — 暗灰边缘 halo
+ * 改用我们项目 token,dark mode 自动跟随。max-width + pre-wrap 防止长
+ * IP 列表 / 长状态字串撑出屏幕。 */
 .cbi-tooltip {
 	position: absolute;
 	z-index: 1000;
 	left: -1000px;
-	padding: 2px 5px;
+	max-width: 280px;
+	padding: var(--space-2) var(--space-3);
 	transition: opacity .25s ease-out;
-	white-space: pre;
+	white-space: pre-wrap;
 	pointer-events: none;
 	opacity: 0;
-	border-radius: 3px;
-	background: #fff;
-	box-shadow: 0 0 2px #444;
+	color: var(--color-text);
+	background: var(--color-surface-0);
+	border: 1px solid var(--color-border-subtle);
+	border-radius: var(--radius-sm);
+	box-shadow: var(--shadow-md);
+	font-size: var(--text-sm);
 }
 
 .cbi-tooltip-container:hover .cbi-tooltip {
@@ -3375,13 +3389,17 @@ span[data-tooltip] .label {
 
 .zonebadge .cbi-tooltip {
 	margin: -1.5rem 0 0 -.5rem;
-	padding: .25rem;
-	background: inherit;
+	padding: var(--space-2);
+	background: var(--color-surface-1);
 }
 
+/* Round 32 / Step 124 — .zonebadge-empty:替换 1990s 棋盘灰条纹
+ * 旧:repeating-linear-gradient(rgba(204,204,204,.5) ... rgba(255,255,255,.5))
+ * 用 1px dashed border + surface-1 表达"空 zone",dark mode 自动跟随。 */
 .zonebadge-empty {
-	color: #404040;
-	background: repeating-linear-gradient(45deg, rgba(204, 204, 204, .5), rgba(204, 204, 204, .5) 5px, rgba(255, 255, 255, .5) 5px, rgba(255, 255, 255, .5) 10px);
+	color: var(--color-text-muted);
+	background: var(--color-surface-1);
+	border: 1px dashed var(--color-border-default);
 }
 
 .zone-forwards {
