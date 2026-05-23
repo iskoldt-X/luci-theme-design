@@ -30,8 +30,24 @@
 //   - Theoretical-link-rate overlay (needs iwinfo channel/bandwidth)
 // ─────────────────────────────────────────────────────────────────────────────
 
-var STORAGE_KEY = 'design-speedtest-history-v1';
+var STORAGE_KEY      = 'design-speedtest-history-v1';
+var STORAGE_KEY_SIZE = 'design-speedtest-size-v1';   // Step 64: persisted file-size preset
 var HISTORY_MAX = 6;
+
+// Step 64: user-selectable test size. Default 200 MB hits a balance
+// between "fast enough not to feel slow" and "long enough to saturate
+// gigabit Wi-Fi past TCP slow-start". 1 GB option is honest about being
+// 'thorough' / slow.
+//
+// Upload bytes are derived as half the download size — uploads on real
+// links are typically slower so we don't need as much data to get a
+// stable rate, and it cuts the total test time.
+var SIZE_PRESETS_MB = {
+	'50':   { dl: 50,   ul: 25,  label: '50 MB',  hint: 'quick' },
+	'200':  { dl: 200,  ul: 100, label: '200 MB', hint: 'default' },
+	'500':  { dl: 500,  ul: 250, label: '500 MB', hint: '' },
+	'1024': { dl: 1024, ul: 512, label: '1 GB',   hint: 'thorough' }
+};
 
 var PING_COUNT      = 20;                 // 20 samples → median is robust to outliers
 var DOWNLOAD_BYTES  = 50 * 1024 * 1024;   // 50 MB — at 1 Gbps wired = 400ms (post TCP slow-start),
@@ -137,9 +153,7 @@ return baseclass.extend({
 				this.makeStat(_('Loss'),    'st-loss',    '%')
 			]),
 			E('div', { 'class': 'speedtest-actions' }, [
-				// Step 46: label select lets the user tag the run so history
-				// shows side-by-side comparable entries. No automated SSID
-				// switching — that's not possible from a browser anyway.
+				// Step 46: label select lets the user tag the run.
 				E('select', {
 					'id':    'speedtest-label',
 					'class': 'speedtest-label-select',
@@ -150,6 +164,17 @@ return baseclass.extend({
 					E('option', { 'value': '2.4 GHz' }, _('Wi-Fi 2.4 GHz')),
 					E('option', { 'value': 'Other'   }, _('Other'))
 				]),
+				// Step 64: file-size selector. Persists last choice to
+				// localStorage so the user doesn't re-pick every test.
+				E('select', {
+					'id':    'speedtest-size',
+					'class': 'speedtest-label-select',
+					'aria-label': _('Test size')
+				}, Object.keys(SIZE_PRESETS_MB).map(function (mb) {
+					var p = SIZE_PRESETS_MB[mb];
+					var text = p.label + (p.hint ? ' · ' + _(p.hint) : '');
+					return E('option', { 'value': mb }, text);
+				})),
 				E('button', {
 					'type':  'button',
 					'class': 'cbi-button cbi-button-action cbi-button-positive speedtest-run',
@@ -164,6 +189,25 @@ return baseclass.extend({
 		view.appendChild(card);     // append at END (not first-fold)
 
 		this.renderHistory();
+
+		// Step 64: restore last-used file size from localStorage + persist
+		// future changes. Defaults to 200 MB if no preference saved or the
+		// saved value isn't in the current SIZE_PRESETS_MB map (so retiring
+		// a preset doesn't break existing users).
+		var sizeEl = document.getElementById('speedtest-size');
+		if (sizeEl) {
+			var saved = '';
+			try { saved = localStorage.getItem(STORAGE_KEY_SIZE) || ''; }
+			catch (e) { /* localStorage disabled — fall through to default */ }
+			if (saved && SIZE_PRESETS_MB[saved]) {
+				sizeEl.value = saved;
+			} else {
+				sizeEl.value = '200';
+			}
+			sizeEl.addEventListener('change', function () {
+				try { localStorage.setItem(STORAGE_KEY_SIZE, sizeEl.value); } catch (e) {}
+			});
+		}
 	},
 
 	// Step 52: build one gauge — semicircle SVG track + animated bar +
@@ -250,10 +294,21 @@ return baseclass.extend({
 		// success. Initialised as null sentinels; written inside each phase.
 		var labelEl = document.getElementById('speedtest-label');
 		var label   = labelEl ? labelEl.value : 'Other';
+
+		// Step 64: read selected file size and convert MB → bytes for the
+		// CGI request. Falls back to the legacy DOWNLOAD_BYTES/UPLOAD_BYTES
+		// defaults if the select element isn't present (e.g. some plugin
+		// stripped it) — backwards-compat.
+		var sizeEl = document.getElementById('speedtest-size');
+		var preset = (sizeEl && SIZE_PRESETS_MB[sizeEl.value]) || SIZE_PRESETS_MB['200'];
+		var downloadBytes = preset.dl * 1024 * 1024;
+		var uploadBytes   = preset.ul * 1024 * 1024;
+
 		var result  = {
 			t: Date.now(), label: label,
 			latency: null, jitter: null, loss: null,
-			download: null, upload: null
+			download: null, upload: null,
+			sizeLabel: preset.label    // Step 64: track which size was used for history
 		};
 
 		btn.textContent = _('Testing latency (%d samples)…').replace('%d', PING_COUNT);
@@ -266,27 +321,24 @@ return baseclass.extend({
 					result.latency = l.median;
 					result.jitter  = l.jitter;
 				}
-				// Step 52: loss tracked even when no successful samples,
-				// so user sees 100% rather than '—' when CGI unreachable.
+				// Step 52: loss tracked even when no successful samples.
 				self.setStat('loss', l.loss.toFixed(0));
 				result.loss = l.loss;
 
-				btn.textContent = _('Testing download (%d MB)…').replace('%d', DOWNLOAD_BYTES / 1024 / 1024);
-				return self.testDownload();
+				btn.textContent = _('Testing download (%d MB)…').replace('%d', downloadBytes / 1024 / 1024);
+				return self.testDownload(downloadBytes);
 			})
 			.then(function (mbps) {
 				self.setGauge('download', mbps);
 				if (mbps !== null) result.download = mbps;
-				btn.textContent = _('Testing upload (%d MB)…').replace('%d', UPLOAD_BYTES / 1024 / 1024);
-				return self.testUpload();
+				btn.textContent = _('Testing upload (%d MB)…').replace('%d', uploadBytes / 1024 / 1024);
+				return self.testUpload(uploadBytes);
 			})
 			.then(function (mbps) {
 				self.setGauge('upload', mbps);
 				if (mbps !== null) result.upload = mbps;
 
-				// Step 46: persist + refresh history list. Only save if at
-				// least one number was captured (avoid littering on a totally
-				// failed run).
+				// Step 46: persist + refresh history.
 				if (result.latency !== null || result.download !== null || result.upload !== null) {
 					pushHistory(result);
 					self.renderHistory();
@@ -371,11 +423,15 @@ return baseclass.extend({
 		return Promise.resolve().then(next);
 	},
 
-	testDownload: function () {
+	// Step 64: testDownload/testUpload now take a bytes argument so the
+	// caller (runTest) can pass the user-selected size. Default args fall
+	// back to the legacy module-level constants for any external callers.
+	testDownload: function (bytes) {
+		bytes = bytes || DOWNLOAD_BYTES;
 		var t0 = performance.now();
 		var ctrl = new AbortController();
 		var to = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
-		return fetch('/cgi-bin/design/download?bytes=' + DOWNLOAD_BYTES + '&t=' + Date.now(), {
+		return fetch('/cgi-bin/design/download?bytes=' + bytes + '&t=' + Date.now(), {
 			signal: ctrl.signal, cache: 'no-store'
 		}).then(function (r) {
 			if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -383,14 +439,15 @@ return baseclass.extend({
 		}).then(function (blob) {
 			clearTimeout(to);
 			var ms = performance.now() - t0;
-			var bytes = blob.size;
-			var mbps = (bytes * 8) / (ms / 1000) / 1e6;
+			var actual = blob.size;
+			var mbps = (actual * 8) / (ms / 1000) / 1e6;
 			return mbps;
 		}).catch(function () { clearTimeout(to); return null; });
 	},
 
-	testUpload: function () {
-		var payload = new Blob([new Uint8Array(UPLOAD_BYTES)]);
+	testUpload: function (bytes) {
+		bytes = bytes || UPLOAD_BYTES;
+		var payload = new Blob([new Uint8Array(bytes)]);
 		var t0 = performance.now();
 		var ctrl = new AbortController();
 		var to = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
@@ -400,7 +457,7 @@ return baseclass.extend({
 			clearTimeout(to);
 			if (!r.ok) throw new Error('HTTP ' + r.status);
 			var ms = performance.now() - t0;
-			var mbps = (UPLOAD_BYTES * 8) / (ms / 1000) / 1e6;
+			var mbps = (bytes * 8) / (ms / 1000) / 1e6;
 			return mbps;
 		}).catch(function () { clearTimeout(to); return null; });
 	},
