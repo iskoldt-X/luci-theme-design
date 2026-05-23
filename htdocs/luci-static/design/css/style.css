@@ -1869,43 +1869,75 @@ td > table > tbody > tr > td,
 	/* background-color: #f9f9f9; */
 }
 
-.cbi-value-field {
-    width: 65%;
-}
-
-.cbi-value-field,
-.cbi-value-description {
-    display: table-cell;
-}
-
-.cbi-value-description {
-	font-size: small;
-	padding-top: .4rem;
-	opacity: .5;
-}
-
-.cbi-value-title {
-    word-wrap: break-word;
-    display: table-cell;
-    width: 35%;
-    float: left; 
-    padding: 13px 10px 5px 3px;
-}
-
+/* Step 105 (Round 22): replace LuCI's table-cell + float-left
+   35/65 proportional form layout with a modern CSS Grid mirroring
+   doc/style-preview.html's `.form-row` spec.
+   - 140-200 px label column (auto-sized to longest realistic label
+     in that range)
+   - 1fr value column (takes remaining space)
+   - Optional `.cbi-value-description` hint flows beneath the value
+     cell via grid-template-areas
+   - 48 px touch-friendly min-height (Apple HIG / Material spec)
+   - subtle border-bottom rows for visual separation, off on last
+   LuCI emits this DOM unchanged — we just rewrite our CSS, so no
+   Lua-side work. .cbi-value-description sometimes ships as a
+   sibling of .cbi-value-field, sometimes as a child; the grid-area
+   property only takes effect on grid items (sibling case) and is
+   harmlessly ignored on non-grid-item descendants (child case). */
 .cbi-value {
-    display: flex;
-    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(140px, 200px) 1fr;
+    grid-template-areas:
+        "label value"
+        ".     hint";
+    column-gap: var(--space-4);
+    row-gap: var(--space-1);
     align-items: center;
-    align-content: center;
-    justify-content: flex-start;
-    min-height: 40px;
-    padding: 8px 10px;
-    flex-flow:row wrap;
-    border-bottom: var(--cbilinecolor);
+    width: 100%;
+    min-height: 48px;
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .cbi-value:last-child {
     border-bottom: none;
+}
+
+.cbi-value-title {
+    grid-area: label;
+    /* Reset old layout: was display:table-cell + float:left + width:35% */
+    width: auto;
+    float: none;
+    display: block;
+    padding: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
+    word-wrap: break-word;
+    line-height: 1.4;
+}
+
+.cbi-value-field {
+    grid-area: value;
+    /* Reset old layout: was display:table-cell + width:65% */
+    width: auto;
+    display: block;
+    color: var(--color-text);
+}
+
+.cbi-value-description {
+    grid-area: hint;
+    /* Reset old "small + opacity .5" to preview's text-xs + text-subtle.
+       opacity reset to 1 since text-subtle already provides the muted
+       tone via color token — opacity hits user-typed strong/em/links
+       inside the hint too, which is wrong. */
+    display: block;
+    font-size: var(--text-xs);
+    color: var(--color-text-subtle);
+    padding-top: 0;
+    margin-top: var(--space-1);
+    opacity: 1;
+    line-height: 1.4;
 }
 
 .cbi-value ul {
@@ -3538,9 +3570,10 @@ input[name="nslookup"] {
         display: none !important;
     }
 
-    .cbi-value-title {
-        width:35%;
-    }
+    /* Step 105 (Round 22): the old `.cbi-value-title { width: 35% }`
+       mobile override is dead — base layout switched from float-based
+       to CSS Grid, the column width is set by grid-template-columns
+       at the `.cbi-value` level, not on the title cell. Removed. */
 
     .node-network-diagnostics > .main .cbi-map div.cbi-section > div * {
         width: 100% !important;
@@ -3753,35 +3786,30 @@ input[name="nslookup"] {
     .main > .main-left > .nav > .slide > .slide-menu > li > a {
     }
 
+    /* Step 105 (Round 22): on the narrowest tier (≤370 px) stack the
+       label / value / hint vertically. Single-column grid keeps the
+       same DOM contract — title in row 1, value in row 2, hint in
+       row 3 (still positioned under value via grid-area). */
     .cbi-value {
-    margin-bottom: 20px;
-    display: table;
-    padding: 0px;
-    border-bottom: none;
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "label"
+            "value"
+            "hint";
+        row-gap: var(--space-1);
+        padding: var(--space-3) 0;
     }
 
     .cbi-value-title {
-        width: 100%;
-        font-weight: 700;
-        float: left;
-        padding: 0;
-        margin: 0;
-        margin-bottom: .25rem;
-    }
-    
-    .cbi-section-node {
-        padding: 10px !important;
-    }
-	
-    .cbi-value-description {
-        width: 100%;
-        display: block;
+        /* Slightly bolder weight in stacked mode so the label still
+           reads as the "header" of the row when label and value share
+           the same width. */
+        font-weight: var(--weight-semibold);
+        color: var(--color-text);
     }
 
-    .cbi-value > .cbi-value-field {
-        display: block;
-        float: left;
-        width: 100%;
+    .cbi-section-node {
+        padding: 10px !important;
     }
     img[src*="/luci-static/resources/cbi/add.gif"] {
         right: 45px;
