@@ -1137,6 +1137,92 @@ L.ui.changes.apply          = diffHook;
 
 这三条已经写进 `/Users/nht435/.claude/projects/.../memory/` 项目记忆，未来 contributor / agent 接手时立刻能避坑。
 
+---
+
+## 🌩️ 第十轮（Step 59）：本地开发回路 — 把 15 分钟单循环压到 5 秒
+
+> 起飞时间：2026-05-23
+> 触发：第九轮结束时与用户的整体项目评估。**最大单项改进 = 本地开发回路**。9 轮深度调试都靠用户实机贴 console / 截图，这是结构性的速度瓶颈。
+> 范围：纯工具，**不触主题代码一行**。Mac 端添加 fswatch + rsync 同步脚本，从此 dev 期反馈循环 ≈ 5 秒。
+
+### Step 59 — `scripts/dev-sync.sh` + `doc/development.md`
+
+**时间**：2026-05-23
+**文件**：
+- 新建 `scripts/dev-sync.sh`（200+ 行 bash，watch + 一次性 sync 双模式）
+- 新建 `doc/development.md`（workflow doc，setup + troubleshooting + Phase 2 roadmap）
+
+**做了什么：**
+
+不写新功能、不修 bug，只解决**项目元层面的速度问题**。
+
+#### 原节奏 vs 新节奏
+
+| 阶段 | Round 1-9 | Round 10+ |
+|---|---|---|
+| 改完一行代码到看到效果 | ~15 分钟 | **~5 秒** |
+| 工具链 | git push → CI build → 下载 zip → unzip → scp → ssh opkg install → hard refresh | 编辑器保存 → fswatch 触发 → rsync 4 个 target → Cmd+R |
+| 关键依赖 | GitHub Actions runner + 路由器 + 浏览器 + 人在终端贴命令 | fswatch (brew) + 路由器 |
+| 错误恢复 | 重新走整条流水线 | `--once` 重 push 或 git stash + sync |
+
+180× 加速。Round 11+ 一天能跑 30 次迭代，**不再依赖用户当人肉测试机**。
+
+#### dev-sync.sh 核心逻辑
+
+```
+preflight:
+    1. fswatch / rsync / ssh 三个工具齐
+    2. PROJECT_ROOT 是 luci-theme-design repo（防误用）
+    3. SSH 能连 luci-router (BatchMode 强制 key 认证)
+    4. 路由器上 /www/luci-static/design 与 /usr/lib/lua/luci/view/themes/design 已存在
+       （否则提示先装一次 ipk）
+
+初始全量 sync_all() → 4 路并行 rsync:
+    htdocs/luci-static/design/    →  /www/luci-static/design/         (--delete OK)
+    htdocs/luci-static/resources/ →  /www/luci-static/resources/      (NO --delete, 与 LuCI core 共享)
+    luasrc/view/themes/design/    →  /usr/lib/lua/luci/view/themes/design/   (--delete OK)
+    root/www/cgi-bin/design/      →  /www/cgi-bin/design/  (--chmod 加可执行位)
+
+监听 fswatch -o htdocs/ luasrc/ root/www/:
+    每次批次 → sync_all()
+```
+
+#### 关键安全设计
+
+- **`--delete` 用得非常克制**：只在 theme 自己独占的子目录用（`design/` 后缀），与 LuCI core 共享的 `resources/` 一律 NOT --delete，避免误删 LuCI 自身模块
+- **`BatchMode=yes` + `ConnectTimeout=5`**：preflight 在 SSH 卡住时 5s 内放弃，不会让用户死等
+- **PROJECT_ROOT 校验**：脚本通过 `Makefile` + 几个标志性目录的存在性确认自己确实在 luci-theme-design repo 下，不会在乱七八糟的目录里跑
+- **`set -euo pipefail`**：任何一步出错立刻退出，不会半同步状态下还以为 OK
+- **`.DS_Store` / `.gitkeep` 排除**：避免把 macOS / git 占位文件推到路由器
+
+#### 不替代什么
+
+dev-sync **不替代** GH Actions CI 或 ipk 分发：
+- 用户分发**仍然**是 GH Actions build → 用户 opkg install
+- CI 仍然**必须**通过（lint / size budget / brace balance / CGI safety）
+- dev-sync 只是 dev 期内的反馈循环加速
+
+#### Phase 2 路线图（记入 doc/development.md）
+
+| 增强 | 价值 | 工时 |
+|---|---|---|
+| Playwright e2e 跑在 luci-router | 9 个 deployment bug 全部写成回归测试 | ~4-6h |
+| LiveReload | 改文件后浏览器自动刷新，连 Cmd+R 都省 | ~1h |
+| `dev-revert.sh` | 一键回滚到 git HEAD | ~30 min |
+| `dev-tail.sh` | tail 路由器 logread + uhttpd 日志到本地终端 | ~30 min |
+
+按需上。
+
+**验证：**
+```bash
+$ bash -n scripts/dev-sync.sh       ✅
+$ chmod +x scripts/dev-sync.sh       ✅
+$ ls scripts/                         dev-sync.sh
+```
+
+**Round 10 终极效果**：从 Round 11 开始，**Claude 我 + 用户**之间的 debug 循环也加速。我改完一个 Step、commit、用户跑 `dev-sync.sh --once` 就上线了。不需要 CI 等待，不需要 ipk 重装。
+
+
 
 
 ---
