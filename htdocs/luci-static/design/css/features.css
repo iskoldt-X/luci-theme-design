@@ -1918,3 +1918,43 @@
     text-decoration: underline;
     margin-left: var(--space-2);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Step 111 (Round 27): unify hover lift across all overview cards
+ *
+ * The existing `.node-admin-status-overview #view > .cbi-section:hover` rule
+ * at style.css:4627 was added back in Step 41 to give the LuCI-rendered
+ * System / Memory / Storage / DHCP / UPnP cards a -2 px lift + shadow-md
+ * elevation on hover. Subtle but tasteful — the user explicitly liked it.
+ *
+ * The 5 cards we added between Rounds 4-17 (.wan-hero / .design-tile /
+ * .devices-card / .speedtest-card / .traffic-card) were created without
+ * matching :hover rules. Chrome-Claude DOM audit confirmed all 5 had
+ * computed `transform: none` on hover — they read as visually static
+ * next to the lifting cbi-section cards.
+ *
+ * Same motion tokens (`--motion-fast` 120 ms + `--ease-out` cubic-bezier)
+ * as the existing cbi-section rule for visual continuity. Transition
+ * explicitly lists transform + box-shadow rather than `all` to avoid
+ * accidentally animating layout-affecting properties (width, height,
+ * etc.) that other cascade rules may touch.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.wan-hero,
+.design-tile,
+.devices-card,
+.speedtest-card,
+.traffic-card {
+    transition:
+        transform var(--motion-fast) var(--ease-out),
+        box-shadow var(--motion-fast) var(--ease-out);
+}
+
+.wan-hero:hover,
+.design-tile:hover,
+.devices-card:hover,
+.speedtest-card:hover,
+.traffic-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
