@@ -809,15 +809,50 @@
     text-align: right;
 }
 
-.devices-row-detail {
-    margin-left: calc(16px + var(--space-3));
-    margin-top: var(--space-2);
-    padding-left: var(--space-3);
-    border-left: 2px solid var(--color-border-subtle);
+/* Step 44: chevron sits at the end of the main row, rotates 180° when the
+   row expands. Auto-margin pushes it to the far right. */
+.devices-row-chev {
+    margin-left: auto;
+    width: 16px;
+    height: 16px;
+    color: var(--color-text-subtle);
+    transition: transform var(--motion-fast) var(--ease-out);
+    flex-shrink: 0;
+}
+.devices-row-expanded .devices-row-chev {
+    transform: rotate(180deg);
 }
 
-.devices-row:not(.devices-row-expanded) .devices-row-detail {
-    display: none;
+/* Step 44: smooth inline expand via max-height transition. The detail
+   block is always in the DOM (so toggling is a class flip, not a re-
+   render) but visually clipped to height 0 when collapsed. max-height
+   600px covers normal cases; if the user has unusually long values the
+   transition just clips, no overflow. opacity adds a gentle fade. */
+.devices-row-detail {
+    margin-left: calc(16px + var(--space-3));
+    padding-left: var(--space-3);
+    border-left: 2px solid var(--color-border-subtle);
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition:
+        max-height var(--motion-normal) var(--ease-out),
+        opacity   var(--motion-normal) var(--ease-out),
+        margin-top var(--motion-normal) var(--ease-out);
+    margin-top: 0;
+}
+.devices-row-expanded .devices-row-detail {
+    max-height: 600px;
+    opacity: 1;
+    margin-top: var(--space-2);
+}
+
+/* Two-column detail grid (wider screens) collapses to single column on
+   mobile. */
+.devices-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--space-1) var(--space-3);
 }
 
 .devices-detail-row {
@@ -838,8 +873,28 @@
     word-break: break-all;
 }
 
+/* Step 44: action buttons row under the detail grid. Right-aligned so
+   the eye reads detail-first, action-second; reduced bottom padding so
+   the visual "block" of the expanded section still feels compact. */
+.devices-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    justify-content: flex-end;
+    margin-top: var(--space-3);
+    padding-top: var(--space-2);
+    border-top: 1px dashed var(--color-border-subtle);
+}
+.devices-action {
+    font-size: var(--text-xs);
+    padding: 4px var(--space-3);
+    min-height: 28px;
+}
+
 @media (max-width: 640px) {
     .devices-row-type { display: none; }
+    .devices-actions { justify-content: stretch; }
+    .devices-action { flex: 1 1 auto; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

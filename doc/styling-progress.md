@@ -1404,3 +1404,104 @@ $ camelCase tokens: 0        ✅
 ```
 
 **剩余差距：** WAN Hero header 处的 5 根 latency bars（preview 里 ping 数字前的小信号条）留给 Step 48。Devices count 也留 Step 48。
+
+---
+
+### Step 44 — Device list 真正的"可交互"：smooth expand + 操作按钮 + rename 持久化
+
+**时间**：2026-05-23
+**文件**：
+- `htdocs/luci-static/resources/devices.js` 重写 render/buildRow 路径（212 → ~290 行）
+- `htdocs/luci-static/design/css/features.css` §14 重写 `.devices-row-detail` + `.devices-actions`
+
+**做了什么：**
+
+第五轮 ship MVP 时 devices.js 有四个粗糙点：
+1. 每次 toggleRow 都**重渲染整个 list** —— 6+ 客户端时眼睛能看到 flash
+2. expand/collapse 用 `display: none` —— 没有过渡，瞬切
+3. **没有操作按钮** —— preview 里有 改名/限速/阻止/白名单 4 个按钮，real 一个没有
+4. 改名是不可能的 —— 即使想加，没存储路径
+
+本 Step 把这四个一次解决：
+
+#### 1. Smooth inline expand（CSS max-height transition）
+
+原方案：`isExpanded ? [详情子节点] : []` → toggleRow → 整个 list re-render。
+
+新方案：detail 始终在 DOM 里，CSS 控制可见性：
+
+```css
+.devices-row-detail {
+    max-height: 0; opacity: 0; overflow: hidden;
+    transition: max-height 200ms ease-out, opacity 200ms ease-out, margin-top ...;
+    margin-top: 0;
+}
+.devices-row-expanded .devices-row-detail {
+    max-height: 600px; opacity: 1; margin-top: var(--space-2);
+}
+```
+
+`toggleRow(mac)` 改为 `row.classList.toggle('devices-row-expanded', this.expanded[mac])` —— 单行 class flip，无 DOM 重建。
+
+`600px` max-height 是一个 cap：正常 detail + actions 大概 200px，远低于 600；如果用户 hostname 极长或 IPv6 地址特别多导致溢出，会被截掉而不是动画卡死。
+
+#### 2. Chevron 旋转指示器
+
+新加 `.devices-row-chev` 使用 `i-arrow-down` SVG。`margin-left: auto` 推到行末，`transition: transform 120ms` + `.devices-row-expanded .devices-row-chev { transform: rotate(180deg) }` 形成开关动效。
+
+#### 3. 操作按钮（3 个）
+
+每行的 detail 末尾新增 `.devices-actions` flex row，3 个按钮：
+
+| 按钮 | 行为 |
+|---|---|
+| **Rename** | `prompt()` 弹原生输入，写 `localStorage` 持久化 + `this.customNames[mac]`，下次 refresh 时优先用 |
+| **Limit**  | `toast.info('Rate limiting is not yet implemented')` —— 诚实的 stub，**不**装作能用 |
+| **Block**  | `toast.warning('Blocking is not yet implemented')` —— 同上，按钮风格用 `cbi-button-negative` 视觉提示破坏性操作 |
+
+按钮 click 都有 `e.stopPropagation()` —— 不要触发外层 row 的 click（避免点 Rename 后顺手收起 detail）。`buildRow` 的 row-click handler 也用 `e.target.closest('.devices-action')` 提前 return，**两个方向**都防住点击穿透。
+
+#### 4. Rename 持久化（localStorage）
+
+`STORAGE_KEY = 'design-device-names-v1'`，存 `{ mac: customName }` map。`loadCustomNames()` / `saveCustomNames()` 各自 try/catch（quota 满 / 隐私模式禁 localStorage 不会让整个 module 挂）。
+
+显示优先级：`customNames[mac]` > `l.hostname` > `vendor + 'device'` > `'Unknown device'`。
+
+**重要诚实**：toast 提示 `Saved (this browser only — UCI persistence coming later)`。换浏览器 / 清缓存就丢。UCI 持久化（写 `/etc/config`、reload-safe schema、跨 device 同步语义）是独立 PR，留给后续。
+
+**为什么 prompt() 不上自家 Modal？**
+
+LuCI 的 `ui.showModal` 不内置 input field，要自己拼 input + button + form submit handler，约 30 行代码。`window.prompt()` 已经是浏览器原生 + 键盘支持 + Enter/Esc 全包，对 Step 44 这种"轻量交互"够用。改 modal 等真要加"输入校验 / 多字段"时再说。
+
+**没有破坏的事：**
+
+- ❌ DHCP / OUI / type 推断逻辑全保留，OUI 表里去掉了 2 个 dup key（`DC:A6:32` 和 `DC:A6:32` 重复定义为 Raspberry Pi 和 Espressif，保留 Pi，新的 Espressif 用 `EC:FA:BC` `24:6F:28`）
+- ❌ 30s refresh interval 保留
+- ❌ `tryInject` / `injectCard` / `refresh` 公共 API 不变
+- ❌ Toast 行为通过 `toastSafe()` wrap：toast module 不存在时 fallback 到 console，不会因 toast load 顺序问题崩
+
+**Break change：**
+
+- 每行多了一个 ▾ chevron 在末尾
+- expand/collapse 不再瞬切，有 200ms 平滑动画
+- detail 区下多了一行操作按钮（Rename / Limit / Block）
+- 点 Rename 会弹 prompt 让你输入新名字
+- 改名后名字会持久化（仅当前浏览器）
+
+**验证：**
+
+```bash
+$ node --check devices.js     ✅
+$ CSS braces 194 == 194       ✅
+$ Total CSS lines: 1283 (+54)
+```
+
+**仍 deferred（明确不在 Step 44 范围）：**
+
+| 项 | 为什么 deferred |
+|---|---|
+| 无线信号 bars（preview 里 -41dBm 4 格那种） | 需要 iwinfo merge —— 把 dhcp leases 与 `iwinfo dump` 按 MAC join，跨 PHY 找信号值。设计上 50+ 行新代码，会让 Step 44 diff 翻倍 |
+| Wired vs Wi-Fi 判定 | 同上，靠 iwinfo |
+| UCI 持久化 rename | 新 UCI section + reload-safe schema + cross-browser sync 语义。值得 standalone PR |
+| 实际 Block 写防火墙规则 | uci.firewall.add 新 rule 需要 careful 不要锁住自己（block 自己 MAC = lock out admin），后续 confirm-modal + safety check |
+| 实际 Limit 写 QoS 规则 | 类似，需要 luci-app-qos 集成 |

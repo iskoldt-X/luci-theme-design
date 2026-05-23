@@ -10,13 +10,25 @@
 //   - Device type guess (laptop / phone / TV / IoT etc.) from hostname keywords
 //   - Vendor guess from MAC OUI prefix
 //   - Click row to expand details
+//   - Step 44: smooth inline expand (CSS max-height transition, no full
+//     re-render on every toggle), chevron rotation, action buttons
+//     (Rename / Limit / Block) — Rename persists to localStorage so the
+//     name survives DHCP refreshes within the same browser. Limit & Block
+//     are honest stubs that surface a toast explaining they're not yet
+//     implemented (no fake feature).
 //
 // Lives in a card injected into Overview (does NOT replace LuCI's
 // admin/network/dhcp view — that stays for detailed management).
 //
-// MVP: ~35 OUI prefixes + 10 hostname-keyword type rules. Wireless signal
-// strength merge + rename-and-save-to-UCI deferred to follow-up.
+// Still deferred (out of scope for Step 44):
+//   - Wireless signal strength / signal bars  (needs iwinfo merge)
+//   - True wired/wifi indicator                (same)
+//   - UCI persistence for rename               (currently localStorage only)
+//   - Actual block / rate-limit action         (would need uci.firewall +
+//                                              uci.qos integration)
 // ─────────────────────────────────────────────────────────────────────────────
+
+var STORAGE_KEY = 'design-device-names-v1';
 
 // ── Type inference by hostname keyword ────────────────────────────────────────
 // First match wins. Patterns are case-insensitive regex source strings.
@@ -40,13 +52,13 @@ var OUI = {
 	'DC:A6:32': 'Raspberry Pi',   'E4:5F:01': 'Raspberry Pi',     '00:1A:11': 'Google',
 	'F4:F5:D8': 'Google',         'F8:FF:C2': 'Apple',            'A4:83:E7': 'Apple',
 	'7C:6D:F8': 'Apple',          '00:25:00': 'Apple',            'F4:5C:89': 'Apple',
-	'AC:DE:48': 'Apple',          'DC:A6:32': 'Raspberry Pi',     'B0:35:9F': 'Apple',
+	'AC:DE:48': 'Apple',          'B0:35:9F': 'Apple',
 	'04:03:D6': 'Nintendo',       '00:24:E4': 'Nintendo',         'DC:A6:BD': 'Sony',
 	'00:50:F2': 'Microsoft',      '7C:1E:52': 'Microsoft',        '00:18:FE': 'HP',
 	'94:DE:80': 'HP',             '00:14:22': 'Dell',             '00:25:64': 'Dell',
 	'04:7D:7B': 'Lenovo',         'B8:AC:6F': 'Dell',             '00:0C:29': 'VMware',
 	'00:50:56': 'VMware',         '52:54:00': 'QEMU/KVM',         '08:00:27': 'VirtualBox',
-	'DC:A6:32': 'Espressif',      'EC:FA:BC': 'Espressif',        '24:6F:28': 'Espressif IoT',
+	'EC:FA:BC': 'Espressif',      '24:6F:28': 'Espressif IoT',
 	'B0:F8:93': 'TP-Link',        '14:CC:20': 'TP-Link',          '00:1D:7E': 'Cisco-Linksys'
 };
 
@@ -66,6 +78,27 @@ function inferType(hostname) {
 	return { icon: 'i-info', label: _('Unknown') };
 }
 
+// ── Custom names (Step 44) — localStorage persistence ────────────────────────
+// Best-effort: lost on browser clear, doesn't sync across browsers / devices.
+// UCI persistence is a follow-up (would need a new UCI section + reload-safe
+// schema). The toast on save makes the boundary explicit.
+function loadCustomNames() {
+	try {
+		var raw = localStorage.getItem(STORAGE_KEY);
+		return raw ? JSON.parse(raw) : {};
+	} catch (e) { return {}; }
+}
+function saveCustomNames(map) {
+	try { localStorage.setItem(STORAGE_KEY, JSON.stringify(map)); }
+	catch (e) { /* quota / disabled — fail silent */ }
+}
+
+function toastSafe(type, msg) {
+	if (window.toast && window.toast[type]) return window.toast[type](msg);
+	if (type === 'error' && console && console.error) console.error(msg);
+	return null;
+}
+
 // ── ubus / RPC ────────────────────────────────────────────────────────────────
 var getDHCPLeases = L.rpc.declare({
 	object: 'luci-rpc',
@@ -79,7 +112,8 @@ return baseclass.extend({
 	__init__: function () {
 		if (!document.body.classList.contains('node-admin-status-overview')) return;
 		this.iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design') + '/icons.svg';
-		this.expanded = {};   // mac → bool
+		this.expanded     = {};                   // mac → bool
+		this.customNames  = loadCustomNames();    // mac → string
 		this.tryInject();
 	},
 
@@ -156,56 +190,122 @@ return baseclass.extend({
 			return;
 		}
 
+		// Step 44: build all rows ONCE with their detail content embedded,
+		// then toggle a class on click — no DOM rebuild on every expand.
 		listEl.innerHTML = '';
 		var self = this;
 		unique.forEach(function (l) {
-			var mac = (l.macaddr || l.mac || '').toUpperCase();
-			var type = inferType(l.hostname);
-			var vendor = ouiVendor(mac);
-			var ipShort = (l.ipaddr || '').split('.').pop();
-			var isExpanded = self.expanded[mac] === true;
-
-			var row = E('li', {
-				'class': 'devices-row' + (isExpanded ? ' devices-row-expanded' : ''),
-				'data-mac': mac,
-				'click': (function (m) { return function () { self.toggleRow(m); }; })(mac)
-			}, [
-				E('div', { 'class': 'devices-row-main' }, [
-					E('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
-						E('use', { 'href': self.iconBase + '#' + type.icon })),
-					E('span', { 'class': 'devices-row-name' }, l.hostname || (vendor ? vendor + ' ' + _('device') : _('Unknown device'))),
-					E('span', { 'class': 'devices-row-ip' }, ipShort ? '.' + ipShort : '—'),
-					E('span', { 'class': 'devices-row-type' }, type.label)
-				]),
-				E('div', { 'class': 'devices-row-detail' }, isExpanded ? [
-					E('div', { 'class': 'devices-detail-row' }, [
-						E('span', { 'class': 'devices-detail-label' }, _('Full IP')),
-						E('span', { 'class': 'devices-detail-value' }, l.ipaddr || '—')
-					]),
-					E('div', { 'class': 'devices-detail-row' }, [
-						E('span', { 'class': 'devices-detail-label' }, _('MAC')),
-						E('span', { 'class': 'devices-detail-value' }, mac || '—')
-					]),
-					E('div', { 'class': 'devices-detail-row' }, [
-						E('span', { 'class': 'devices-detail-label' }, _('Vendor')),
-						E('span', { 'class': 'devices-detail-value' }, vendor || _('Unknown'))
-					]),
-					E('div', { 'class': 'devices-detail-row' }, [
-						E('span', { 'class': 'devices-detail-label' }, _('Lease expires')),
-						E('span', { 'class': 'devices-detail-value' }, l.expires
-							? new Date(l.expires * 1000).toLocaleString()
-							: _('static or expired'))
-					])
-				] : [])
-			]);
-
-			listEl.appendChild(row);
+			listEl.appendChild(self.buildRow(l));
 		});
+	},
+
+	buildRow: function (l) {
+		var self    = this;
+		var mac     = (l.macaddr || l.mac || '').toUpperCase();
+		var type    = inferType(l.hostname);
+		var vendor  = ouiVendor(mac);
+		var ipShort = (l.ipaddr || '').split('.').pop();
+		var isOpen  = self.expanded[mac] === true;
+
+		// Resolve display name: user override (Step 44) > DHCP hostname >
+		// vendor "device" > "Unknown device".
+		var displayName = self.customNames[mac]
+			|| l.hostname
+			|| (vendor ? vendor + ' ' + _('device') : _('Unknown device'));
+
+		return E('li', {
+			'class':    'devices-row' + (isOpen ? ' devices-row-expanded' : ''),
+			'data-mac': mac,
+			'click': function (e) {
+				// Don't toggle when an action button (or anything inside it)
+				// was clicked. closest() walks up the tree.
+				if (e.target.closest && e.target.closest('.devices-action')) return;
+				self.toggleRow(mac);
+			}
+		}, [
+			E('div', { 'class': 'devices-row-main' }, [
+				E('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
+					E('use', { 'href': self.iconBase + '#' + type.icon })),
+				E('span', { 'class': 'devices-row-name', 'data-mac': mac },
+					displayName),
+				E('span', { 'class': 'devices-row-ip' }, ipShort ? '.' + ipShort : '—'),
+				E('span', { 'class': 'devices-row-type' }, type.label),
+				// Chevron rotates 180° via CSS when expanded
+				E('svg', { 'class': 'svg-icon devices-row-chev', 'aria-hidden': 'true' },
+					E('use', { 'href': self.iconBase + '#i-arrow-down' }))
+			]),
+			// Detail wrapper is always in DOM — max-height transition handles
+			// the visual collapse/expand. Cheaper than rebuilding rows.
+			E('div', { 'class': 'devices-row-detail' }, [
+				E('div', { 'class': 'devices-detail-grid' }, [
+					self.detailRow(_('Full IP'),  l.ipaddr || '—'),
+					self.detailRow(_('MAC'),      mac || '—'),
+					self.detailRow(_('Vendor'),   vendor || _('Unknown')),
+					self.detailRow(_('Lease expires'), l.expires
+						? new Date(l.expires * 1000).toLocaleString()
+						: _('static or expired'))
+				]),
+				E('div', { 'class': 'devices-actions' }, [
+					E('button', {
+						'type':  'button',
+						'class': 'cbi-button cbi-button-action devices-action',
+						'click': function (e) {
+							e.stopPropagation();
+							self.actionRename(mac, displayName);
+						}
+					}, _('Rename')),
+					E('button', {
+						'type':  'button',
+						'class': 'cbi-button cbi-button-action devices-action',
+						'click': function (e) {
+							e.stopPropagation();
+							toastSafe('info', _('Rate limiting is not yet implemented'));
+						}
+					}, _('Limit')),
+					E('button', {
+						'type':  'button',
+						'class': 'cbi-button cbi-button-negative devices-action',
+						'click': function (e) {
+							e.stopPropagation();
+							toastSafe('warning', _('Blocking is not yet implemented'));
+						}
+					}, _('Block'))
+				])
+			])
+		]);
+	},
+
+	detailRow: function (label, value) {
+		return E('div', { 'class': 'devices-detail-row' }, [
+			E('span', { 'class': 'devices-detail-label' }, label),
+			E('span', { 'class': 'devices-detail-value' }, value)
+		]);
 	},
 
 	toggleRow: function (mac) {
 		this.expanded[mac] = !this.expanded[mac];
-		// Re-render only this row would be cleaner; for MVP just re-render all
-		this.refresh();
+		var row = document.querySelector('.devices-row[data-mac="' + mac + '"]');
+		if (row) row.classList.toggle('devices-row-expanded', this.expanded[mac]);
+	},
+
+	actionRename: function (mac, currentName) {
+		// Minimal but honest UX: native prompt + localStorage. UCI persistence
+		// is a follow-up (would touch /etc/config + reload schema).
+		var next = window.prompt(_('Rename this device') + ' (' + mac + ')', currentName);
+		if (next === null) return;             // cancelled
+		next = next.trim();
+		if (next === '') {
+			// Empty → clear custom name and fall back to DHCP/vendor
+			delete this.customNames[mac];
+		} else {
+			this.customNames[mac] = next;
+		}
+		saveCustomNames(this.customNames);
+
+		// Update the visible name in-place (no full re-render)
+		var nameEl = document.querySelector('.devices-row-name[data-mac="' + mac + '"]');
+		if (nameEl) nameEl.textContent = next || mac;
+
+		toastSafe('success', _('Saved (this browser only — UCI persistence coming later)'));
 	}
 });
