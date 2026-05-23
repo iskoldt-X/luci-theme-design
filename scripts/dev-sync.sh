@@ -85,11 +85,18 @@ check_repo() {
 # exist and rsync would refuse to push). Bootstrap path: install the
 # ipk once via the GH Actions build, then dev-sync replaces files in
 # place forever after.
+#
+# Step 60: also probe remote rsync. BusyBox/ash on ImmortalWrt does NOT
+# ship rsync by default — running dev-sync without it produces a cryptic
+# "rsync: unexpected end of file" because the local rsync's remote
+# shell can't find the binary. Catch that here and give the opkg fix.
 check_router() {
     log "${BLUE}preflight${NC}: probing ${BOLD}${ROUTER}${NC}..."
     local probe
     if ! probe=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$ROUTER" \
-            "test -d /www/luci-static/design && test -d /usr/lib/lua/luci/view/themes/design && echo OK" \
+            "test -d /www/luci-static/design && echo DESIGN_OK; \
+             test -d /usr/lib/lua/luci/view/themes/design && echo VIEW_OK; \
+             command -v rsync >/dev/null 2>&1 && echo RSYNC_OK" \
             2>&1); then
         err "can't reach $ROUTER over SSH (BatchMode=yes — needs key auth)."
         err "  try: ssh $ROUTER \"echo hello\""
@@ -97,15 +104,24 @@ check_router() {
         err "  ssh raw output: $probe"
         exit 1
     fi
-    if [ "$(echo "$probe" | tail -1)" != "OK" ]; then
+    if ! echo "$probe" | grep -q '^RSYNC_OK$'; then
+        err "$ROUTER reachable, but rsync isn't installed on the router."
+        err "  BusyBox / ash doesn't include rsync by default."
+        err "  fix in one line:"
+        err "    ssh $ROUTER \"opkg update && opkg install rsync\""
+        err "  (~100 KB, then rerun this script.)"
+        exit 1
+    fi
+    if ! echo "$probe" | grep -q '^DESIGN_OK$' || \
+       ! echo "$probe" | grep -q '^VIEW_OK$'; then
         err "$ROUTER reachable, but theme dirs missing."
-        err "  /www/luci-static/design        OR"
+        err "  /www/luci-static/design                OR"
         err "  /usr/lib/lua/luci/view/themes/design"
         err "  do not exist. Install the theme ipk once before using dev-sync."
         err "  (see README.md — opkg install luci-theme-design_*.ipk)"
         exit 1
     fi
-    log "${GREEN}preflight: OK${NC}"
+    log "${GREEN}preflight: OK${NC}  ${DIM}(router rsync + theme dirs present)${NC}"
 }
 
 # ──────────────────────────────────────────────────────────────────────
