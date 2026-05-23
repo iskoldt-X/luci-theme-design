@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  vlan.svg — Virtual LAN tagging / 802.1Q
+  Round 33 / Step 128 override for upstream LuCI icon
+  Visual: one root box branching into three VLANs (network → VLANs)
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
+     fill="none" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="9" y="3" width="6" height="4" rx="0.75"/>
+  <line x1="12" y1="7" x2="6" y2="13"/>
+  <line x1="12" y1="7" x2="12" y2="13"/>
+  <line x1="12" y1="7" x2="18" y2="13"/>
+  <rect x="3" y="14" width="6" height="4" rx="0.75"/>
+  <rect x="9" y="14" width="6" height="4" rx="0.75"/>
+  <rect x="15" y="14" width="6" height="4" rx="0.75"/>
+</svg>

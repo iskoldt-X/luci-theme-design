@@ -3252,14 +3252,20 @@ td > .ifacebadge,
  */
 img[src*="/luci-static/resources/icons/port_"],
 img[src*="/luci-static/resources/icons/ethernet"],
-img[src*="/luci-static/resources/icons/wifi"] {
+img[src*="/luci-static/resources/icons/wifi"],
+img[src*="/luci-static/resources/icons/bridge"],
+img[src*="/luci-static/resources/icons/tunnel"],
+img[src*="/luci-static/resources/icons/vlan"] {
 	width: 32px;
 	height: 32px;
 }
 
 html[data-theme="dark"] img[src*="/luci-static/resources/icons/port_"],
 html[data-theme="dark"] img[src*="/luci-static/resources/icons/ethernet"],
-html[data-theme="dark"] img[src*="/luci-static/resources/icons/wifi"] {
+html[data-theme="dark"] img[src*="/luci-static/resources/icons/wifi"],
+html[data-theme="dark"] img[src*="/luci-static/resources/icons/bridge"],
+html[data-theme="dark"] img[src*="/luci-static/resources/icons/tunnel"],
+html[data-theme="dark"] img[src*="/luci-static/resources/icons/vlan"] {
 	filter: brightness(1.15);
 }
 
