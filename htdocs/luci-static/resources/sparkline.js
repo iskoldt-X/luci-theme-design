@@ -44,12 +44,21 @@ MetricRing.prototype.path = function (w, h) {
 		if (this.data[i] < lo) lo = this.data[i];
 		if (this.data[i] > hi) hi = this.data[i];
 	}
-	var range = hi - lo || 1;
+	// Flat-data fix (e.g. CPU load 0.00 for several samples): without this
+	// guard the line plots at y=h (bottom of viewBox) and gets clipped /
+	// invisible. Center the line in the middle 60% of the box when range is
+	// negligible, so users always see SOME visible line indicating "data
+	// is being collected, currently flat".
+	var range = hi - lo;
+	var flat = range < 0.0001;
+	if (flat) range = 1;
 	var stepX = w / (this.max - 1);
 	var d = '';
 	for (var j = 0; j < this.data.length; j++) {
 		var x = j * stepX;
-		var y = h - ((this.data[j] - lo) / range) * h;
+		var y = flat
+			? h * 0.5    // centered for flat data
+			: h - ((this.data[j] - lo) / range) * h * 0.85 - h * 0.075;  // 7.5% top/bottom padding
 		d += (j === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
 	}
 	return d.trim();

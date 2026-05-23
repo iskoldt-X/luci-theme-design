@@ -124,30 +124,71 @@ return baseclass.extend({
 
 	refresh: function () {
 		var self = this;
-		// WAN interface state via LuCI's network helper
+
+		// Per-field try/catch so one broken accessor doesn't blank the whole
+		// card. User report on ImmortalWrt 24.10: IP populated but Connection /
+		// Uptime / Interface all blank + status showed "Unable to read WAN state"
+		// — that was the .catch firing AFTER IP was already set. Now each
+		// field stands alone.
+		function safe(fn, fallback) {
+			try {
+				var v = fn();
+				return (v === null || v === undefined || v === '') ? fallback : v;
+			} catch (e) {
+				return fallback;
+			}
+		}
+
 		network.getWANNetworks().then(function (wans) {
 			if (!wans || !wans.length) {
 				self.setStatus('offline', _('No WAN configured'));
 				return;
 			}
 			var w = wans[0];
-			var up = w.isUp();
-			self.setStatus(up ? 'online' : 'offline', up ? _('Online') : _('Offline'));
 
-			var ipv4 = w.getIPAddrs();
-			document.getElementById('wan-hero-ip').textContent = (ipv4 && ipv4.length) ? ipv4[0].split('/')[0] : '—';
-			document.getElementById('wan-hero-proto').textContent = w.getProtocol() ? w.getProtocol().getI18n() : '—';
-			document.getElementById('wan-hero-uptime').textContent = formatUptime(w.getUptime());
-			document.getElementById('wan-hero-iface').textContent = w.getDevice() ? w.getDevice().getName() : (w.getName() || '—');
-		}).catch(function () {
+			// isUp() can throw on some forks if the interface is mid-restart
+			var up = safe(function () { return w.isUp(); }, null);
+			if (up === null) {
+				self.setStatus('unknown', _('WAN state transient'));
+			} else {
+				self.setStatus(up ? 'online' : 'offline', up ? _('Online') : _('Offline'));
+			}
+
+			var ipv4 = safe(function () { return w.getIPAddrs(); }, []);
+			document.getElementById('wan-hero-ip').textContent =
+				(ipv4 && ipv4.length) ? ipv4[0].split('/')[0] : safe(function () {
+					// Fallback: try IPv6 if IPv4 missing
+					var v6 = w.getIP6Addrs();
+					return (v6 && v6.length) ? v6[0].split('/')[0] : '—';
+				}, '—');
+
+			document.getElementById('wan-hero-proto').textContent = safe(function () {
+				var p = w.getProtocol();
+				return p ? p.getI18n() : null;
+			}, '—');
+
+			document.getElementById('wan-hero-uptime').textContent = safe(function () {
+				return formatUptime(w.getUptime());
+			}, '—');
+
+			document.getElementById('wan-hero-iface').textContent = safe(function () {
+				var d = w.getDevice();
+				return d ? d.getName() : w.getName();
+			}, '—');
+		}).catch(function (e) {
+			// Outer rejection: getWANNetworks itself failed. Only NOW do we
+			// claim full unknown. Single fields handled by per-field try/catch
+			// above.
 			self.setStatus('unknown', _('Unable to read WAN state'));
+			if (console && console.warn) console.warn('wan-hero: getWANNetworks failed:', e);
 		});
 
-		// Gateway/local ping — separate from WAN state since CGI is on the box itself
+		// Gateway/local ping — independent from WAN state since CGI is on the
+		// box itself; works even if WAN is down.
 		measurePing().then(function (ms) {
 			var el = document.getElementById('wan-hero-ping');
-			if (ms === null) { el.textContent = ''; return; }
-			el.textContent = ms.toFixed(1) + ' ms';
+			if (!el) return;
+			el.textContent = (ms === null) ? '' : ms.toFixed(1) + ' ms';
 		});
 	},
 

@@ -4050,6 +4050,28 @@ td.cbi-button, .cbi-button-apply,
     grid-column: 1 / -1;
 }
 
+/* Theme-injected feature cards (Phase 2+3+4) span the full grid width so
+   they don't fight with LuCI native cbi-sections for horizontal real
+   estate. `order` then arranges visual sequence regardless of DOM
+   insertion timing (multiple L.require modules race to inject; load order
+   isn't guaranteed). User feedback 2026-05-23: without these rules our
+   WAN Hero ended up the same cell width as LuCI's "System" — lost the
+   hero feel. See preview/upgrade-preview.html for the target layout. */
+.node-admin-status-overview #view > .wan-hero,
+.node-admin-status-overview #view > .design-tile-grid,
+.node-admin-status-overview #view > .devices-card,
+.node-admin-status-overview #view > .speedtest-card,
+.node-admin-status-overview #view > .traffic-card {
+    grid-column: 1 / -1;
+}
+.node-admin-status-overview #view > .wan-hero         { order: -3; }
+.node-admin-status-overview #view > .design-tile-grid { order: -2; }
+/* LuCI's .cbi-section elements default to order: 0 — they fall between
+   our hero/tiles and our extras (devices/speedtest/traffic). */
+.node-admin-status-overview #view > .devices-card     { order: 10; }
+.node-admin-status-overview #view > .speedtest-card   { order: 11; }
+.node-admin-status-overview #view > .traffic-card     { order: 12; }
+
 /* cbi-section 卡片本身（基础 token 已应用，这里仅微调） */
 .node-admin-status-overview #view > .cbi-section {
     margin: 0;
