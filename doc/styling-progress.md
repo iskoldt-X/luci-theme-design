@@ -1669,3 +1669,100 @@ $ node --check speedtest.js     ✅
 $ CSS braces 213 == 213         ✅
 $ grep -rlP '\x01' (no SOH)     ✅
 ```
+
+---
+
+### Step 48 — WAN Hero 5-bar latency indicator
+
+**时间**：2026-05-23
+**文件**：
+- `htdocs/luci-static/resources/wan-hero.js`（+25 行：pingToBars + bars markup + 更新逻辑）
+- `htdocs/luci-static/design/css/features.css`（+50 行 §12 wan-hero-ping-bars 系列规则）
+
+**做了什么：**
+
+upgrade-preview §A1 header 处的 ping 数字前有 5 根高度递增的信号条 (`<span class="latency-bars">...`)。本 Step 把它从 preview 搬到 real theme。
+
+#### JS 改动（wan-hero.js）
+
+1. **新 helper `pingToBars(ms)`** 把 ping 中位数映射到 0-5 根活跃 bar：
+
+| 范围 | bars | 解读 |
+|---|---|---|
+| `< 5ms`  | 5 | excellent — LAN-only |
+| `< 20ms` | 4 | good — Wi-Fi to local gateway |
+| `< 50ms` | 3 | ok — typical broadband |
+| `< 100ms` | 2 | poor — congested / distant gateway |
+| `≥ 100ms` | 1 | very poor |
+| ping fail | 0 | offline / unreachable |
+
+2. **`injectCard` 改 `wan-hero-ping` 内部结构**：原本 `E('span', ..., '')` 简单文本节点；现在改成两个 child span：
+   - `.wan-hero-ping-bars` 含 5 个空 `<span>`，`data-bars="0"`
+   - `.wan-hero-ping-text` 含 ms 文本
+
+3. **`refresh()` ping 回调** 改为同时更新 bars 的 `data-bars` attribute + text 的内容。
+
+#### CSS 改动（features.css §12）
+
+- 5 个 `<span>` 高度 6/9/12/15/18 px，宽 3px，间距 2px —— 信号条经典形状
+- 默认色 `--color-surface-2`（灰），非活跃
+- `[data-bars="N"]` 用 `:nth-child(-n+N)` 选择前 N 根，色 `--color-success`
+- **Warning / Danger tinging**：
+  - `data-bars="2"` 时前 2 根 = warning amber（提示"ping 偏高"）
+  - `data-bars="1"` 时第 1 根 = danger red（最差状态）
+- `wan-hero-ping` 容器改 `display: inline-flex + gap` 让 bars 和 text 横向排
+- `transition: background 120ms ease-out` 让数据变化时颜色渐变（不是瞬切）
+
+#### 为什么用 `data-bars` attribute selector 而不是 class
+
+CSS attribute selector `[data-bars="N"]` 实现的"前 N 根高亮"用 `:nth-child(-n+N)` 比生成 5 个 class（active-1 / active-2 / ...）干净得多。data attribute 也方便后续 JS debug（直接 `document.querySelector('[data-bars="5"]')` 看哪些极好）。
+
+**没有破坏的事：**
+
+- ❌ `pingOnce` / `measurePing` / 5 sample × median 逻辑零改动
+- ❌ `setStatus` / `refresh` 公共结构保留
+- ❌ ping 失败时仍隐藏文字（textContent=""），bars 全灰（data-bars="0"）
+
+**Break change：** 
+- WAN Hero 右上角的 ping 数字旁边多出 5 根小竖线
+- 1-2ms LAN ping 触发"全绿 5 根"
+- 100ms+ WAN 触发"1 根红"，作为高 ping 的视觉警告
+
+**验证：**
+
+```bash
+$ node --check wan-hero.js          ✅
+$ CSS braces 224 == 224             ✅
+$ Minifier-unsafe rgb: 0            ✅
+$ SOH scan clean                    ✅
+```
+
+---
+
+## 📊 第七轮（Step 41-46 + 48）累计变化
+
+> Step 47 skipped — traffic.js 在第六轮 Step 35 时已经 ship inline nlbw chart（renderConsumers）。
+
+| 指标 | 第六轮后 | 第七轮后 |
+|---|---|---|
+| Overview tile 数 | 3 | **4**（加 Net tile） |
+| WAN Hero 视觉打磨 | flat 卡 | **gradient + glow + pulse + latency bars + ↑↓ throughput** |
+| WAN 实时 throughput | 无 | **2s 轮询 wan-stats 单例，2 个消费者** |
+| 设备列表 expand | full re-render | **CSS max-height 平滑过渡 + 类切换** |
+| 设备列表操作按钮 | 0 | **3 个**（Rename 持久化 + Limit/Block 诚实 stub） |
+| Apply-modal Undo | 无 | **10s 窗口，L.uci.values 快照** |
+| Speedtest 历史 | 无 | **localStorage 6 条 + label + clear** |
+| Speedtest manual 对比 | 无 | **2.4G / 5G label 工作流** |
+| Ping 可视化 | "1.2 ms" 文字 | **5 bars + 颜色编码（绿/黄/红）+ 文字** |
+| LuCI module 文件数 | 12 | **13**（+wan-stats） |
+| CSS 行数（features.css） | 1038 | **1433** (+395) |
+| upgrade.md 完成进度 | 19/21 | **依然 19/21**（剩 T20 build-time CSS diff + T21 visual regression test，部署期加固） |
+
+## 🎯 用户能立刻看到的变化（第七轮）
+
+1. **WAN Hero**：斜向 emerald sheen 渐变 + 右上角辉光 + "Online" 圆点呼吸 + ping 数字前 5 根信号条 + 底部 ↑↓ 实时带宽
+2. **顶部 tile grid**：从 3 张变 4 张，多了 WAN Traffic tile，2s 节奏更"live"
+3. **LAN 客户端列表**：行末多 ▾ 箭头，点击平滑展开详情 + 3 个操作按钮（Rename 能持久化，Limit/Block 诚实告诉你"还没实现"）
+4. **Apply 配置**：成功后 10s 内可点 [Undo] 把 set 改动撤回
+5. **Speedtest**：测试前可选标签（5G/2.4G/Wired/Other），下方多出 Recent runs 历史条，方便手动对比
+6. **多 1 个 LuCI module**（wan-stats），footer 多 1 行 `L.require`

@@ -572,6 +572,57 @@
     color: var(--color-text-muted);
     font-size: var(--text-sm);
     font-family: var(--font-mono);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+/* Step 48: 5-bar latency indicator next to the ping number. Bars
+   grow in height from left to right (6 → 18 px) and light up based
+   on data-bars attribute (0-5). Active = success green; inactive =
+   muted surface. 'Last bar' always slightly dimmer when on at 4 to
+   visually signal "you can still get better" — purely decorative. */
+.wan-hero-ping-bars {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 18px;
+}
+.wan-hero-ping-bars > span {
+    display: block;
+    width: 3px;
+    background: var(--color-surface-2);
+    border-radius: 1px;
+    transition: background var(--motion-fast) var(--ease-out);
+}
+.wan-hero-ping-bars > span:nth-child(1) { height: 6px; }
+.wan-hero-ping-bars > span:nth-child(2) { height: 9px; }
+.wan-hero-ping-bars > span:nth-child(3) { height: 12px; }
+.wan-hero-ping-bars > span:nth-child(4) { height: 15px; }
+.wan-hero-ping-bars > span:nth-child(5) { height: 18px; }
+
+/* Active bars: light the first N where N = data-bars value. Selector
+   list expansion handles 1..5; 0 = no active bars. */
+.wan-hero-ping-bars[data-bars="1"] > span:nth-child(-n+1),
+.wan-hero-ping-bars[data-bars="2"] > span:nth-child(-n+2),
+.wan-hero-ping-bars[data-bars="3"] > span:nth-child(-n+3),
+.wan-hero-ping-bars[data-bars="4"] > span:nth-child(-n+4),
+.wan-hero-ping-bars[data-bars="5"] > span:nth-child(-n+5) {
+    background: var(--color-success);
+}
+
+/* Warning tinge when only 1-2 bars are active — ping is high enough
+   that the user should notice. */
+.wan-hero-ping-bars[data-bars="1"] > span:nth-child(1),
+.wan-hero-ping-bars[data-bars="2"] > span:nth-child(-n+2) {
+    background: var(--color-warning);
+}
+.wan-hero-ping-bars[data-bars="1"] > span:nth-child(1) {
+    background: var(--color-danger);
+}
+
+.wan-hero-ping-text {
+    /* keep text on the same baseline as the bars */
 }
 
 .wan-hero-body {

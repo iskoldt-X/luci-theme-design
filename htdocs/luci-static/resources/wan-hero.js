@@ -79,6 +79,19 @@ function measurePing() {
 	return next();
 }
 
+// Step 48: map a ping median (ms) → number of active "signal" bars.
+// Thresholds chosen so a typical LAN ping (1-3ms) maxes out at 5,
+// Wi-Fi-to-WAN (10-30ms) sits at 3-4, congested or distant gateway
+// (100ms+) drops to 1. Returns 0 if the ping itself failed.
+function pingToBars(ms) {
+	if (ms === null || ms === undefined || !isFinite(ms)) return 0;
+	if (ms < 5)    return 5;
+	if (ms < 20)   return 4;
+	if (ms < 50)   return 3;
+	if (ms < 100)  return 2;
+	return 1;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 return baseclass.extend({
@@ -108,7 +121,15 @@ return baseclass.extend({
 					E('use', { 'href': this.iconBase + '#i-globe' })),
 				E('span', { 'class': 'wan-hero-title' }, _('Internet')),
 				E('span', { 'class': 'wan-hero-status', 'id': 'wan-hero-status' }, _('Checking...')),
-				E('span', { 'class': 'wan-hero-ping', 'id': 'wan-hero-ping' }, '')
+				// Step 48: ping element gets a 5-bar signal indicator + text.
+			// Inner structure is filled by refresh(); empty until first
+			// measurement returns.
+			E('span', { 'class': 'wan-hero-ping', 'id': 'wan-hero-ping' }, [
+				E('span', { 'class': 'wan-hero-ping-bars', 'id': 'wan-hero-ping-bars', 'data-bars': '0' }, [
+					E('span'), E('span'), E('span'), E('span'), E('span')
+				]),
+				E('span', { 'class': 'wan-hero-ping-text', 'id': 'wan-hero-ping-text' }, '')
+			])
 			]),
 			E('div', { 'class': 'wan-hero-body' }, [
 				E('div', { 'class': 'wan-hero-field' }, [
@@ -239,9 +260,13 @@ return baseclass.extend({
 		// Gateway/local ping — independent from WAN state since CGI is on the
 		// box itself; works even if WAN is down.
 		measurePing().then(function (ms) {
-			var el = document.getElementById('wan-hero-ping');
-			if (!el) return;
-			el.textContent = (ms === null) ? '' : ms.toFixed(1) + ' ms';
+			// Step 48: split the display into 5-bar indicator + text. The
+			// bars are CSS-styled spans; we just update the data-bars
+			// attribute and let the cascade do the rest.
+			var bars = document.getElementById('wan-hero-ping-bars');
+			var text = document.getElementById('wan-hero-ping-text');
+			if (bars) bars.setAttribute('data-bars', String(pingToBars(ms)));
+			if (text) text.textContent = (ms === null) ? '' : ms.toFixed(1) + ' ms';
 		});
 	},
 
