@@ -191,7 +191,7 @@ return baseclass.extend({
 		}
 
 		var mainLeft = qs('.main-left');
-		if (mainLeft && window.innerWidth <= 992)
+		if (mainLeft && window.innerWidth <= 1100)
 			mainLeft.style.width = '0';
 
 		var mainRight = qs('.main-right');
@@ -380,13 +380,13 @@ return baseclass.extend({
 
 		var open = mainLeft.style.width == '';
 
-			if (width > 992 || ev.type == 'resize')
+			if (width > 1100 || ev.type == 'resize')
 				open = true;
 				
 		darkMask.style.visibility = open ? '' : 'visible';
 		darkMask.style.opacity = open ? '': 1;
 
-		if (width <= 992)
+		if (width <= 1100)
 			mainLeft.style.width = open ? '0' : '';
 		else
 			mainLeft.style.width = ''

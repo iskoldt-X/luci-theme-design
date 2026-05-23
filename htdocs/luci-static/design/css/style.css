@@ -749,7 +749,7 @@ header {
 }
 
 /* Replaces the JS resize handler that used to toggle box-shadow on small viewports */
-@media (max-width: 992px) {
+@media (max-width: 1100px) {
     header {
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
     }
@@ -3411,7 +3411,7 @@ input[name="nslookup"] {
     }
 }
 
-@media screen and (max-width: 992px) {
+@media screen and (max-width: 1100px) {
 
     /* img[src*="/images/logo.png"] {
     background-color: var(--mainleftbgcolor);
@@ -3860,11 +3860,11 @@ input[name="nslookup"] {
 
 /* Step 74 (Round 13): hide the mobile bottom-bar on desktop. README marks
    the theme as 'mobile-optimised' and the .navbar is the iOS WebApp style
-   bottom nav (home / openclash / link / rank / user). On desktops > 992px
+   bottom nav (home / openclash / link / rank / user). On desktops > 1100px
    the left sidebar already handles all navigation, so the bottom bar just
    occupies screen real estate and overlaps content. Hide cleanly.
    Browser-side Claude agent flagged this 2026-05-23. */
-@media (min-width: 993px) {
+@media (min-width: 1101px) {
 	.navbar {
 		display: none;
 	}
@@ -3886,7 +3886,7 @@ input[name="nslookup"] {
    Match the navbar's own height formula: 50 px base + safe-area
    on iOS notch / Android gesture bar, plus var(--space-4) of breathing
    room so content doesn't visually butt against the navbar's top edge. */
-@media (max-width: 992px) {
+@media (max-width: 1100px) {
 	.main-right {
 		padding-bottom: calc(50px + env(safe-area-inset-bottom) + var(--space-4));
 	}
