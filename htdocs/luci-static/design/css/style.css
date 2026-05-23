@@ -5148,3 +5148,58 @@ td.cbi-button, .cbi-button-apply,
     stroke-dasharray: 3 3;
     opacity: 0.7;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Round 34 / Step 131 — DiskMan 分区条 inline-style 4 色覆盖
+ *
+ * /admin/system/diskman (luci-app-diskman) 给每个分区写 inline:
+ *   <div style="background-color:#c0c0ff">sda128 raw</div>
+ *   <div style="background-color:#fbbd00">sda1 fat16</div>
+ *   <div style="background-color:#e97c30">sda2 squashfs</div>
+ *   <div style="background-color:#a0e0a0">free space</div>
+ *
+ * 4 个 1990s 高饱和粉彩,dark mode 上像彩虹糖撒黑桌布。属性选择器 +
+ * !important 是覆盖 inline style 的唯一路径(同 Step 122 zonebadge)。
+ *
+ * 语义映射:
+ *   #c0c0ff 淡紫 (raw)        → --color-info       (blue)
+ *   #fbbd00 芥末 (FAT/boot)   → --color-warning    (amber)
+ *   #e97c30 烧橙 (squashfs)   → --chart-3          (amber-orange)
+ *   #a0e0a0 薄荷 (free)       → --color-accent-500 (success green)
+ * 文字色统一 --color-text-onaccent (white) 保证 contrast on solid bg。
+ *
+ * 每种颜色覆盖 4 种 inline 拼写(`:` 后 with/without space + `;` 前后
+ * 各一,因为 LuCI 模板 inline style 的格式不统一)。
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+[data-page="admin-system-diskman"] [style*="background-color:#c0c0ff" i],
+[data-page="admin-system-diskman"] [style*="background-color: #c0c0ff" i],
+[data-page="admin-system-diskman"] [style*="background:#c0c0ff" i],
+[data-page="admin-system-diskman"] [style*="background: #c0c0ff" i] {
+    background: var(--color-info) !important;
+    color: var(--color-text-onaccent) !important;
+}
+
+[data-page="admin-system-diskman"] [style*="background-color:#fbbd00" i],
+[data-page="admin-system-diskman"] [style*="background-color: #fbbd00" i],
+[data-page="admin-system-diskman"] [style*="background:#fbbd00" i],
+[data-page="admin-system-diskman"] [style*="background: #fbbd00" i] {
+    background: var(--color-warning) !important;
+    color: var(--color-text-onaccent) !important;
+}
+
+[data-page="admin-system-diskman"] [style*="background-color:#e97c30" i],
+[data-page="admin-system-diskman"] [style*="background-color: #e97c30" i],
+[data-page="admin-system-diskman"] [style*="background:#e97c30" i],
+[data-page="admin-system-diskman"] [style*="background: #e97c30" i] {
+    background: var(--chart-3) !important;
+    color: var(--color-text-onaccent) !important;
+}
+
+[data-page="admin-system-diskman"] [style*="background-color:#a0e0a0" i],
+[data-page="admin-system-diskman"] [style*="background-color: #a0e0a0" i],
+[data-page="admin-system-diskman"] [style*="background:#a0e0a0" i],
+[data-page="admin-system-diskman"] [style*="background: #a0e0a0" i] {
+    background: var(--color-accent-500) !important;
+    color: var(--color-text-onaccent) !important;
+}
