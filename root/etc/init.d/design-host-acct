@@ -1,0 +1,195 @@
+#!/bin/sh /etc/rc.common
+#
+# design-host-acct — per-host traffic accounting for the Traffic Analysis card
+#
+# WHY THIS EXISTS
+# ───────────────
+# nlbwmon's per-host byte counters are broken when Software Flow Offloading
+# is enabled — the offload fastpath bypasses Netfilter conntrack hooks, so
+# nlbwmon (which subscribes to conntrack via NFNETLINK_CONNTRACK) sees the
+# counter frozen at ~0 for every offloaded flow. Most user routers run with
+# offloading on for performance and never realize the per-host metering they
+# see is wrong.
+#
+# HOW IT WORKS
+# ────────────
+# nftables `netdev` family with the `ingress` hook fires at the NIC RX
+# point, BEFORE the network stack diverges into the nf_flowtable fastpath.
+# Counter objects attached to ingress rules see every packet, including
+# those that will subsequently be offloaded.
+#
+# Two ingress hooks per host:
+#   - on br-lan:    saddr == host → uploads (LAN → internet bytes)
+#   - on $WAN_DEV:  daddr == host → downloads (internet → LAN bytes)
+#
+# Counter naming: `host_tx_<ip_underscored>` / `host_rx_<ip_underscored>`
+# (nftables identifiers can't contain dots, so 192.168.45.225 becomes
+# 192_168_45_225 for the name).
+#
+# Round 31 / Step 115 (2026-05-23).
+# ─────────────────────────────────────────────────────────────────────────
+
+START=99
+STOP=10
+
+NFT_TABLE="design_acct"
+LAN_DEV="br-lan"
+DHCP_LEASES="/tmp/dhcp.leases"
+
+EXTRA_COMMANDS="refresh"
+EXTRA_HELP="    refresh    Rescan DHCP leases + re-detect WAN; add new host counters"
+
+# Detect current WAN device dynamically. Works for static / DHCP / PPPoE /
+# WireGuard etc. — whatever interface holds the default route. Returns
+# empty string if WAN is down (caller should fall back gracefully).
+get_wan_dev() {
+	ip -4 -o route get 8.8.8.8 2>/dev/null | \
+		awk '{for(i=1;i<=NF;i++) if($i=="dev") { print $(i+1); exit }}'
+}
+
+# Sanitize IP into nft-safe identifier (dots → underscores). Also gate
+# against weird input (no shell escape chars).
+ip_to_id() {
+	echo "$1" | tr '.' '_' | tr -cd 'a-zA-Z0-9_'
+}
+
+# Add per-host counters + rules. Idempotent — `nft add` silently no-ops if
+# the object already exists with the same definition.
+add_host_counter() {
+	local ip="$1"
+	local id
+
+	# Skip malformed
+	case "$ip" in
+		*[!0-9.]*) return 1 ;;
+		"") return 1 ;;
+	esac
+	id=$(ip_to_id "$ip")
+	[ -z "$id" ] && return 1
+
+	nft add counter netdev "$NFT_TABLE" "host_tx_$id" 2>/dev/null
+	nft add counter netdev "$NFT_TABLE" "host_rx_$id" 2>/dev/null
+
+	# Feed counters from the matching rules. Each rule references its
+	# counter by name — no need to per-IP grep when reading.
+	nft add rule netdev "$NFT_TABLE" lan_in \
+		ip saddr "$ip" counter name "host_tx_$id" 2>/dev/null
+	nft add rule netdev "$NFT_TABLE" wan_in \
+		ip daddr "$ip" counter name "host_rx_$id" 2>/dev/null
+}
+
+# Build the table + chains from scratch. Wipes any prior state — used on
+# start. After this returns, counters exist for all currently-known DHCP
+# hosts; new leases get added via refresh().
+setup_table() {
+	local wan_dev
+
+	# Hard reset
+	nft delete table netdev "$NFT_TABLE" 2>/dev/null
+
+	# Pre-flight: nft itself missing? Don't crash the rest of boot.
+	command -v nft >/dev/null 2>&1 || {
+		logger -t design-host-acct "nft binary missing; aborting"
+		return 1
+	}
+
+	# Pre-flight: netdev family loaded? Kernel module nf_tables_netdev
+	# needs to be available. Most OpenWrt 22.03+ builds have this.
+	if ! nft list tables 2>/dev/null | grep -q ''; then
+		logger -t design-host-acct "nftables non-functional; aborting"
+		return 1
+	fi
+
+	nft add table netdev "$NFT_TABLE" 2>/dev/null || {
+		logger -t design-host-acct "failed to create netdev table"
+		return 1
+	}
+
+	# LAN ingress chain — hooks on br-lan. priority -300 places this
+	# before any conntrack-related hooks (which are around 0).
+	nft add chain netdev "$NFT_TABLE" lan_in \
+		"{ type filter hook ingress device $LAN_DEV priority -300 ; }" \
+		2>/dev/null
+
+	# WAN ingress chain — hooks on whatever the default-route device is
+	# right now. Best-effort: if WAN isn't up yet, skip the wan_in chain
+	# and let refresh() add it later.
+	wan_dev=$(get_wan_dev)
+	if [ -n "$wan_dev" ] && [ "$wan_dev" != "$LAN_DEV" ]; then
+		nft add chain netdev "$NFT_TABLE" wan_in \
+			"{ type filter hook ingress device $wan_dev priority -300 ; }" \
+			2>/dev/null
+	fi
+
+	# Initial population from current DHCP lease table.
+	refresh_hosts
+}
+
+# Add counters for hosts that aren't yet covered. Idempotent — existing
+# counters are preserved (bytes don't reset). Also re-checks WAN device
+# in case it changed since startup (e.g., PPPoE reconnect, WAN restart).
+refresh_hosts() {
+	local ip
+	local current_wan
+	local existing_wan
+	local existing_ips
+
+	[ -r "$DHCP_LEASES" ] || return 0
+
+	# Check if WAN device changed; rebuild wan_in chain if so.
+	current_wan=$(get_wan_dev)
+	if [ -n "$current_wan" ] && [ "$current_wan" != "$LAN_DEV" ]; then
+		# Pull current chain's device attribute via JSON
+		existing_wan=$(nft -j list table netdev "$NFT_TABLE" 2>/dev/null | \
+			jsonfilter -e '@.nftables[*].chain[@.name="wan_in"].dev' 2>/dev/null)
+		if [ "$current_wan" != "$existing_wan" ]; then
+			nft delete chain netdev "$NFT_TABLE" wan_in 2>/dev/null
+			nft add chain netdev "$NFT_TABLE" wan_in \
+				"{ type filter hook ingress device $current_wan priority -300 ; }" \
+				2>/dev/null
+			# Re-add wan_in rules for all existing counters. We can find
+			# them by grepping existing counter names.
+			nft -j list table netdev "$NFT_TABLE" 2>/dev/null | \
+				jsonfilter -e '@.nftables[*].counter.name' 2>/dev/null | \
+				grep '^host_rx_' | sed 's/^host_rx_//' | tr '_' '.' | \
+				while read ip; do
+					local id=$(ip_to_id "$ip")
+					nft add rule netdev "$NFT_TABLE" wan_in \
+						ip daddr "$ip" counter name "host_rx_$id" 2>/dev/null
+				done
+		fi
+	fi
+
+	# Get current counter names → IP set (so we can skip already-tracked).
+	existing_ips=$(nft -j list table netdev "$NFT_TABLE" 2>/dev/null | \
+		jsonfilter -e '@.nftables[*].counter.name' 2>/dev/null | \
+		grep '^host_tx_' | sed 's/^host_tx_//' | tr '_' '.' | sort -u)
+
+	# Walk DHCP leases (col 3 = IP). Add any IP not already counted.
+	awk '{print $3}' "$DHCP_LEASES" 2>/dev/null | sort -u | while read ip; do
+		if ! echo "$existing_ips" | grep -qx "$ip"; then
+			add_host_counter "$ip"
+		fi
+	done
+}
+
+start() {
+	setup_table
+}
+
+stop() {
+	nft delete table netdev "$NFT_TABLE" 2>/dev/null
+}
+
+restart() {
+	stop
+	start
+}
+
+reload() {
+	refresh_hosts
+}
+
+refresh() {
+	refresh_hosts
+}

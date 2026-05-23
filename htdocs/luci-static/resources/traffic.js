@@ -166,6 +166,44 @@ function fetchNlbwData() {
 		.catch(function () { return []; });
 }
 
+// Step 115 (Round 31): offload-proof per-host bandwidth source.
+// /cgi-bin/design/host-traffic reads nftables `netdev design_acct` table
+// (created by /etc/init.d/design-host-acct service) which uses ingress-hook
+// counters that fire BEFORE the nf_flowtable fastpath divergence. Returns
+// `{available, hosts: [{ip, tx_bytes, rx_bytes}, ...]}`. When the acct
+// service isn't installed yet or no traffic has been counted, available
+// is false / hosts is empty — caller falls back to nlbwmon.
+function fetchHostTraffic() {
+	return fetch('/cgi-bin/design/host-traffic', { cache: 'no-store' })
+		.then(function (r) { return r.ok ? r.json() : null; })
+		.catch(function () { return null; });
+}
+
+// Convert host-traffic CGI output to nlbwmon's consumer shape
+// `[{mac, rx, tx}, ...]` so renderConsumers can stay agnostic of the
+// data source. Looks up MAC via IP→lease map; hosts not in DHCP table
+// (rare — static-IP devices) are dropped because deviceLabel needs MAC.
+function hostTrafficToConsumers(hostData, leases) {
+	if (!hostData || !hostData.available || !hostData.hosts || !hostData.hosts.length) {
+		return [];
+	}
+	var byIp = {};
+	leases.forEach(function (l) {
+		if (l.ipaddr) byIp[l.ipaddr] = l;
+	});
+	return hostData.hosts.map(function (h) {
+		var lease = byIp[h.ip] || {};
+		var mac = (lease.macaddr || lease.mac || '').toUpperCase();
+		return {
+			mac: mac,
+			rx:  parseInt(h.rx_bytes, 10) || 0,
+			tx:  parseInt(h.tx_bytes, 10) || 0,
+			_ip: h.ip
+		};
+	}).filter(function (c) { return c.mac && (c.rx > 0 || c.tx > 0); })
+	  .sort(function (a, b) { return (b.rx + b.tx) - (a.rx + a.tx); });
+}
+
 function fetchLeasesByMac() {
 	return getDHCPLeases().then(function (data) {
 		var leases = (data && (data.dhcp_leases || data['dhcp_leases'])) || [];
@@ -177,6 +215,17 @@ function fetchLeasesByMac() {
 		});
 		return byMac;
 	}).catch(function () { return {}; });
+}
+
+// Step 115: returns raw lease array (not byMac). Used by host-traffic
+// path which needs IP→lease mapping. Kept separate so fetchLeasesByMac
+// callers don't change.
+function fetchLeasesRaw() {
+	return getDHCPLeases().then(function (data) {
+		var leases = (data && (data.dhcp_leases || data['dhcp_leases'])) || [];
+		if (data && data.dhcp6_leases) leases = leases.concat(data.dhcp6_leases);
+		return leases;
+	}).catch(function () { return []; });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -255,10 +304,34 @@ return baseclass.extend({
 
 	refreshData: function () {
 		var self = this;
-		Promise.all([fetchNlbwData(), fetchLeasesByMac()]).then(function (results) {
-			var consumers = results[0];
-			var leasesByMac = results[1];
-			self.renderConsumers(consumers, leasesByMac);
+		// Step 115 (Round 31): try host-traffic CGI first (nftables ingress
+		// counters — offload-proof). Fall back to nlbwmon if host-traffic
+		// has no data (acct service not yet installed / no traffic counted).
+		// Both fetches + lease lookup run in parallel for snappy refresh.
+		Promise.all([
+			fetchHostTraffic(),
+			fetchNlbwData(),
+			fetchLeasesRaw()
+		]).then(function (results) {
+			var hostData     = results[0];
+			var nlbwConsumers = results[1];
+			var leasesRaw    = results[2];
+
+			// Build byMac map for renderConsumers (existing API)
+			var byMac = {};
+			leasesRaw.forEach(function (l) {
+				var m = (l.macaddr || l.mac || '').toUpperCase();
+				if (m && !byMac[m]) byMac[m] = l;
+			});
+
+			// Prefer host-traffic if it yielded actual per-host data.
+			// Otherwise fall through to nlbw (which may also be empty —
+			// renderConsumers handles the empty state with the existing
+			// Step 99 hint).
+			var nftConsumers = hostTrafficToConsumers(hostData, leasesRaw);
+			var consumers = nftConsumers.length ? nftConsumers : nlbwConsumers;
+
+			self.renderConsumers(consumers, byMac);
 		});
 	},
 

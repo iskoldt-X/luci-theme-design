@@ -174,7 +174,8 @@ sync_all() {
         "${PROJECT_ROOT}/luasrc/view/themes/design/" \
         "${ROUTER}:/usr/lib/lua/luci/view/themes/design/"
 
-    # 4. CGI scripts (ping, temp, devstats, download, upload, nlbw)
+    # 4. CGI scripts (ping, temp, devstats, download, upload, nlbw,
+    #    cpustat, wifi-stations, host-traffic, ...)
     #    LOCAL:  root/www/cgi-bin/design/
     #    REMOTE: /www/cgi-bin/design/
     #    --chmod=+x because rsync over SSH defaults to 644 and uhttpd
@@ -184,6 +185,28 @@ sync_all() {
         --exclude='.gitkeep' \
         "${PROJECT_ROOT}/root/www/cgi-bin/design/" \
         "${ROUTER}:/www/cgi-bin/design/"
+
+    # 5. Init.d services (Step 115: design-host-acct for offload-proof
+    #    per-host accounting). NO --delete: /etc/init.d/ is shared with
+    #    LuCI core + every other package. --chmod=+x required because
+    #    the procd / init dispatcher refuses to execute non-executable
+    #    scripts. Restart the service after each sync so changes to
+    #    setup/refresh logic take effect immediately.
+    if [ -d "${PROJECT_ROOT}/root/etc/init.d" ]; then
+        rsync -az --chmod=Fu=rwx,Fgo=rx \
+            --exclude='.DS_Store' \
+            "${PROJECT_ROOT}/root/etc/init.d/" \
+            "${ROUTER}:/etc/init.d/"
+        # Trigger enable + restart for our managed services. Each `[ -x ]`
+        # guard tolerates the file being absent (e.g., user reverted).
+        ssh "${SSH_OPTS[@]}" "$ROUTER" "
+            [ -x /etc/init.d/design-host-acct ] && {
+                /etc/init.d/design-host-acct enable 2>/dev/null
+                /etc/init.d/design-host-acct restart 2>/dev/null
+            }
+            true
+        " 2>/dev/null || true
+    fi
 
     # Step 85 (Round 13): bust the router-side LuCI module cache so dispatch
     # tree / menu changes pick up. /tmp/luci-modulecache caches Lua module

@@ -13,13 +13,35 @@ PKG_LICENSE:=Apache-2.0
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
-# Ensure theme-provided CGI scripts under /www/cgi-bin/design/ are executable.
-# Required for Phase 2+ features (sparkline temp probe, WAN ping, speedtest).
-# See doc/upgrade.md §0.5.
+# Ensure theme-provided CGI scripts + init.d services are executable.
+# Required because the ipk packing system can lose +x bits and uhttpd
+# refuses to exec a non-executable CGI / procd refuses non-exec init scripts.
+# Step 115 (Round 31): added init.d + uci-defaults paths.
 define Package/$(PKG_NAME)/postinst-pkg
 #!/bin/sh
 [ -d "$${IPKG_INSTROOT}/www/cgi-bin/design" ] && \
     chmod -R +x "$${IPKG_INSTROOT}/www/cgi-bin/design/" 2>/dev/null
+[ -f "$${IPKG_INSTROOT}/etc/init.d/design-host-acct" ] && \
+    chmod +x "$${IPKG_INSTROOT}/etc/init.d/design-host-acct" 2>/dev/null
+[ -f "$${IPKG_INSTROOT}/etc/uci-defaults/40_design-host-acct" ] && \
+    chmod +x "$${IPKG_INSTROOT}/etc/uci-defaults/40_design-host-acct" 2>/dev/null
+exit 0
+endef
+
+# Clean shutdown on package removal — stop the acct service, drop the
+# nftables table, remove the cron entry. Without this, the table lives
+# on after uninstall and shows zombie counters.
+define Package/$(PKG_NAME)/prerm
+#!/bin/sh
+if [ -x /etc/init.d/design-host-acct ]; then
+    /etc/init.d/design-host-acct stop 2>/dev/null
+    /etc/init.d/design-host-acct disable 2>/dev/null
+fi
+# Remove the cron entry added by uci-defaults/40_design-host-acct
+if [ -f /etc/crontabs/root ]; then
+    sed -i '/design-host-acct refresh/d' /etc/crontabs/root 2>/dev/null
+    /etc/init.d/cron restart 2>/dev/null
+fi
 exit 0
 endef
 
