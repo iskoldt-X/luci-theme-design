@@ -8,20 +8,29 @@
 #     "hosts": [ { "ip": "192.168.45.225", "tx_bytes": N, "rx_bytes": N }, ... ]
 #   }
 #
-# Data source: nftables `netdev design_acct` table created by the
-# /etc/init.d/design-host-acct service. That service installs `ingress`-hook
-# counters that survive Software Flow Offloading (offload bypasses
-# conntrack, but the netdev/ingress hook fires before the fastpath
-# divergence — counters see every packet regardless).
+# Data source: nftables `bridge design_acct` table created by the
+# /etc/init.d/design-host-acct service. That service installs bridge-family
+# prerouting + postrouting hook counters that survive Software Flow
+# Offloading (offload bypasses inet/forward layer; bridge family is at
+# layer-2 and unaffected).
 #
-# tx_bytes = upload (LAN host → outside), measured on br-lan ingress
-# rx_bytes = download (outside → LAN host), measured on WAN dev ingress
+# tx_bytes = upload (LAN host → outside), measured on bridge prerouting
+#            (saddr = LAN host, packet entering bridge from LAN port)
+# rx_bytes = download (outside → LAN host), measured on bridge postrouting
+#            (daddr = LAN host AFTER inet PREROUTING's DNAT)
 #
-# If the acct table doesn't exist yet (service not installed, or kernel
-# missing netdev family), returns available:false. Frontend falls back to
-# nlbwmon or the empty state.
+# If the acct table doesn't exist yet (service not installed, or nftables
+# unavailable), returns available:false. Frontend falls back to nlbwmon
+# or the empty state.
 #
-# Round 31 / Step 115 (2026-05-23). Companion to /etc/init.d/design-host-acct.
+# Round 31:
+#   Step 115 — initial implementation using netdev family + WAN ingress
+#              (broken — NAT not done yet at WAN ingress)
+#   Step 117 — switched RX to br-lan netdev/egress (sound design but
+#              kernel CONFIG_NETFILTER_EGRESS off in stock builds)
+#   Step 118 — switched to bridge family, universal kernel compat,
+#              still offload-proof
+# Companion to /etc/init.d/design-host-acct.
 
 echo "Content-Type: application/json"
 echo "Cache-Control: no-store"
@@ -30,7 +39,14 @@ echo ""
 NFT_TABLE="design_acct"
 
 # Probe: does the acct table exist? (Service might not be running yet.)
-if ! nft list table netdev "$NFT_TABLE" >/dev/null 2>&1; then
+# Check both bridge (Step 118 layout) AND netdev (legacy Step 115/117) so
+# this CGI tolerates a still-running old service across an upgrade.
+NFT_FAMILY=""
+if nft list table bridge "$NFT_TABLE" >/dev/null 2>&1; then
+	NFT_FAMILY="bridge"
+elif nft list table netdev "$NFT_TABLE" >/dev/null 2>&1; then
+	NFT_FAMILY="netdev"
+else
 	echo '{"available":false,"hosts":[],"reason":"no-acct-table"}'
 	exit 0
 fi
@@ -39,7 +55,7 @@ fi
 # then pair them with awk. Busybox jsonfilter doesn't emit paired tuples
 # but separate -e queries produce parallel ordered output we can zip.
 
-RAW=$(nft -j list table netdev "$NFT_TABLE" 2>/dev/null)
+RAW=$(nft -j list table "$NFT_FAMILY" "$NFT_TABLE" 2>/dev/null)
 if [ -z "$RAW" ]; then
 	echo '{"available":true,"hosts":[],"reason":"empty-output"}'
 	exit 0

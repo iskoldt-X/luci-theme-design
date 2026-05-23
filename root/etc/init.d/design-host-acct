@@ -13,39 +13,53 @@
 #
 # HOW IT WORKS
 # ────────────
-# nftables `netdev` family with ingress/egress hooks fire at the device-
-# level RX/TX point, where flow-offloaded packets are still visible (offload
-# only bypasses the netfilter FORWARD chain — netdev hooks are upstream).
+# nftables `bridge` family with prerouting + postrouting hooks. The bridge
+# family operates at layer-2 (bridge code) and is INDEPENDENT of inet/
+# netfilter — flow offload's nf_flowtable fastpath bypasses the inet
+# FORWARD chain only; bridge family chains still fire for every packet
+# entering or leaving the bridge.
 #
-# Two chains, both on br-lan (the LAN bridge):
-#   - lan_in  (ingress on br-lan):  saddr == LAN host → UPLOAD bytes
-#   - lan_out (egress  on br-lan):  daddr == LAN host → DOWNLOAD bytes
+# Two chains:
+#   - lan_in   (hook prerouting):  saddr == LAN host  → UPLOAD bytes
+#                                   (packet arrives at a bridge port from
+#                                    a LAN device — saddr is the host)
+#   - lan_out  (hook postrouting): daddr == LAN host  → DOWNLOAD bytes
+#                                   (packet about to leave a bridge port
+#                                    headed to LAN — by this point inet
+#                                    PREROUTING's DNAT has restored daddr
+#                                    to the LAN host's IP)
 #
-# Why egress on br-lan instead of ingress on WAN (Step 115's broken
-# original design):
-#   When a download packet arrives at WAN (eth1) ingress, its destination
-#   address is the router's PUBLIC IP — NAT (DNAT via conntrack) hasn't
-#   happened yet. The LAN host's IP is only restored at PREROUTING. By the
-#   time the packet exits br-lan headed for the LAN device, DNAT has
-#   completed and daddr is the real LAN host IP. So br-lan egress sees
-#   the correct daddr to match against.
+# WHY NOT netdev family (Step 117's attempt):
+#   netdev/egress hook on br-lan would have given us downloads cleanly.
+#   But kernel CONFIG_NETFILTER_EGRESS is OFF in stock ImmortalWrt 24.10
+#   builds (and most OpenWrt builds) — `nft add chain ... hook egress`
+#   returns "Chain of type filter is not supported". Bridge family is
+#   universally enabled on every OpenWrt build going back to 17.x, no
+#   kernel rebuild needed.
+#
+# WHY NOT wan ingress (Step 115's original attempt):
+#   At the moment a download packet arrives at WAN (eth1) ingress, its
+#   daddr is the router's PUBLIC IP — NAT/DNAT happens in PREROUTING and
+#   restores the LAN host's IP only afterwards. So `ip daddr 192.168.45.X`
+#   at WAN ingress can never match.
 #
 # Counter naming: `host_tx_<ip_underscored>` / `host_rx_<ip_underscored>`
 # (nftables identifiers can't contain dots, so 192.168.45.225 becomes
 # 192_168_45_225 for the name).
 #
-# Kernel requirement: netdev/egress hook needs Linux 5.16+. ImmortalWrt
-# 24.10 ships kernel 6.6 — well past that. OpenWrt 22.03/23.05 also fine.
-#
-# Round 31 / Step 115 (2026-05-23). Step 117 (Round 31 fix-up) — switched
-# from broken eth1-ingress to br-lan-egress for download direction.
+# Round 31:
+#   Step 115 (initial): netdev family with eth1-ingress for RX — fundamentally
+#     broken because NAT hadn't run yet at that hook point. TX worked.
+#   Step 117 (fix-up):  switched RX to br-lan netdev/egress — sound design
+#     but kernel CONFIG missing, chain creation failed at runtime.
+#   Step 118 (THIS):    switched to bridge family — universally available,
+#     same offload-proof property, both directions work.
 # ─────────────────────────────────────────────────────────────────────────
 
 START=99
 STOP=10
 
 NFT_TABLE="design_acct"
-LAN_DEV="br-lan"
 DHCP_LEASES="/tmp/dhcp.leases"
 
 EXTRA_COMMANDS="refresh"
@@ -71,19 +85,19 @@ add_host_counter() {
 	id=$(ip_to_id "$ip")
 	[ -z "$id" ] && return 1
 
-	nft add counter netdev "$NFT_TABLE" "host_tx_$id" 2>/dev/null
-	nft add counter netdev "$NFT_TABLE" "host_rx_$id" 2>/dev/null
+	nft add counter bridge "$NFT_TABLE" "host_tx_$id" 2>/dev/null
+	nft add counter bridge "$NFT_TABLE" "host_rx_$id" 2>/dev/null
 
-	# UPLOAD: packets entering br-lan from a LAN device on their way out
-	# to the WAN — saddr is the LAN host's IP.
-	nft add rule netdev "$NFT_TABLE" lan_in \
+	# UPLOAD: packets entering the bridge from a LAN port on their way
+	# out to the WAN — saddr is the LAN host's IP.
+	nft add rule bridge "$NFT_TABLE" lan_in \
 		ip saddr "$ip" counter name "host_tx_$id" 2>/dev/null
 
-	# DOWNLOAD: packets exiting br-lan headed back to the LAN device.
-	# By this stage of the pipeline, conntrack's DNAT has restored
-	# daddr to the LAN host's IP (whereas at eth1 ingress it was still
-	# the router's public WAN IP — see file header for full reasoning).
-	nft add rule netdev "$NFT_TABLE" lan_out \
+	# DOWNLOAD: packets about to leave the bridge via a LAN port. By
+	# this stage, inet PREROUTING's DNAT has restored daddr to the LAN
+	# host's IP (whereas at WAN eth1 ingress it was still the router's
+	# public IP — see file header for full reasoning).
+	nft add rule bridge "$NFT_TABLE" lan_out \
 		ip daddr "$ip" counter name "host_rx_$id" 2>/dev/null
 }
 
@@ -91,8 +105,11 @@ add_host_counter() {
 # start. After this returns, counters exist for all currently-known DHCP
 # hosts; new leases get added via refresh().
 setup_table() {
-	# Hard reset
+	# Hard reset (catches the transition from Step 115/117's netdev
+	# table layout to Step 118's bridge family — delete both, only
+	# the family in use will exist anyway)
 	nft delete table netdev "$NFT_TABLE" 2>/dev/null
+	nft delete table bridge "$NFT_TABLE" 2>/dev/null
 
 	# Pre-flight: nft itself missing? Don't crash the rest of boot.
 	command -v nft >/dev/null 2>&1 || {
@@ -100,37 +117,36 @@ setup_table() {
 		return 1
 	}
 
-	# Pre-flight: netdev family loaded? Kernel module nf_tables_netdev
-	# needs to be available. Most OpenWrt 22.03+ builds have this.
+	# Pre-flight: nftables operational?
 	if ! nft list tables 2>/dev/null | grep -q ''; then
 		logger -t design-host-acct "nftables non-functional; aborting"
 		return 1
 	fi
 
-	nft add table netdev "$NFT_TABLE" 2>/dev/null || {
-		logger -t design-host-acct "failed to create netdev table"
+	nft add table bridge "$NFT_TABLE" 2>/dev/null || {
+		logger -t design-host-acct "failed to create bridge table"
 		return 1
 	}
 
-	# LAN ingress chain — packets entering br-lan FROM a LAN host.
-	# priority -300 places this before any conntrack hooks (around 0).
-	nft add chain netdev "$NFT_TABLE" lan_in \
-		"{ type filter hook ingress device $LAN_DEV priority -300 ; }" \
+	# LAN ingress chain — packets entering the bridge FROM a LAN port.
+	# Bridge family hooks operate at layer-2; flow offload (inet/forward
+	# layer) doesn't bypass these.
+	nft add chain bridge "$NFT_TABLE" lan_in \
+		"{ type filter hook prerouting priority -300 ; }" \
 		2>/dev/null || {
-		logger -t design-host-acct "failed to add lan_in chain"
+		logger -t design-host-acct "failed to add lan_in chain (bridge prerouting)"
 	}
 
-	# LAN egress chain — packets leaving br-lan TO a LAN host. Critical
-	# that this is egress and NOT ingress on the WAN device; at WAN
-	# ingress the daddr is the router's public IP (NAT hasn't run yet).
-	# Egress hook requires kernel 5.16+; if missing the `nft add chain`
-	# returns non-zero and we log a warning. Without it downloads will
-	# not be tracked but uploads (lan_in) still work.
-	nft add chain netdev "$NFT_TABLE" lan_out \
-		"{ type filter hook egress device $LAN_DEV priority -300 ; }" \
+	# LAN egress chain — packets about to leave the bridge TO a LAN
+	# port. At bridge postrouting, inet's PREROUTING DNAT has already
+	# restored daddr to the LAN host's IP, so `ip daddr 192.168.45.X`
+	# matches correctly. Bridge family postrouting is universally
+	# available on every OpenWrt build — no kernel CONFIG_NETFILTER_EGRESS
+	# dependency.
+	nft add chain bridge "$NFT_TABLE" lan_out \
+		"{ type filter hook postrouting priority -300 ; }" \
 		2>/dev/null || {
-		logger -t design-host-acct \
-			"failed to add lan_out chain — kernel lacks netdev egress hook? Downloads will be 0."
+		logger -t design-host-acct "failed to add lan_out chain (bridge postrouting)"
 	}
 
 	# Initial population from current DHCP lease table.
@@ -146,7 +162,7 @@ refresh_hosts() {
 	[ -r "$DHCP_LEASES" ] || return 0
 
 	# Get current counter names → IP set (so we can skip already-tracked).
-	existing_ips=$(nft -j list table netdev "$NFT_TABLE" 2>/dev/null | \
+	existing_ips=$(nft -j list table bridge "$NFT_TABLE" 2>/dev/null | \
 		jsonfilter -e '@.nftables[*].counter.name' 2>/dev/null | \
 		grep '^host_tx_' | sed 's/^host_tx_//' | tr '_' '.' | sort -u)
 
@@ -163,6 +179,10 @@ start() {
 }
 
 stop() {
+	# Delete both families — only the active one (bridge in Step 118+)
+	# will succeed; the other returns silently. Catches migration from
+	# Step 115/117's netdev layout if both happened to coexist briefly.
+	nft delete table bridge "$NFT_TABLE" 2>/dev/null
 	nft delete table netdev "$NFT_TABLE" 2>/dev/null
 }
 
