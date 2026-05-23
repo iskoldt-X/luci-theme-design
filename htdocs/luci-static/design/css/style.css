@@ -4622,8 +4622,27 @@ td.cbi-button, .cbi-button-apply,
     align-items: start;
 }
 
-/* 第一个 cbi-section（系统信息）通常重要，占满整行 */
-.node-admin-status-overview #view > .cbi-section:first-of-type {
+/* Step 113 (Round 29): every cbi-section on overview spans the full
+   grid width — not just the first one. Was `:first-of-type { grid-
+   column: 1 / -1 }` (System info got hero treatment, all other LuCI
+   sections fell into the default 2-column auto-fit at ≥720 px wide).
+   Chrome-Claude layout audit (vw=1820, main=811 px) confirmed the
+   binary 2-col was actively hurting data-heavy sections:
+     - Active DHCP Leases (cols=10): only Hostname visible, scrollbar
+     - Storage: long /opt/docker/overlay2/<sha>/diff paths truncated
+     - Network (IPv4/IPv6 Upstream): label/value force-stacked vertically
+     - Active UPnP (cols=8): right half blank
+     - Port status (6 ports): only 3-4 fit per row before wrap
+   Counter-intuitive but real: TOTAL page height DECREASES with this
+   change. At 360-px-wide cards, content with many rows / wide tables
+   gets vertically tall (artificially narrow). At 800-px-wide cards,
+   same content fits in fewer rows because labels + values sit
+   horizontally instead of stacking. Step 105's .cbi-value internal
+   grid (label 140-200 px + value 1fr) handles the label/value 2-up
+   positioning automatically when given horizontal room.
+   This effectively merges the legacy first-of-type rule with
+   Chrome-Claude's recommended all-section full-width pattern. */
+.node-admin-status-overview #view > .cbi-section {
     grid-column: 1 / -1;
 }
 
