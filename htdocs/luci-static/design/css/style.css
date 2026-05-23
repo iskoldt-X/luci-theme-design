@@ -952,15 +952,42 @@ small {
 	pointer-events: none;
 }
 
+/* Step 109 (Round 25): flex-center the topbar.
+   Chrome-Claude found the 4 topbar buttons (≡ 🔍 ⚡ 🌙) sitting at
+   center y=18 while the header centerline is at y=28 — visually
+   pinned to the top of the bar by 10 px. Root cause: `.fill` was
+   only 37 px tall (sum of intrinsic child heights), `.container`
+   had no align-items, so the 36-px buttons just sat at the top of
+   `.fill` instead of being vertically centered in the 55-px header.
+   Fix: make both `.fill` and `.container` flex containers with
+   align-items: center + height 55 px (matching header.height).
+   Every child element — present and future — now sits on header's
+   centerline without needing per-element margin adjustments. */
+header > .fill,
 header > .fill > .container {
-	/* margin-top: .5rem; */
-	/* padding: .5rem 1rem 0 1rem; */
+	display: flex;
+	align-items: center;
+	height: 55px;
+}
+
+header > .fill > .container {
 	margin:0;
 	padding:0;
+	gap: var(--space-1);
 	-webkit-user-select: none;
 	-moz-user-select: none;
 	-ms-user-select: none;
 	user-select: none;
+}
+
+/* Step 109: push #indicators + subsequent icon buttons to the right
+   edge so brand stays left-anchored, action icons cluster right —
+   the conventional topbar layout. DOM order is showSide → brand →
+   indicators → cmdk → qa → theme, so margin-left:auto on .status
+   absorbs all free space and shifts itself + the 3 icon buttons
+   that follow to the right. */
+header > .fill > .container > .status {
+	margin-left: auto;
 }
 
 header > .fill > .container > #logo {
@@ -1084,6 +1111,35 @@ header > .fill > .container > .status > * {
 span[data-indicator="uci-changes"] {
     font-size: var(--text-xs);
     transition: all var(--motion-normal) var(--ease-out);
+}
+
+/* Step 109 (Round 25): reshape LuCI's poll-status indicator from a
+   16×4 nearly-invisible gray blob into a discoverable 8 px coloured
+   dot (matches Internet · Online dot style on the WAN hero card).
+   Higher specificity than the base [data-indicator] rule (3162) so
+   this wins. data-style="active" → success green, "inactive" →
+   muted subtle. Cursor:pointer surfaces the polling-pause affordance
+   that's been hidden in plain sight since LuCI 24.10. style.js
+   sets a title attribute on each MutationObserver tick. */
+[data-indicator="poll-status"] {
+    width: 8px;
+    height: 8px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--color-success);
+    cursor: pointer;
+    font-size: 0;
+    line-height: 0;
+    transition: opacity var(--motion-fast) var(--ease-out),
+                background var(--motion-fast) var(--ease-out);
+    flex-shrink: 0;
+}
+[data-indicator="poll-status"][data-style="inactive"] {
+    background: var(--color-text-subtle);
+    opacity: 0.5;
+}
+[data-indicator="poll-status"]:hover {
+    opacity: 0.7;
 }
 
 .error {
