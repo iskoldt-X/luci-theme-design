@@ -163,24 +163,55 @@ return baseclass.extend({
 
 	_tryPatch: function () {
 		var self = this;
-		if (!window.L || !L.ui || !L.ui.changes || typeof L.ui.changes.displayChanges !== 'function') {
+		// Step 58: also patch L.ui.changes.apply() — the Save & Apply button
+		// on config pages goes through THAT, not displayChanges. User
+		// reported clicking '保存并应用' still showed LuCI's native rollback
+		// countdown modal because our patch was only on displayChanges.
+		var hasDisplay = window.L && L.ui && L.ui.changes &&
+			typeof L.ui.changes.displayChanges === 'function';
+		var hasApply = window.L && L.ui && L.ui.changes &&
+			typeof L.ui.changes.apply === 'function';
+		if (!hasDisplay || !hasApply) {
 			if ((self._patchAttempts = (self._patchAttempts || 0) + 1) > 40) return;
 			setTimeout(L.bind(self._tryPatch, self), 250);
 			return;
 		}
 		// Already patched? Don't double-wrap.
 		if (L.ui.changes.__designPatched) return;
-		L.ui.changes.__designOriginal = L.ui.changes.displayChanges;
-		L.ui.changes.__designPatched  = true;
 
-		L.ui.changes.displayChanges = function () {
+		// Step 58: save references to BOTH originals under distinct names
+		// so the showDiff fallback in Step 54 can find them by either the
+		// old single-name (__designOriginal) or the new pair.
+		L.ui.changes.__designOriginalDisplay = L.ui.changes.displayChanges;
+		L.ui.changes.__designOriginalApply   = L.ui.changes.apply;
+		L.ui.changes.__designOriginal        = L.ui.changes.displayChanges; // legacy alias
+		L.ui.changes.__designPatched         = true;
+
+		// Single hook handles both entry points — both should show our diff
+		// modal first, then user confirms via the "Confirm & Apply" button
+		// which calls self.applyAndProgress (using L.uci.apply directly).
+		// _inConfirmFlow guards against the patched hook intercepting the
+		// re-entrant calls our own apply makes.
+		function diffHook() {
+			if (self._inConfirmFlow) {
+				// We're already inside our confirm flow — let the original
+				// run unmodified so LuCI's internal apply logic completes.
+				return L.ui.changes.__designOriginalApply.apply(L.ui.changes, arguments);
+			}
 			try {
 				return self.showDiff();
 			} catch (e) {
-				// API drift / unexpected state — fall back to LuCI's native modal
-				return L.ui.changes.__designOriginal.apply(L.ui.changes, arguments);
+				if (console && console.error) console.error('apply-modal: showDiff sync throw', e);
+				return L.ui.changes.__designOriginalDisplay.apply(L.ui.changes, arguments);
 			}
-		};
+		}
+
+		L.ui.changes.displayChanges = diffHook;
+		L.ui.changes.apply          = diffHook;
+
+		if (console && console.log) {
+			console.log('apply-modal: patched displayChanges AND apply — Save&Apply button now goes through our diff modal');
+		}
 	},
 
 	showDiff: function () {
@@ -278,6 +309,10 @@ return baseclass.extend({
 
 	applyAndProgress: function (snapshot) {
 		var self = this;
+		// Step 58: mark that we're in the confirm flow so the patched
+		// L.ui.changes.apply hook (if reentered) calls the original
+		// instead of looping back into showDiff.
+		self._inConfirmFlow = true;
 		// LuCI's uci.apply takes a "rollback timeout" in seconds. Default 90 from
 		// the env (apply_rollback). If after that the box doesn't get a confirm,
 		// it rolls back — protects against the user locking themselves out.
@@ -312,6 +347,10 @@ return baseclass.extend({
 		}).catch(function (err) {
 			if (progressId !== null && window.toast) toast.dismiss(progressId);
 			toastSafe('error', _('Apply failed') + ': ' + ((err && err.message) ? err.message : 'unknown'));
+			// Step 58: reset confirm flow on error so if user retries
+			// Save&Apply, the hook re-enters showDiff (not the original
+			// apply which would skip our modal).
+			self._inConfirmFlow = false;
 		});
 	},
 
