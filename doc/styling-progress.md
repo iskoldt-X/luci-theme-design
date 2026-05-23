@@ -1410,6 +1410,80 @@ Phase 0(Step 1)迁移到 token 系统时为兼容性留了 35 个 legacy alias�
 | doc/ 入口文档 | 无 | **INDEX.md** |
 | @import 误用防御 | 无 (Round 11 末尾才发现) | **CI 阻止** |
 
+---
+
+## 🤝 第十三轮（Step 73-76）：浏览器侧 Claude agent 报告 4 个问题
+
+> 触发：用户装了 Claude in Chrome 浏览器扩展,让那里的 Claude 现场检查 overview 页。
+> 工作流升级:**我写代码 + dev-sync 推 + 浏览器侧 Claude 现场报告 + 用户转达**。比"我自己装 Playwright MCP"轻量 10 倍,信息密度足够。
+
+### Chrome Claude agent 发现的 4 个问题
+
+1. **侧边栏菜单 item 没图标** —— "ImmortalWrt"、状态、路由、防火墙... 都纯文字
+2. **底部固定 navbar 在桌面上显示且可能盖内容**(房子/牙刷/链接/统计/用户 5 个图标)
+3. **"存储"卡右侧内容被截断** —— 横向溢出
+4. **WAN Traffic tile 下方没有 sparkline 迷你图**
+
+### Step 73 — `MENU_ICON_MAP` 加 lowercase node-name fallback
+
+**根因**:LuCI 26.x 的 `children[i].title` 在某些 locale 下**已经被翻译**为中文(状态、系统等),导致我们的 by-title lookup 全 miss。
+
+**修法**:扩 MENU_ICON_MAP 的 by-data-node-name 半部,加全套 lowercase 别名(`status` / `system` / `services` / `docker` / `nas` / `vpn` / `network` / `logout` / `reboot` 等共 13 个),URL path 是 locale-stable 的,这层 fallback 一定 hit。
+
+### Step 74 — `.navbar` 桌面隐藏
+
+`.navbar` 是 iOS WebApp 风格的底部 5-icon 固定栏,主题 README 强调"针对移动端优化"。但 CSS 没分平台,desktop 上也满宽显示一条 ~50px 的栏,挡内容。
+
+**修法**:`@media (min-width: 993px) { .navbar { display: none } }`。同时清除 `.main-right` 的 `padding-bottom`(原来留给 navbar 的位置)。移动端(≤ 992px)完全不动,保留沉浸式体验。
+
+### Step 75 — Overview 存储/系统 cbi-section 横向溢出
+
+LuCI 自带 storage section 列出长 path 如 `/opt/docker/overlay2/8ac621821c94e271...`。Value 列**没** `word-break`,CSS Grid item 默认 `min-width: auto`(intrinsic content size),长内容把列撑爆,溢出右边。
+
+**修法**:
+- value 列(td:nth-child(2))加 `word-break: break-all` + `overflow-wrap: anywhere` + `white-space: normal`(重置遗留 nowrap)
+- grid item(`.cbi-section`)加 `min-width: 0`,让它真的尊重 grid track 宽度。**不用** `overflow: hidden` —— 那会剪掉未来 LuCI 的 hover tooltip。
+
+### Step 76 — Sparkline 默认就显示 baseline
+
+两个并发 bug:
+1. `makeTile()` 创建的 `<path d="">` 不带 class,渲染**完全为空** —— 即使 SVG 元素存在 40px 高,看着像没东西
+2. Step 57 的 empty-state CSS 太弱:stroke-width:1 + opacity:0.6 + dash 3,3 + border-default 灰色,综合下来在 surface-1 浅灰背景上**眼睛真识别不出**
+
+**修法**:
+- sparkline.js `makeTile()` 直接在创建时塞入 baseline path `M 0,20 L 220,20` + 加 `.design-tile-spark-line-empty` class。从 t=0 开始**永远**有可见 baseline
+- features.css empty-state:stroke-width 1 → 1.5、opacity 0.6 → 0.85、dash 3,3 → 4,4、color `border-default` → `border-strong`
+
+renderTileSpark() 在 ring ≥ 2 samples 时**移除** `-empty` class,line 用 accent-500 绿粗线画真实曲线。
+
+---
+
+## 📊 第十三轮（Step 73-76）累计
+
+| 指标 | 第十二轮后 | 第十三轮后 |
+|---|---|---|
+| 侧边栏菜单图标 | 部分(取决于 locale) | **全部 hit**(by-name fallback) |
+| 桌面 vs 移动端 .navbar | 都显示(挡内容) | 桌面 hide,移动端保留 |
+| Overview 卡片溢出 | 长 path 撑爆 | min-width:0 + word-break |
+| sparkline 默认可见性 | 空 SVG → 看着没东西 | baseline 默认渲染 + 更高对比 |
+| Browser-side Claude agent 报告问题数 | 4/4 unresolved | **0/4 unresolved** ✅ |
+
+## 🎯 协作工作流升级
+
+Round 13 起,debug 链路是:
+
+```
+我 (这边的 Claude)              浏览器侧 Claude (用户的 Mac 上 Chrome)
+   写代码                            inspect DOM / network / console
+   commit                            报告具体症状
+   dev-sync 自动推                   验证修复后状态
+        ↓                                  ↑
+        └──────── 用户当传话+刷新 ────────┘
+```
+
+不需要 Playwright,不需要 Claude Desktop + MCP,**已有工具就够用**。这是 Round 12 的"Round 12 最大改进 = 本地开发回路"的进一步进化版。
+
+
 
 
 
