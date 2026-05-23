@@ -69,11 +69,14 @@ MetricRing.prototype.path = function (w, h) {
 //
 // Step 76 (Round 13): pre-bake the empty-state baseline path so the
 // sparkline area shows SOMETHING even before the first tick() arrives.
-// Previously: <path d=""> rendered nothing → sparkline area appeared
-// blank → browser-side Claude agent reported "no sparkline mini chart".
-// Now: dashed grey baseline visible at t=0; replaced by real curve at
-// t=10s once the ring has 2+ samples. renderTileSpark() removes the
-// .design-tile-spark-line-empty class when transitioning to real data.
+// Step 79 (Round 13 follow-up): Chrome-Claude reported that even with
+// Step 76 in place, the WAN Traffic tile rendered completely blank.
+// Inspection showed the path elements had NO stroke / stroke-dasharray
+// attributes — the CSS class .design-tile-spark-line / -line-empty
+// wasn't actually applying its styling for some reason (CSS specificity
+// war, or LuCI base svg rules, or the agent's snapshot caught a moment
+// before CSS settled). Force the attributes inline on the path element
+// so they don't depend on stylesheet application timing at all.
 function makeTile(id, iconName, label, iconBase) {
 	var baseY = (SPARK_H / 2).toFixed(1);
 	var initPath = 'M 0,' + baseY + ' L ' + SPARK_W + ',' + baseY;
@@ -89,12 +92,35 @@ function makeTile(id, iconName, label, iconBase) {
 			'class':   'design-tile-spark',
 			'viewBox': '0 0 ' + SPARK_W + ' ' + SPARK_H,
 			'preserveAspectRatio': 'none',
-			'aria-hidden': 'true'
+			'aria-hidden': 'true',
+			// Step 79: pin presentation attrs on the SVG element itself
+			// so even if CSS gets dropped on the floor we still get a
+			// visible chart. fill=none + stroke=currentColor inherit
+			// downward to the paths.
+			'fill': 'none',
+			'stroke': 'currentColor'
 		}, [
-			E('path', { 'class': 'design-tile-spark-fill', 'd': '' }),
+			// Fill area below the curve. fill is applied inline so it
+			// renders even before CSS lands.
 			E('path', {
-				'class': 'design-tile-spark-line design-tile-spark-line-empty',
-				'd':     initPath
+				'class': 'design-tile-spark-fill',
+				'd':     '',
+				'fill':  'rgba(16, 185, 129, 0.18)',
+				'stroke':'none'
+			}),
+			// Line itself. Initial state is the empty baseline (a flat
+			// dashed line in the middle); renderTileSpark() flips it to
+			// the real curve once the ring has 2+ samples.
+			E('path', {
+				'class':            'design-tile-spark-line design-tile-spark-line-empty',
+				'd':                initPath,
+				'fill':             'none',
+				'stroke':           '#a1a1aa',
+				'stroke-width':     '1.5',
+				'stroke-dasharray': '4 4',
+				'stroke-linecap':   'round',
+				'stroke-linejoin':  'round',
+				'opacity':          '0.85'
 			})
 		])
 	]);
@@ -108,18 +134,31 @@ function renderTileSpark(tileEl, ring) {
 	// Step 57: when fewer than 2 samples have arrived (1st poll cycle),
 	// ring.path() returns ''. Instead of leaving the SVG empty (looks
 	// broken), draw a faded dashed baseline so the user sees "data area
-	// is here, just collecting" — combined with the placeholder class
-	// CSS which dashes + dims it.
+	// is here, just collecting".
 	if (!linePath) {
 		var baseY = (SPARK_H / 2).toFixed(1);
 		lineEl.setAttribute('d', 'M 0,' + baseY + ' L ' + SPARK_W + ',' + baseY);
 		lineEl.classList.add('design-tile-spark-line-empty');
+		// Step 79: also force the empty-state attributes inline (same
+		// values as the initial makeTile() bake-in) so we never get a
+		// curve+empty mix when transitioning back.
+		lineEl.setAttribute('stroke', '#a1a1aa');
+		lineEl.setAttribute('stroke-width', '1.5');
+		lineEl.setAttribute('stroke-dasharray', '4 4');
+		lineEl.setAttribute('opacity', '0.85');
 		fillEl.setAttribute('d', '');
 		return;
 	}
 
 	lineEl.classList.remove('design-tile-spark-line-empty');
 	lineEl.setAttribute('d', linePath);
+	// Step 79: flip line attributes to the "real curve" presentation.
+	// Pinned inline (not just class swap) so CSS-not-applied scenarios
+	// still render the curve visibly. accent-500 is #10b981.
+	lineEl.setAttribute('stroke', '#10b981');
+	lineEl.setAttribute('stroke-width', '2');
+	lineEl.removeAttribute('stroke-dasharray');
+	lineEl.removeAttribute('opacity');
 	fillEl.setAttribute('d', linePath + ' L' + SPARK_W + ',' + SPARK_H + ' L0,' + SPARK_H + ' Z');
 }
 

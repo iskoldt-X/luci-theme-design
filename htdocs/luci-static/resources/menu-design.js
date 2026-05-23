@@ -62,12 +62,59 @@ var ICON_BASE_URL = (typeof L !== 'undefined' && L.env && L.env.mediaurlbase
 	: '/luci-static/design') + '/icons.svg';
 
 function iconForMenu(dataTitle, nodeName) {
-	return MENU_ICON_MAP[dataTitle] || MENU_ICON_MAP[nodeName] || null;
+	var hit = MENU_ICON_MAP[dataTitle] || MENU_ICON_MAP[nodeName] || null;
+	// Step 77 (Round 13): diagnostic for the browser-side Claude agent.
+	// Reports menu items that pass through with no icon mapped, so we can
+	// expand MENU_ICON_MAP rather than guess.
+	if (!hit && console && console.warn) {
+		console.warn('menu-design: no icon for', { dataTitle: dataTitle, nodeName: nodeName });
+	}
+	return hit;
 }
 
+// Step 77 (Round 13): rebuild makeMenuIcon WITHOUT going through LuCI's
+// generic E() helper.
+//
+// Browser-side Claude agent reported the menu <svg> elements appeared in
+// DOM with the right class but with NO <path> children — i.e. the <use>
+// reference wasn't resolving to symbol content. Two known LuCI E() edge
+// cases that can produce this:
+//   1. E('svg', ...) creates an HTMLUnknownElement instead of an
+//      SVGElement on some LuCI versions because createElement (HTML ns)
+//      is used rather than createElementNS (SVG ns). Inner <use> is then
+//      also HTMLUnknown and the browser never processes it as a sprite
+//      reference.
+//   2. E sets `href` as an HTML attribute (setAttribute), but legacy
+//      <use> implementations require `xlink:href` (the XML namespaced
+//      attribute) — setting both is the well-known workaround.
+//
+// This rewrite uses createElementNS for both <svg> and <use>, sets href
+// AND xlink:href, AND pins width/height as attributes (not just CSS) so
+// the layout box is correct even if the .menu-icon CSS rule doesn't
+// apply for whatever reason. Belt + suspenders.
+var SVG_NS   = 'http://www.w3.org/2000/svg';
+var XLINK_NS = 'http://www.w3.org/1999/xlink';
+
 function makeMenuIcon(iconName) {
-	return E('svg', { 'class': 'svg-icon menu-icon', 'aria-hidden': 'true' },
-		E('use', { 'href': ICON_BASE_URL + '#' + iconName }));
+	var svg = document.createElementNS(SVG_NS, 'svg');
+	svg.setAttribute('class', 'svg-icon menu-icon');
+	svg.setAttribute('aria-hidden', 'true');
+	svg.setAttribute('width',  '18');
+	svg.setAttribute('height', '18');
+	svg.setAttribute('viewBox', '0 0 24 24');
+	svg.setAttribute('fill', 'none');
+	svg.setAttribute('stroke', 'currentColor');
+	svg.setAttribute('stroke-width', '1.6');
+	svg.setAttribute('stroke-linecap', 'round');
+	svg.setAttribute('stroke-linejoin', 'round');
+
+	var use = document.createElementNS(SVG_NS, 'use');
+	var href = ICON_BASE_URL + '#' + iconName;
+	use.setAttribute('href', href);
+	use.setAttributeNS(XLINK_NS, 'xlink:href', href);
+
+	svg.appendChild(use);
+	return svg;
 }
 
 // Animation helpers that replace jQuery's slideUp / slideDown ("fast" = 200 ms).

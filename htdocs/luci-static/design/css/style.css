@@ -4115,11 +4115,14 @@ td.cbi-button, .cbi-button-apply,
     /* Step 75 (Round 13): value column gets word-break so long paths
        like '/opt/docker/overlay2/8ac621821c94e271...' wrap into the
        card instead of overflowing the right edge. Reported by Chrome-
-       Claude agent inspection on the 存储 (Storage) cbi-section. */
-    word-break: break-all;
-    overflow-wrap: anywhere;
-    /* Reset any inherited nowrap from white-space rules elsewhere. */
-    white-space: normal;
+       Claude agent inspection on the 存储 (Storage) cbi-section.
+       Step 78 (Round 13 follow-up): Chrome-Claude reported Step 75
+       didn't take — white-space: nowrap was still computing on these
+       cells, meaning LuCI's own rule was winning the specificity war.
+       Force with !important. */
+    word-break: break-all !important;
+    overflow-wrap: anywhere !important;
+    white-space: normal !important;
 }
 
 /* Step 75: also set min-width:0 on the grid cell. CSS Grid items default
