@@ -1187,33 +1187,89 @@ span[data-indicator="uci-changes"] {
     transition: all var(--motion-normal) var(--ease-out);
 }
 
-/* Step 109 (Round 25): reshape LuCI's poll-status indicator from a
+/* Step 109 (Round 25):reshape LuCI's poll-status indicator from a
    16×4 nearly-invisible gray blob into a discoverable 8 px coloured
-   dot (matches Internet · Online dot style on the WAN hero card).
-   Higher specificity than the base [data-indicator] rule (3162) so
-   this wins. data-style="active" → success green, "inactive" →
-   muted subtle. Cursor:pointer surfaces the polling-pause affordance
-   that's been hidden in plain sight since LuCI 24.10. style.js
-   sets a title attribute on each MutationObserver tick. */
+   dot. Step 136 (Round 35):升级再升级 — 8px dot → 36×36 icon button
+   match cmdk/quick-actions/theme-toggle 同尺寸,Chrome-Claude 实测后
+   提议(Round 35 audit "扁条按钮 = 没用?")。设计哲学转向:indicator
+   = clickable BUTTON,不再是 "subtle status signal"。
+
+   功能:点击切换 active ↔ inactive,暂停整页 LuCI 轮询(CPU/Memory/
+   bandwidth/realtime charts 全靠)。
+   active   = success 绿 refresh-cw icon,5s 旋转一圈(同步典型 polling
+              cadence)
+   inactive = muted subtle pause icon,无动画
+
+   Icon 走 inline SVG data URI + mask(同 .node-main-login 登录页盾牌
+   mask 模式,L3784)。不用 icons.svg sprite #use 因为 LuCI 控制 span
+   inner HTML,我们不能注入 <svg> 标签,所以走 ::before pseudo + mask。
+*/
 [data-indicator="poll-status"] {
-    width: 8px;
-    height: 8px;
+    width: 36px;
+    height: 36px;
     padding: 0;
-    border-radius: 50%;
-    background: var(--color-success);
+    border-radius: var(--radius-md);
+    background-color: transparent;
+    color: var(--color-text-muted);
     cursor: pointer;
     font-size: 0;
     line-height: 0;
-    transition: opacity var(--motion-fast) var(--ease-out),
-                background var(--motion-fast) var(--ease-out);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
+    border: none;
+    transition: background-color var(--motion-fast) var(--ease-out),
+                color var(--motion-fast) var(--ease-out);
 }
+
+[data-indicator="poll-status"]::before {
+    content: '';
+    display: block;
+    width: 18px;
+    height: 18px;
+    background-color: currentColor;
+    -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='23 4 23 10 17 10'/><polyline points='1 20 1 14 7 14'/><path d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15'/></svg>");
+    mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='23 4 23 10 17 10'/><polyline points='1 20 1 14 7 14'/><path d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15'/></svg>");
+    -webkit-mask-size: contain;
+    mask-size: contain;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+}
+
+[data-indicator="poll-status"][data-style="active"] {
+    color: var(--color-success);
+}
+[data-indicator="poll-status"][data-style="active"]::before {
+    animation: poll-spin 5s linear infinite;
+}
+
 [data-indicator="poll-status"][data-style="inactive"] {
-    background: var(--color-text-subtle);
-    opacity: 0.5;
-}
-[data-indicator="poll-status"]:hover {
+    color: var(--color-text-subtle);
     opacity: 0.7;
+}
+[data-indicator="poll-status"][data-style="inactive"]::before {
+    -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'><rect x='6' y='4' width='4' height='16' rx='1'/><rect x='14' y='4' width='4' height='16' rx='1'/></svg>");
+    mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'><rect x='6' y='4' width='4' height='16' rx='1'/><rect x='14' y='4' width='4' height='16' rx='1'/></svg>");
+    animation: none;
+}
+
+[data-indicator="poll-status"]:hover {
+    background-color: var(--color-surface-1);
+    opacity: 0.85;
+}
+[data-indicator="poll-status"]:hover[data-style="active"] {
+    color: var(--color-success);
+}
+[data-indicator="poll-status"]:hover[data-style="inactive"] {
+    color: var(--color-text);
+}
+
+@keyframes poll-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
 }
 
 .error {
