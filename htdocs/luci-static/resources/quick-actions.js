@@ -4,6 +4,31 @@
 'require rpc';
 'require fs';
 
+// Step 83 (Round 13): inline SVG namespace helper. LuCI's generic E()
+// creates HTMLUnknownElement for tags it doesn't know (svg/use/path),
+// which breaks rendering of <use href="#i-..."/> sprite references.
+// Chrome-Claude verification of Step 80 found 1 rogue i-activity SVG
+// still in the HTML namespace — turned out to be from the speedtest
+// header icon; this file's icons are similarly affected. Same fix
+// applied across all 8 modules that create SVG via E().
+var __SVG_NS   = 'http://www.w3.org/2000/svg';
+var __XLINK_NS = 'http://www.w3.org/1999/xlink';
+function svgEl(tag, attrs, children) {
+	var el = document.createElementNS(__SVG_NS, tag);
+	if (attrs) Object.keys(attrs).forEach(function (k) {
+		if (k === 'xlink:href') el.setAttributeNS(__XLINK_NS, 'xlink:href', attrs[k]);
+		else el.setAttribute(k, attrs[k]);
+	});
+	if (children) {
+		var arr = Array.isArray(children) ? children : [children];
+		arr.forEach(function (c) { if (c) el.appendChild(c); });
+	}
+	return el;
+}
+function svgUse(href) {
+	return svgEl('use', { 'href': href, 'xlink:href': href });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Quick Actions popover — upgrade.md §2.A3
 //
@@ -94,8 +119,8 @@ return baseclass.extend({
 
 		if (pending > 0) {
 			children.push(E('div', { 'class': 'quick-actions-pending' }, [
-				E('svg', { 'class': 'svg-icon quick-actions-pending-icon', 'aria-hidden': 'true' },
-					E('use', { 'href': self.iconBase + '#i-alert-triangle' })),
+				svgEl('svg', { 'class': 'svg-icon quick-actions-pending-icon', 'aria-hidden': 'true' },
+					svgUse(self.iconBase + '#i-alert-triangle')),
 				E('span', { 'class': 'quick-actions-pending-text' }, [
 					_('Pending'), ' ',
 					E('strong', {}, String(pending)), ' ',
@@ -129,8 +154,8 @@ return baseclass.extend({
 			'role':  'menuitem',
 			'click': function () { self.run(kind); }
 		}, [
-			E('svg', { 'class': 'svg-icon quick-actions-item-icon', 'aria-hidden': 'true' },
-				E('use', { 'href': self.iconBase + '#' + iconName })),
+			svgEl('svg', { 'class': 'svg-icon quick-actions-item-icon', 'aria-hidden': 'true' },
+				svgUse(self.iconBase + '#' + iconName)),
 			E('span', {}, label)
 		]);
 	},

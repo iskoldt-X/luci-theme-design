@@ -2,6 +2,29 @@
 'require baseclass';
 'require ui';
 
+// Step 83 (Round 13): SVG namespace helpers. The rogue 'i-activity' that
+// Chrome-Claude found in HTML namespace was this file's speedtest-icon
+// in the card header. Same fix applied to the gauge SVGs (semi-circle
+// dials) which were also E('svg'/'path',...) and thus rendering blank
+// stroke patterns even when their attrs are set.
+var __SVG_NS   = 'http://www.w3.org/2000/svg';
+var __XLINK_NS = 'http://www.w3.org/1999/xlink';
+function svgEl(tag, attrs, children) {
+	var el = document.createElementNS(__SVG_NS, tag);
+	if (attrs) Object.keys(attrs).forEach(function (k) {
+		if (k === 'xlink:href') el.setAttributeNS(__XLINK_NS, 'xlink:href', attrs[k]);
+		else el.setAttribute(k, attrs[k]);
+	});
+	if (children) {
+		var arr = Array.isArray(children) ? children : [children];
+		arr.forEach(function (c) { if (c) el.appendChild(c); });
+	}
+	return el;
+}
+function svgUse(href) {
+	return svgEl('use', { 'href': href, 'xlink:href': href });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Wi-Fi / LAN link speedtest — upgrade.md §2.A5
 //
@@ -136,8 +159,8 @@ return baseclass.extend({
 		var self = this;
 		var card = E('div', { 'class': 'speedtest-card', 'id': 'speedtest-card' }, [
 			E('div', { 'class': 'speedtest-head' }, [
-				E('svg', { 'class': 'svg-icon speedtest-icon', 'aria-hidden': 'true' },
-					E('use', { 'href': this.iconBase + '#i-activity' })),
+				svgEl('svg', { 'class': 'svg-icon speedtest-icon', 'aria-hidden': 'true' },
+					svgUse(this.iconBase + '#i-activity')),
 				E('span', { 'class': 'speedtest-title' }, _('Wi-Fi / LAN Link Test')),
 				E('span', { 'class': 'speedtest-meta' }, _('Browser ↔ router'))
 			]),
@@ -219,20 +242,28 @@ return baseclass.extend({
 		// fully hidden, animate to dashoffset=0 for full.
 		return E('div', { 'class': 'speedtest-gauge speedtest-gauge-' + kind }, [
 			E('div', { 'class': 'speedtest-gauge-label' }, label),
-			E('svg', {
+			svgEl('svg', {
 				'class':   'speedtest-gauge-svg',
 				'viewBox': '0 0 200 110',
 				'preserveAspectRatio': 'xMidYMid meet',
 				'aria-hidden': 'true'
 			}, [
-				E('path', {
+				svgEl('path', {
 					'class': 'speedtest-gauge-track',
-					'd':     'M 20,100 A 80,80 0 0 1 180,100'
+					'd':     'M 20,100 A 80,80 0 0 1 180,100',
+					'fill':  'none',
+					'stroke': '#d4d4d8',     // border-default light, dark via CSS
+					'stroke-width': '10',
+					'stroke-linecap': 'round'
 				}),
-				E('path', {
+				svgEl('path', {
 					'class':              'speedtest-gauge-bar',
 					'id':                 'st-bar-' + kind,
 					'd':                  'M 20,100 A 80,80 0 0 1 180,100',
+					'fill':               'none',
+					'stroke':             (kind === 'download') ? '#10b981' : '#3b82f6',
+					'stroke-width':       '10',
+					'stroke-linecap':     'round',
 					'stroke-dasharray':   '251',
 					'stroke-dashoffset':  '251'
 				})

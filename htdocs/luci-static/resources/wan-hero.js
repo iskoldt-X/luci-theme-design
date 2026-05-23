@@ -5,6 +5,27 @@
 'require network';
 'require wan-stats';
 
+// Step 83 (Round 13): SVG namespace helpers — see sparkline.js for the
+// full rationale. tl;dr E('svg',...) creates HTMLUnknownElement, so the
+// <use href="#i-globe"/> reference never renders.
+var __SVG_NS   = 'http://www.w3.org/2000/svg';
+var __XLINK_NS = 'http://www.w3.org/1999/xlink';
+function svgEl(tag, attrs, children) {
+	var el = document.createElementNS(__SVG_NS, tag);
+	if (attrs) Object.keys(attrs).forEach(function (k) {
+		if (k === 'xlink:href') el.setAttributeNS(__XLINK_NS, 'xlink:href', attrs[k]);
+		else el.setAttribute(k, attrs[k]);
+	});
+	if (children) {
+		var arr = Array.isArray(children) ? children : [children];
+		arr.forEach(function (c) { if (c) el.appendChild(c); });
+	}
+	return el;
+}
+function svgUse(href) {
+	return svgEl('use', { 'href': href, 'xlink:href': href });
+}
+
 // Step 43: throughput formatter (rate in bps → number + unit) — kept inline
 // here rather than importing from a shared module, since the only other
 // consumer is sparkline.js and a 5-line helper isn't worth a module boundary.
@@ -173,8 +194,8 @@ return baseclass.extend({
 	injectCard: function () {
 		var card = E('div', { 'class': 'wan-hero', 'id': 'wan-hero' }, [
 			E('div', { 'class': 'wan-hero-head' }, [
-				E('svg', { 'class': 'svg-icon wan-hero-icon', 'aria-hidden': 'true' },
-					E('use', { 'href': this.iconBase + '#i-globe' })),
+				svgEl('svg', { 'class': 'svg-icon wan-hero-icon', 'aria-hidden': 'true' },
+					svgUse(this.iconBase + '#i-globe')),
 				E('span', { 'class': 'wan-hero-title' }, _('Internet')),
 				E('span', { 'class': 'wan-hero-status', 'id': 'wan-hero-status' }, _('Checking...')),
 				// Step 48: ping element gets a 5-bar signal indicator + text.

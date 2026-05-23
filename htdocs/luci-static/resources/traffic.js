@@ -3,6 +3,25 @@
 'require ui';
 'require rpc';
 
+// Step 83 (Round 13): SVG namespace helpers — see sparkline.js.
+var __SVG_NS   = 'http://www.w3.org/2000/svg';
+var __XLINK_NS = 'http://www.w3.org/1999/xlink';
+function svgEl(tag, attrs, children) {
+	var el = document.createElementNS(__SVG_NS, tag);
+	if (attrs) Object.keys(attrs).forEach(function (k) {
+		if (k === 'xlink:href') el.setAttributeNS(__XLINK_NS, 'xlink:href', attrs[k]);
+		else el.setAttribute(k, attrs[k]);
+	});
+	if (children) {
+		var arr = Array.isArray(children) ? children : [children];
+		arr.forEach(function (c) { if (c) el.appendChild(c); });
+	}
+	return el;
+}
+function svgUse(href) {
+	return svgEl('use', { 'href': href, 'xlink:href': href });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Traffic Analysis card — upgrade.md §5.D2 (progressive enhancement)
 //
@@ -183,8 +202,8 @@ return baseclass.extend({
 	injectCard: function () {
 		var card = E('div', { 'class': 'traffic-card', 'id': 'traffic-card' }, [
 			E('div', { 'class': 'traffic-head' }, [
-				E('svg', { 'class': 'svg-icon traffic-icon', 'aria-hidden': 'true' },
-					E('use', { 'href': this.iconBase + '#i-bar-chart' })),
+				svgEl('svg', { 'class': 'svg-icon traffic-icon', 'aria-hidden': 'true' },
+					svgUse(this.iconBase + '#i-bar-chart')),
 				E('span', { 'class': 'traffic-title' }, _('Traffic Analysis')),
 				E('span', { 'class': 'traffic-meta', 'id': 'traffic-meta' }, '')
 			]),

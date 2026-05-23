@@ -3,6 +3,27 @@
 'require ui';
 'require rpc';
 
+// Step 83 (Round 13): SVG namespace helpers. LuCI's E('svg',...) creates
+// HTMLUnknownElement — the browser doesn't paint that as SVG so all
+// our <use href="#i-..."/> icon references render invisibly.
+var __SVG_NS   = 'http://www.w3.org/2000/svg';
+var __XLINK_NS = 'http://www.w3.org/1999/xlink';
+function svgEl(tag, attrs, children) {
+	var el = document.createElementNS(__SVG_NS, tag);
+	if (attrs) Object.keys(attrs).forEach(function (k) {
+		if (k === 'xlink:href') el.setAttributeNS(__XLINK_NS, 'xlink:href', attrs[k]);
+		else el.setAttribute(k, attrs[k]);
+	});
+	if (children) {
+		var arr = Array.isArray(children) ? children : [children];
+		arr.forEach(function (c) { if (c) el.appendChild(c); });
+	}
+	return el;
+}
+function svgUse(href) {
+	return svgEl('use', { 'href': href, 'xlink:href': href });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // LAN client list with OUI / type inference — upgrade.md §2.A2
 //
@@ -132,8 +153,8 @@ return baseclass.extend({
 	injectCard: function () {
 		var card = E('div', { 'class': 'devices-card', 'id': 'devices-card' }, [
 			E('div', { 'class': 'devices-head' }, [
-				E('svg', { 'class': 'svg-icon devices-icon', 'aria-hidden': 'true' },
-					E('use', { 'href': this.iconBase + '#i-user' })),
+				svgEl('svg', { 'class': 'svg-icon devices-icon', 'aria-hidden': 'true' },
+					svgUse(this.iconBase + '#i-user')),
 				E('span', { 'class': 'devices-title' }, _('LAN Clients')),
 				E('span', { 'class': 'devices-count', 'id': 'devices-count' }, '')
 			]),
@@ -224,15 +245,15 @@ return baseclass.extend({
 			}
 		}, [
 			E('div', { 'class': 'devices-row-main' }, [
-				E('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
-					E('use', { 'href': self.iconBase + '#' + type.icon })),
+				svgEl('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
+					svgUse(self.iconBase + '#' + type.icon)),
 				E('span', { 'class': 'devices-row-name', 'data-mac': mac },
 					displayName),
 				E('span', { 'class': 'devices-row-ip' }, ipShort ? '.' + ipShort : '—'),
 				E('span', { 'class': 'devices-row-type' }, type.label),
 				// Chevron rotates 180° via CSS when expanded
-				E('svg', { 'class': 'svg-icon devices-row-chev', 'aria-hidden': 'true' },
-					E('use', { 'href': self.iconBase + '#i-arrow-down' }))
+				svgEl('svg', { 'class': 'svg-icon devices-row-chev', 'aria-hidden': 'true' },
+					svgUse(self.iconBase + '#i-arrow-down'))
 			]),
 			// Detail wrapper is always in DOM — max-height transition handles
 			// the visual collapse/expand. Cheaper than rebuilding rows.

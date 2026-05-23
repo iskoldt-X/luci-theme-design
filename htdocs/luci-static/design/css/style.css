@@ -4114,23 +4114,23 @@ td.cbi-button, .cbi-button-apply,
     font-feature-settings: 'tnum';
 }
 
-/* Step 81 (Round 13): broad overflow protection for ALL text content in
-   Overview cbi-section cards.
-   Steps 75 + 78 tried targeted selectors like '... table > tbody > tr >
-   td:nth-child(2)' but Chrome-Claude verification showed those selectors
-   didn't match the actual storage section DOM at all (its computed
-   white-space stayed nowrap, meaning our rule never fired). The actual
-   element is some other shape — maybe span, maybe div, maybe a custom
-   class we can't see from this side.
-   Cast a wider net: every descendant of an Overview cbi-section, EXCEPT
-   form controls / buttons (which need to keep their natural wrapping).
-   overflow-wrap:anywhere is the conservative wrap mode — only splits a
-   word when the line would otherwise overflow, so 'QEMU Standard PC'
-   stays intact while '/opt/docker/overlay2/8ac6...' splits. */
+/* Step 81 (Round 13): broad overflow protection for Overview cbi-section
+   text content. Originally used overflow-wrap:anywhere which was way too
+   aggressive — Step 82 (verification round) softened to break-word.
+   Step 82 (2026-05-23): Chrome-Claude reported Step 81 "modified worked
+   but overcorrected" — `/dev/sda1 (/boot)` wrapped in 2 lines, MAC
+   addresses `00:E0:4C:6A:73:88` split character-by-character vertically
+   in the DHCP table, IPv6 strings shattered, etc. Agent's recommended
+   fix: switch `anywhere` → `break-word`.
+   `break-word` only breaks a word when the WHOLE word can't fit on the
+   line (i.e. genuine overflow case). Hyphenated tokens, colon-separated
+   MAC/IP, and short words stay intact. Long unbroken tokens like
+   `/opt/docker/overlay2/8ac621821c94e2...` still break since they would
+   otherwise overflow. */
 .node-admin-status-overview #view .cbi-section,
 .node-admin-status-overview #view .cbi-section :not(button):not(.cbi-button):not(input):not(select):not(textarea) {
     white-space: normal !important;
-    overflow-wrap: anywhere !important;
+    overflow-wrap: break-word !important;
     word-break: normal;
 }
 

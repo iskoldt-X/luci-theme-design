@@ -2,6 +2,28 @@
 'require baseclass';
 'require ui';
 
+// Step 83 (Round 13): SVG namespace helpers — see sparkline.js for the
+// full rationale. LuCI's E('svg',...) creates HTMLUnknownElement; the
+// browser doesn't paint that as SVG so the <use href="#i-search"/>
+// sprite reference doesn't render.
+var __SVG_NS   = 'http://www.w3.org/2000/svg';
+var __XLINK_NS = 'http://www.w3.org/1999/xlink';
+function svgEl(tag, attrs, children) {
+	var el = document.createElementNS(__SVG_NS, tag);
+	if (attrs) Object.keys(attrs).forEach(function (k) {
+		if (k === 'xlink:href') el.setAttributeNS(__XLINK_NS, 'xlink:href', attrs[k]);
+		else el.setAttribute(k, attrs[k]);
+	});
+	if (children) {
+		var arr = Array.isArray(children) ? children : [children];
+		arr.forEach(function (c) { if (c) el.appendChild(c); });
+	}
+	return el;
+}
+function svgUse(href) {
+	return svgEl('use', { 'href': href, 'xlink:href': href });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cmd+K command palette — upgrade.md §1.S1
 //
@@ -161,8 +183,8 @@ return baseclass.extend({
 		}, [
 			E('div', { 'class': 'cmdk-panel' }, [
 				E('div', { 'class': 'cmdk-input-wrap' }, [
-					E('svg', { 'class': 'svg-icon cmdk-input-icon', 'aria-hidden': 'true' },
-						E('use', { 'href': iconBase + '#i-search' })),
+					svgEl('svg', { 'class': 'svg-icon cmdk-input-icon', 'aria-hidden': 'true' },
+						svgUse(iconBase + '#i-search')),
 					E('input', {
 						'class':           'cmdk-input',
 						'type':            'text',

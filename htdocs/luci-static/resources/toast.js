@@ -2,6 +2,25 @@
 'require baseclass';
 'require ui';
 
+// Step 83 (Round 13): SVG namespace helpers — see sparkline.js.
+var __SVG_NS   = 'http://www.w3.org/2000/svg';
+var __XLINK_NS = 'http://www.w3.org/1999/xlink';
+function svgEl(tag, attrs, children) {
+	var el = document.createElementNS(__SVG_NS, tag);
+	if (attrs) Object.keys(attrs).forEach(function (k) {
+		if (k === 'xlink:href') el.setAttributeNS(__XLINK_NS, 'xlink:href', attrs[k]);
+		else el.setAttribute(k, attrs[k]);
+	});
+	if (children) {
+		var arr = Array.isArray(children) ? children : [children];
+		arr.forEach(function (c) { if (c) el.appendChild(c); });
+	}
+	return el;
+}
+function svgUse(href) {
+	return svgEl('use', { 'href': href, 'xlink:href': href });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Toast notification layer — upgrade.md §1.S2a
 //
@@ -182,8 +201,8 @@ return baseclass.extend({
 		var duration = (opts.duration !== undefined) ? opts.duration : DEFAULT_DURATIONS[type];
 
 		var children = [
-			E('svg', { 'class': 'svg-icon toast-icon', 'aria-hidden': 'true' },
-				E('use', { 'href': this.iconBase + '#' + (ICONS[type] || ICONS.info) })),
+			svgEl('svg', { 'class': 'svg-icon toast-icon', 'aria-hidden': 'true' },
+				svgUse(this.iconBase + '#' + (ICONS[type] || ICONS.info))),
 			E('div', { 'class': 'toast-body' }, message)
 		];
 
