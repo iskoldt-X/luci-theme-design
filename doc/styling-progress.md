@@ -1331,6 +1331,86 @@ awk 内联上色:
 | 工具脚本数 | 1 | **2** |
 | Round 9 用户 explicit complaint 解决数 | 3/5 | **5/5**(全部覆盖) |
 
+---
+
+## 🚨 第十一轮末尾的紧急 Step 67 — @import 位置 bug 引爆
+
+> 触发：用户刷新后**整个 Overview 失去所有 feature 样式**。WAN Hero、tile、speedtest、devices、traffic 全变成纯文本垂直排列。LuCI 原生 cbi-section 卡片仍正常 → style.css 在加载,**features.css 不应用**。
+
+### Step 67 — features.css 改用 `<link>` 加载,不再 `@import`
+
+**真根因**：features.css 一直靠 style.css **末尾**(line 4116) 的 `@import url("./features.css")` 加载。**CSS 规范明确说 @import 必须出现在所有其他规则之前**(MDN: "must precede all other types of rules")。
+
+Edge/Chrome 几个月来对位置不对的 @import **默默宽容**,所以 Step 36 拆 CSS 时这么做能跑。**Step 63** 加了 ~90 行 CSS 改动后,**显然跨过了浏览器某个内部宽容阈值**,@import 直接被丢弃,features.css 一行不应用。
+
+**修法**：
+- style.css 末尾 `@import` 删掉,留注释说明前因后果
+- header.htm 在 style.css `<link>` 紧跟着加一条 features.css `<link>`
+- Cascade 顺序保留(link 在 style.css link 之后),并行下载反而更快
+
+**教训**：CSS 规范不能违反就是不能违反,浏览器宽容是借的不是欠的。今后任何 `@import` **必须**在文件 / inline `<style>` 块的**开头**,否则一定迟早被丢弃。
+
+---
+
+## 🧹 第十二轮（Step 68-71）：CSS 清理 + 工程加固
+
+> 起飞时间：2026-05-23
+> 用户原话："我不需要中文翻译" → Round 12 i18n 撤销,转向 CSS 清理 + lint 加固 + 文档导航。
+> 范围：低/中风险维护性工作,提升代码可读性和未来防御。
+
+### Step 68 — 删除 15 个无引用 legacy CSS aliases
+
+Phase 0(Step 1)迁移到 token 系统时为兼容性留了 35 个 legacy alias。Step 4-20 完成组件重写后,grep 显示 15 个**零引用**,纯死代码。
+
+删除的(全 `var(--alias)` grep 返 0):
+```
+--bg --mainbg --activebottom --bordercolor --sectionnodeborder
+--tabbgcolor --badgebgcolor --badgeborder --progressbarcolor
+--progressbar --progressbartxtcolor --logo_color --alertcolor
+--alertbackground --scrollbarcolor
+```
+
+保留的 20 个仍有 50+ 处引用,迁移它们需要碰大量 style.css 现有代码,延到独立 refactor PR。dark mode 块只 override `--navbgcolor`,无变化需求。
+
+### Step 69 — lint.yml 加 @import 位置检查 + 补全 shellcheck 列表
+
+**两件事**:
+
+1. **新 step "Forbid misplaced @import in CSS"** —— Step 67 那种事 再也不会发生。Python 扫每个 .css 文件,找第一个 `{` 的偏移,任何 `@import` 出现在它之后 → CI fail,打印 Step 67 / 69 引用。本地 self-test 通过。
+
+2. **shellcheck `additional_files` 补全**：之前漏了 `devstats`(Step 53 加) 和 `nlbw`(Round 6 加)两个 CGI。同时把 `additional_files` 重排为 YAML folded scalar (`>-`) 一行一文件,可读性强。
+
+### Step 70 — `doc/INDEX.md` 文档导航
+
+7500 行跨 9 个 markdown 文件的迷宫,新人(包括未来 AI session)开始 lost。INDEX.md 提供:
+- "如果只看一个" → development.md
+- 4 个 active 文档表(行数 + 何时读)
+- 2 个 preview HTML 视觉参考
+- 3 个历史审计标 superseded
+- 项目 memory 目录交叉引用(~/.claude/projects/.../memory/)
+- 4 个常见任务的 reading order:
+  - ship 新功能 / 理解 X 为什么这样 / 修 bug / 新 AI agent 开项目
+
+纯文档,零代码改动。
+
+### Step 71 — push origin js 触发完整 CI 验证
+
+28+ commit 累计后,推到远端让 GH Actions 跑完整 lint(包括新 Step 69 的 @import 检查)+ size budget + CGI safety + build。第一次 push 这一系列,验证整体没有 regression。
+
+---
+
+## 📊 第十二轮（Step 68-71）累计变化
+
+| 指标 | 第十一轮后 | 第十二轮后 |
+|---|---|---|
+| Legacy CSS aliases 数量 | 35 | **20** (-15 死代码) |
+| style.css 行数 | 4121 | 4118 |
+| lint.yml 检查数 | 9 | **10** (+@import 位置) |
+| Shellcheck 覆盖 CGI | 4/6 (漏 devstats/nlbw) | **6/6** |
+| doc/ 入口文档 | 无 | **INDEX.md** |
+| @import 误用防御 | 无 (Round 11 末尾才发现) | **CI 阻止** |
+
+
 
 
 
