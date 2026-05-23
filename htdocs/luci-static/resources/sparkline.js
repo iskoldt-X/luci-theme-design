@@ -66,7 +66,17 @@ MetricRing.prototype.path = function (w, h) {
 };
 
 // ── Tile creation ─────────────────────────────────────────────────────────────
+//
+// Step 76 (Round 13): pre-bake the empty-state baseline path so the
+// sparkline area shows SOMETHING even before the first tick() arrives.
+// Previously: <path d=""> rendered nothing → sparkline area appeared
+// blank → browser-side Claude agent reported "no sparkline mini chart".
+// Now: dashed grey baseline visible at t=0; replaced by real curve at
+// t=10s once the ring has 2+ samples. renderTileSpark() removes the
+// .design-tile-spark-line-empty class when transitioning to real data.
 function makeTile(id, iconName, label, iconBase) {
+	var baseY = (SPARK_H / 2).toFixed(1);
+	var initPath = 'M 0,' + baseY + ' L ' + SPARK_W + ',' + baseY;
 	return E('div', { 'class': 'design-tile', 'id': id }, [
 		E('div', { 'class': 'design-tile-head' }, [
 			E('svg', { 'class': 'svg-icon design-tile-icon', 'aria-hidden': 'true' },
@@ -82,7 +92,10 @@ function makeTile(id, iconName, label, iconBase) {
 			'aria-hidden': 'true'
 		}, [
 			E('path', { 'class': 'design-tile-spark-fill', 'd': '' }),
-			E('path', { 'class': 'design-tile-spark-line', 'd': '' })
+			E('path', {
+				'class': 'design-tile-spark-line design-tile-spark-line-empty',
+				'd':     initPath
+			})
 		])
 	]);
 }

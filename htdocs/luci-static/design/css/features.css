@@ -455,12 +455,17 @@
 
 /* Step 57: empty/insufficient-data state. We draw a dashed center line
    so the user sees "data is collecting, will appear shortly" rather
-   than wondering whether the sparkline area is just empty space. */
+   than wondering whether the sparkline area is just empty space.
+   Step 76 (Round 13): bumped stroke-width 1→1.5 and opacity 0.6→0.85
+   after Chrome-Claude agent reported the baseline was so faint it
+   couldn't be detected ("no sparkline mini chart" was the verdict).
+   Also raised the stroke colour from border-default to border-strong
+   for better contrast on the surface-1 tile background. */
 .design-tile-spark-line-empty {
-    stroke: var(--color-border-default);
-    stroke-width: 1;
-    stroke-dasharray: 3 3;
-    opacity: 0.6;
+    stroke: var(--color-border-strong);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 4;
+    opacity: 0.85;
 }
 
 .design-tile-spark-fill {

@@ -9,8 +9,16 @@ function qs(sel) { return document.querySelector(sel); }
 // Replaces the legacy 'design' icon-font \uXXXX pseudo-element approach with
 // inline Lucide SVG <use>. Lookup priority: data-title → data-node-name → null.
 // When null, no icon is rendered (text-only menu item).
+//
+// Step 73 (Round 13): expanded by-node-name lowercase aliases. The browser-
+// side Claude agent reported all sidebar icons missing on ImmortalWrt 24.10
+// while the header buttons (which use direct icon refs) DID show. Root
+// cause: `children[i].title` on LuCI 26.x can come back already-translated
+// (e.g. '状态' instead of 'Status'), so the by-title lookup misses. The
+// safety net is by-node-name where the name is the URL path component and
+// stays stable across locales ('status', 'system', etc).
 var MENU_ICON_MAP = {
-	// by data-title (LuCI menu .title after _() translation, then space → _)
+	// by data-title (LuCI menu .title — English when locale doesn't translate)
 	'Status':            'i-activity',
 	'System':            'i-settings',
 	'Services':          'i-server',
@@ -26,10 +34,27 @@ var MENU_ICON_MAP = {
 	'iStore':            'i-shopping-bag',
 	'Logout':            'i-log-out',
 	'Reboot':            'i-power',
-	// by data-node-name (fallback for menus whose title varies by locale)
+
+	// by data-node-name (URL path component, locale-stable). Step 73: this
+	// half of the map now covers every top-level LuCI menu we've seen on
+	// ImmortalWrt 24.10 / LuCI 26.x, so even when the title arrives
+	// translated we still find an icon.
+	'status':            'i-activity',
+	'system':            'i-settings',
+	'services':          'i-server',
+	'docker':            'i-box',
+	'nas':               'i-hard-drive',
+	'vpn':               'i-shield',
+	'network':           'i-globe',
+	'logout':            'i-log-out',
+	'reboot':            'i-power',
 	'nlbw':              'i-bar-chart',   // legacy nlbw package
 	'nlbwmon':           'i-bar-chart',   // modern nlbwmon package (ImmortalWrt 24.10+)
-	'wizard':            'i-sparkles'
+	'wizard':            'i-sparkles',
+	'statistics':        'i-pie-chart',
+	'control':           'i-sliders',
+	'asterisk':          'i-phone',
+	'istore':            'i-shopping-bag'
 };
 
 var ICON_BASE_URL = (typeof L !== 'undefined' && L.env && L.env.mediaurlbase
