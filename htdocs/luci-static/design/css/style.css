@@ -3876,6 +3876,22 @@ input[name="nslookup"] {
 	}
 }
 
+/* Step 96 (Round 18): bottom navbar is position:fixed and sits over the
+   content column. Without an offsetting padding-bottom on .main-right,
+   the last ~60 px of the page (the last hero stat, the last tile meta
+   line, the last device row…) is permanently hidden behind the navbar.
+   Chrome-Claude's responsive sweep caught this on a landscape-phone
+   profile (vw=901 vh=290) — Internet hero's Public IP row had its
+   bottom half clipped.
+   Match the navbar's own height formula: 50 px base + safe-area
+   on iOS notch / Android gesture bar, plus var(--space-4) of breathing
+   room so content doesn't visually butt against the navbar's top edge. */
+@media (max-width: 992px) {
+	.main-right {
+		padding-bottom: calc(50px + env(safe-area-inset-bottom) + var(--space-4));
+	}
+}
+
 .navbar a {
 	flex: 1 1 0;
 	text-align: center;
