@@ -887,6 +887,29 @@ small {
     float: right;
     height: 100%;
     border-left: var(--sectionborder);
+    /* Step 103 (Round 21): site-wide symmetric centering.
+       menu-design.js sets `overflow: auto` on this element at runtime
+       (line 198). When inner content overflows vertically — true on
+       overview, network, firewall, dhcp, system, nlbw, realtime,
+       and any plugin page with a substantial form — the browser
+       reveals a vertical scrollbar which reserves ~11–17 px on the
+       inline-end side (right in LTR). That gutter shrinks the inner
+       content box asymmetrically, drifting #maincontent (and the
+       page form inside it) by 5-8 px to the left of true center.
+       Chrome-Claude's site-wide audit caught this exact binary
+       pattern: 8 of 12 logged-in pages with overflowing content
+       showed dw=11, 4 short-content pages showed dw=0.
+       `scrollbar-gutter: stable both-edges` tells the browser to
+       reserve scrollbar gutter on BOTH sides of the scroll container,
+       at all times. Visual result: content stays exactly centered
+       whether or not the scrollbar is currently visible, and
+       whether or not the page has enough content to need scrolling.
+       Tradeoff: ~22-34 px of horizontal real-estate gone to gutter
+       reserves on Windows/Linux. macOS overlay scrollbars are a
+       no-op (no gutter ever reserved), so Mac users see no change.
+       Browser support: Chrome 94+, Firefox 97+, Safari 14.1+ —
+       all evergreen browsers we target. */
+    scrollbar-gutter: stable both-edges;
 }
 
 .main-right > #maincontent {
