@@ -1879,6 +1879,110 @@ Round 17 Chrome-Claude 给 `.showSide` 的判断:"transparent, no z-index 抢占
 
 ---
 
+## 🎨 第二十二轮(Step 104-106):preview parity v2 — 从 style-preview.html 挖宝
+
+> 触发:用户问"你觉得对 theme project 满意吗?最拉后腿的是什么地方?",我答了"自动化测试 + style.css 考古坑 + 强依赖 Chrome-Claude"三件事。用户没选我推荐的 A(Playwright 烟雾测试),而是指向 `doc/style-preview.html` —— **"你看那里很多宝贝,组件目录的按钮、输入控件、底部导航的 after 图标我从来没应用过"**。Explore agent 扫了 85KB preview html,找到 6 个 view + 多个子章节,定位 3 个明显未应用项,Round 22 一次性 ship 3 个 Step 推过。
+
+### Step 104 — 底部 navbar SVG + 文字标签 + frosted active
+
+**用户原话**:"那个图标我真的非常喜欢可是从来没有应用过"。preview iPhone mockup 的底栏导航是这轮最 striking 的设计未实现项。
+
+**差距**:
+| | 现状 | preview after |
+|---|---|---|
+| 图标 | 5 个 28×28 PNG(home.png / openclash.png / link.png / rank.png / user.png) | 5 个 SVG sprite `<use href="#i-...">` |
+| 文字标签 | 无 | 10px medium "首页/代理/网络/统计/我的" |
+| Active 状态 | 无 | `color: accent-500` 当前页对应 tab 高亮 |
+| 背景 | `backdrop-filter: blur(10px)` 单层 | `saturate(140%) blur(20px)` 强 frosted |
+| 高度 | 50px + safe-area | 72px + safe-area(给文字让空间) |
+
+**修法**:
+- `icons.svg` sprite 加 2 个新 symbol(`i-home` + `i-network`)。其他 3 个 icon(globe / bar-chart / user)早已存在。Lucide 标准 path,stroke=currentColor stroke-width=1.5,跟 sprite 现有 38 个 icon 同 convention
+- `header.htm` 重写 `.navbar` 块 — 每个 `<a>` 现在是 `<svg class="navbar-tab-icon">` + `<span class="navbar-tab-label">`,加 `.navbar-tab-{home|proxy|network|stats|admin}` 类供 CSS active 选择
+- `style.css` `.navbar` 块:
+  - 高度 50→72px + backdrop-filter 升级
+  - `.navbar-tab` flex-column / `.navbar-tab-icon` 22×22 / `.navbar-tab-label` 10px
+  - active 状态选择器:`body[data-page^="admin-status-overview"] .navbar-tab-home` 类 cross-match,匹配 6 个段(overview + 空 root / openclash / network 任意子页 / realtime / system 任意子页)
+- Step 96 mobile padding-bottom 同步更新 50→72(content 让出空间)
+
+**Backward-compat shim**:`.navbar a:not(.navbar-tab)` 保留旧 `<img>` 28-px 规则,以防未来 LuCI 版本回退发 plain anchor。
+
+### Step 105 — `.cbi-value` table-cell 35/65 改 CSS Grid form-row
+
+**差距**(LuCI 默认 vs preview):
+- LuCI:`.cbi-value { display: flex }` + `.cbi-value-title { width: 35%; float: left }` + `.cbi-value-field { width: 65%; display: table-cell }` —— 老式比例 + float + table-cell 三件套
+- preview:`.form-row { display: grid; grid-template-columns: minmax(140px, 200px) 1fr; min-height: 48px }` + `.form-help { font-size: text-xs; color: text-subtle }` 在 value 下方
+- HTML 不能改(Lua 生成),但 CSS 可以**重写** —— LuCI 发的 `<div class="cbi-value">` 里 `.cbi-value-title` + `.cbi-value-field` + `.cbi-value-description` 三个 sibling 在 grid context 下可以用 `grid-template-areas` 精确摆放
+
+**修法**:
+```css
+.cbi-value {
+    display: grid;
+    grid-template-columns: minmax(140px, 200px) 1fr;
+    grid-template-areas:
+        "label value"
+        ".     hint";
+    column-gap: var(--space-4);
+    row-gap: var(--space-1);
+    min-height: 48px;
+    border-bottom: 1px solid var(--color-border-subtle);
+}
+.cbi-value-title { grid-area: label; font-size: text-sm; color: text-muted; }
+.cbi-value-field { grid-area: value; }
+.cbi-value-description { grid-area: hint; font-size: text-xs; color: text-subtle; opacity: 1; }
+```
+
+**关键细节** —— 把老规则的 `opacity: .5` 换成 `color: text-subtle`:opacity 是乘法效应,会把 hint 里的 `<a>` `<strong>` `<em>` 一起暗化(强调被吞)。用 color token 才是正确的"低对比度但保留语义层级"。
+
+**Mobile 适配**:`@media (max-width: 370px)` 把 grid 降到单列(label / value / hint 上下三行堆叠),并把 label 字号略加粗(`weight-semibold + color-text`)让 label 在共享列宽时仍读得出"这是 header"。
+
+**风险**:影响**所有** LuCI 配置页表单 —— network / firewall / system / dhcp / openclash 全套。已经 cover 过 grid + grid-template-areas + sibling/child 两种 description 位置,但建议用户先在几个高频页面 verify 一遍。
+
+### Step 106 — 组件目录 (`.btn-*` / `.input` / `.toggle` / `.input-group`)
+
+**差距**:LuCI 自己的 `.cbi-button-positive / -negative / -action / -link` 我们已经 mapped 视觉(line 1639-1702),但 preview 定义的 **utility 类** 我们没暴露:
+- `.btn-primary / .btn-secondary / .btn-ghost / .btn-danger / .btn-link` 5 种语义
+- `.btn-sm / .btn-lg` 大小
+- `.input` 统一 input 视觉(focus ring / hover / placeholder)
+- `.toggle` iOS-style pill switch
+- `.input-group .leading / .trailing` 复合输入
+
+future theme code(devices.js / cmdk.js / 新的 standalone widget)想用这套 vocab 时,**得知道这些类不存在,只能用 cbi-button-*** —— LuCI 语义有时不匹配(`.cbi-button-link` 是蓝色 action 按钮,**不是** text-link 样式;collision 让 `.btn-link` 必须用不同名)。
+
+**修法**:在 style.css §BUTTONS 块末尾(line ~1700)追加 218 行,定义所有 preview 类作为**并行 API**。LuCI 的 `.cbi-button-*` 一行不动,新类纯增量。
+
+**关键设计选择**:
+- `.btn-link` 和 `.cbi-button-link` 名字不同 — preview 的 link 是 "text + underline on hover",LuCI 的 link 是 "solid blue button"。同名会撞,故新类独立命名。
+- `.input` 选择器同时 cover `.cbi-input-text` + `.cbi-input-password` — 让 LuCI 自己的 input 也获得新的 focus-ring(3px accent-35 halo)。这是这一 Step **唯一立刻可见的变化** —— 其他都是 future-ready 类,需要 future code 来用。
+- `.toggle` 是 input[type="checkbox"] 的 appearance reset。LuCI 自己不发 `.toggle`,这是给我们将来想做 iOS-style 设置开关用的。
+
+### 📊 第二十二轮(Step 104-106)累计
+
+| 指标 | 第二十一轮后 | 第二十二轮后 |
+|---|---|---|
+| 底部 navbar 图标 | 5 张 28px PNG | SVG sprite + 文字标签 + active 高亮 |
+| 底部 navbar 高度 | 50px | 72px(给标签让空间) |
+| 底部 navbar 背景效果 | `blur(10px)` | `saturate(140%) blur(20px)` frosted |
+| LuCI 表单 row 布局 | table-cell 35/65 比例 | CSS Grid `minmax(140-200px) 1fr` + 48px touch-friendly |
+| Description hint 样式 | `font-size: small; opacity: .5` | `font-size: text-xs; color: text-subtle` |
+| Mobile 表单 row | 老 display:table + float | 单列 Grid 堆叠(label / value / hint) |
+| `.btn-*` utility 类 | 不存在 | 5 variants × 3 sizes 全套 |
+| `.input` 统一 focus ring | 无 | 3px accent halo + bg lift |
+| iOS-style `.toggle` | 无 | 标准 pill switch |
+| `.input-group` 复合输入 | 仅 cmdk 内部用 | 文档化为可复用 pattern |
+
+---
+
+## 🎯 Round 22 横向观察
+
+**preview 不止是"参考",是"未应用 backlog"**:Round 14-21 我们一直把 preview 当作"风格指南"来对齐,但其实每个 section 都是一份**未交付的功能列表**。`style-preview.html` 85KB,6 个 view,十几个子章节 —— 我们 Round 17 之前只触及了 S1-S3(Cmd+K / Toast / Tiles),Round 16-17 是 A1-A2(WAN Hero / Devices),后面的 Config / Components / Mobile 大量内容**根本没动**。Round 22 一次性挖出 3 个 明显未应用项,而**其他还有 Login 卡片改造、Before/After 卡片+表单行的 35/65 改写示范、字号梯度对齐**之类**没动**。下次 dry spell 再去挖。
+
+**"重型重构 + 高风险 Step 不应被埋在 round 中段"**:Step 105 form-row grid 重写**影响所有 admin 配置页**,理应是单 round 单 Step。但 Round 22 把它夹在 104(navbar)和 106(catalog)之间一起 ship 了 —— 节奏对、复用 dev-sync 工作流好,但**如果 105 引出 regression,108 和 109 的视觉变化会让 debug 更难定位**(用户回报"network 页坏了",我得先排除新 navbar / 新 catalog 干扰)。教训:**类似 105 这种 cross-cutting CSS 重写应该独立 round,前后留足 verify 时间**。
+
+**"design vocabulary 是 latent capacity"**:Step 106 加的 `.btn-ghost` `.btn-link` `.toggle` 等**在 ship 当下没有 visual impact** —— LuCI 不发这些类,我们自己代码也还没用。但这是**给未来代码备好的 vocabulary**。下次写新组件直接 `class="btn btn-ghost btn-sm"`,不需要绕 LuCI 的 `.cbi-button-action` 兼容层。**design system 的成熟度**在于这些"未来时态"的 token 也铺好了。
+
+---
+
 
 
 
