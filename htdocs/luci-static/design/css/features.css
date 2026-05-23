@@ -467,15 +467,14 @@
 .design-tile-trend-down { color: var(--color-success); background: var(--color-success-bg); }
 .design-tile-trend-flat { color: var(--color-text-muted); background: var(--color-surface-1); }
 
-/* Step 43 / 89: Net tile's value can be long ("↓ 45.2 Mbps ↑ 1.2 Mbps").
-   Drop the num one size notch so all four parts (prefix, num, unit, trend)
-   still fit on narrow ≥220px tiles without wrapping awkwardly. */
-#design-tile-net .design-tile-num {
-    font-size: var(--text-2xl);
-}
-#design-tile-net .design-tile-prefix {
-    font-size: var(--text-2xl);
-}
+/* Step 89 originally dropped the Net tile's .design-tile-num one notch
+   (text-2xl 24px) to keep "↓ 45.2 Mbps ↑ 1.2 Mbps" on one line in
+   narrow ≥220px tiles. Step 91 (Round 16) revokes that override per
+   user direction ("几个字体可以变大啥的" — pixel-perfect preview parity
+   means WAN's num should match CPU/Mem/Temp at --text-3xl 30px). On
+   narrow tiles the value row's `flex-wrap: wrap` (already on
+   .design-tile-value) lets the trend pill or unit drop to the next
+   line, which is preferable to a permanently-undersized number. */
 
 .design-tile-meta {
     font-size: var(--text-xs);
