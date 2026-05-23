@@ -1,73 +1,46 @@
 'use strict';
 'require baseclass';
-'require rpc';
 'require network';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WAN throughput stats — shared singleton
 //
-// Polls network.device.status every 2 s, diffs rx/tx counters from the last
-// sample, and pushes {rxBps, txBps, deviceName, online} to every subscriber.
+// Polls a tiny shell CGI every 2 s that reads /sys/class/net/<dev>/statistics/
+// {rx,tx}_bytes, diffs counters from the last sample, and pushes
+// {rxBps, txBps, deviceName, online} to every subscriber.
 //
 // Consumed by:
 //   - sparkline.js  → "Net" tile (4th tile, live throughput)
 //   - wan-hero.js   → "↑ N Mbps · ↓ M Mbps" row at the bottom of the hero
 //
+// Step 53 (2026-05-23): Replaced the failing rpc.declare network.device
+// .status call (LuCI 26.x ACL denies it with -32002 Access denied, even
+// though SSH `ubus call network.device status` works) with /cgi-bin/design
+// /devstats — a 20-line shell script reading /sys/class/net/. No RPC, no
+// ACL, no auth — same data, instant access. See doc/styling-progress.md
+// Step 53 for the full diagnostic that found this.
+//
 // Design notes:
 //   1. Singleton. The first subscribe() starts the polling timer; the last
-//      unsubscribe() stops it. Two consumers share one RPC stream.
-//   2. WAN device detection: network.getWANNetworks() → w.getDevice()
-//      .getName(). On routers where WAN isn't up yet at page load (e.g.
-//      PPPoE still negotiating), detection retries on the next poll —
-//      we don't blow the whole module up.
+//      unsubscribe() stops it. Two consumers share one CGI stream.
+//   2. WAN device detection: still via network.getWANNetworks() →
+//      w.getDevice().getName() (that one works — only network.device
+//      .status is ACL-blocked, not network.interface dump).
 //   3. Counter wrap: if delta < 0 we treat it as a wrap/reset and skip
 //      that sample (no spurious huge spike).
 //   4. First sample is needed to anchor the diff — first emit happens at
 //      the 2nd poll (~2 s in). Until then subscribers see null rates.
-//
-// All RPC calls are wrapped in try/catch so a transient ubus hiccup never
-// kills the singleton. Defensive enough for any LuCI 20.x → 26.x.
 // ─────────────────────────────────────────────────────────────────────────────
 
 var POLL_INTERVAL_MS = 2000;
 
-// Step 50: declare both no-args (all devices) and per-device variants.
-// LuCI 26.x's network.device.status response shape varies between builds —
-// sometimes flat {ethN: {...}}, sometimes wrapped {'': {...}} from rpc's
-// expect normalization. We try the all-devices call first, and if the
-// target device isn't in the response we fall back to a per-device
-// status call (rarely takes a different shape).
-var deviceStatusAll = rpc.declare({
-	object: 'network.device',
-	method: 'status'
-	// no `expect` — we want the raw response object so we can probe its
-	// shape defensively in pickDeviceStats() below.
-});
-
-var deviceStatusOne = rpc.declare({
-	object: 'network.device',
-	method: 'status',
-	params: ['name']
-});
-
-// Probe a deviceStatus response (either-shape) for a specific device entry
-// that has rx_bytes/tx_bytes counters under .statistics. Returns the entry
-// object or null. The four shapes we've seen across LuCI versions:
-//   1. { 'eth1': { up, statistics } }                    — common 24.10
-//   2. { '': { 'eth1': { ... } } }                       — expect-wrapped
-//   3. { devices: { 'eth1': { ... } } }                  — older variant
-//   4. { up, statistics }                                 — per-device call
-function pickDeviceStats(response, deviceName) {
-	if (!response || typeof response !== 'object') return null;
-	// Shape 4: per-device direct
-	if (response.statistics) return response;
-	// Shape 1
-	if (response[deviceName] && response[deviceName].statistics) return response[deviceName];
-	// Shape 2
-	if (response[''] && response[''][deviceName] && response[''][deviceName].statistics) return response[''][deviceName];
-	// Shape 3
-	if (response.devices && response.devices[deviceName] && response.devices[deviceName].statistics) return response.devices[deviceName];
-	return null;
+function fetchDevStats(deviceName) {
+	return fetch('/cgi-bin/design/devstats?dev=' + encodeURIComponent(deviceName), {
+		cache: 'no-store'
+	}).then(function (r) {
+		if (!r.ok) throw new Error('http ' + r.status);
+		return r.json();
+	});
 }
 
 function warn(msg, obj) {
@@ -143,46 +116,21 @@ function poll() {
 		});
 	}
 
-	// Try the all-devices call first (one RPC fetches stats for every iface)
-	return deviceStatusAll().then(function (statuses) {
-		var s = pickDeviceStats(statuses, state.wanDevice);
-		if (s) {
-			processStats(s);
+	return fetchDevStats(state.wanDevice).then(function (data) {
+		if (!data || data.error) {
+			warn('devstats error', data);
+			emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: false });
 			return;
 		}
-		// All-devices response didn't contain our device under any known
-		// shape — try a targeted single-device query, which on some LuCI
-		// builds uses a different (flatter) response shape.
-		warn('all-devices response missing ' + state.wanDevice + ', trying single-device', statuses);
-		return deviceStatusOne(state.wanDevice).then(function (resp) {
-			var s2 = pickDeviceStats(resp, state.wanDevice);
-			if (s2) {
-				processStats(s2);
-			} else {
-				warn('single-device response also missing statistics', resp);
-				emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: false });
-			}
-		}).catch(function (err) {
-			warn('single-device call failed', err);
-			emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: false });
+		// Convert the CGI's flat response into the shape processStats expects
+		// (same as what the old rpc returned).
+		processStats({
+			statistics: { rx_bytes: data.rx_bytes, tx_bytes: data.tx_bytes },
+			up:         data.up
 		});
 	}).catch(function (err) {
-		// All-devices call itself rejected (rpcd down, permissions, etc).
-		// Try single-device as a last resort — same RPC method, sometimes
-		// works when the all-devices form doesn't (rare but seen).
-		warn('all-devices call failed, trying single-device', err);
-		return deviceStatusOne(state.wanDevice).then(function (resp) {
-			var s = pickDeviceStats(resp, state.wanDevice);
-			if (s) {
-				processStats(s);
-			} else {
-				warn('single-device also failed', resp);
-				emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: null });
-			}
-		}).catch(function (err2) {
-			warn('both calls failed', err2);
-			emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: null });
-		});
+		warn('devstats fetch failed', err);
+		emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: null });
 	});
 }
 
