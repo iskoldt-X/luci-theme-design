@@ -45,7 +45,13 @@ function svgUse(href) {
 // Robust against renames between OpenWrt 19/21/22/23/24 LuCI revisions.
 // ─────────────────────────────────────────────────────────────────────────────
 
-var REFRESH_MS = 30000;
+// Step 119 (Round 31): refresh cadence 30 s → 5 s. With the Step 118
+// bridge-family backend, nft counters update in real time as packets
+// flow, so polling every 5 s gives a visibly "live" feel matching the
+// WAN throughput tile's 2 s cadence and the sparkline tiles. Backend
+// cost is negligible: one `nft -j list table bridge design_acct` call
+// per poll (~5-10 ms on the router) — 12 requests/min total.
+var REFRESH_MS = 5000;
 var TOP_N      = 5;
 
 // ── Menu URL lookup helpers ───────────────────────────────────────────────────
