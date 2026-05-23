@@ -1222,6 +1222,116 @@ $ ls scripts/                         dev-sync.sh
 
 **Round 10 终极效果**：从 Round 11 开始，**Claude 我 + 用户**之间的 debug 循环也加速。我改完一个 Step、commit、用户跑 `dev-sync.sh --once` 就上线了。不需要 CI 等待，不需要 ipk 重装。
 
+---
+
+## 🤝 第十一轮（Step 63-66）：用户全盘授权后第一波 — preview parity + 工具补完
+
+> 起飞时间：2026-05-23
+> 用户:**"请你帮我全盘接管吧！我相信你。"**
+> 我接的 working principle：每 Step 独立 commit / 小颗粒高频 / 显式标"需要你看一眼" / 不偷偷 push / 一轮 3-5 Step 给清晰总结。
+> 范围：把 Round 9 留下的视觉差再压一档 + dev 工具齐套件。
+
+### Step 63 — Diff Viewer v2:按 config.section 分组 + 旧值删除线
+
+**用户原话**："Diff Viewer 我也找不到, preview 里很好看"
+
+Round 9 Step 54 已经让 modal **出来**（Promise 适配），但视觉上仍是扁平 row list,没 preview §B4 那种"每个被改的对象一张卡 + 红删除线旧值 + 绿新值"的清晰感。
+
+#### apply-modal.js 改动
+
+1. **`enrichChangesWithOldValues(changes)`** —— 给每条 'set' op 从 `L.uci.values` 拉旧值,与 Step 45 snapshot 同源,shallow clone 不动原数组
+2. **`groupChangesByConfigSection(changes)`** —— 按 `config.section` 分组,首见序保留(uci.changes 自然按 config 聚集)
+3. **`changeRowsForOne(c)`** —— 不再 return 单行,改 return **数组**:
+   - add → 1 行 `+ section [type] new section`
+   - remove → 1 行 `− option removed`
+   - rename / reorder → 1 行 with 箭头 / 双向 glyph
+   - set with old !== new → **2 行**(− 旧, + 新)
+   - set without captured old → 1 行(+ 新)
+4. **`showDiff()` 重写**:80 row budget 防止超大 change-set 撑爆 modal,group head 以 `config.section` 为标题,danger 警告区独立保留
+
+#### features.css 改动
+
+- 删旧 `.apply-diff-list` 外框 + `.apply-diff-tag`、`.apply-diff-arrow`
+- 新 `.apply-diff-group` 卡片样式（surface-1 bg + 圆角 + 内边距 + 间隔）
+- 新 `.apply-diff-group-head`(mono semibold + bottom border)
+- `.apply-diff-row` 改 3-col grid `[mark][key][value]`
+- `.apply-diff-row-add`(success-bg + +)/`-del`(danger-bg + − + 仅 val 删除线,key 不划)
+- `.apply-diff-more` truncation 提示用 dashed placeholder 风格
+
+#### 部署后预期(点 badge OR 保存并应用):
+
+```
+Apply 3 pending changes?
+─────────────────────────
+network.lan
+  − ipaddr   192.168.0.1     (红底删除线)
+  + ipaddr   192.168.1.1     (绿底高亮)
+
+wireless.radio0
+  − channel  auto
+  + channel  149
+  − txpower  17
+  + txpower  20
+
+⚠ Changing LAN IP will disconnect your browser.
+[Cancel]   [Confirm & Apply]
+```
+
+### Step 64 — Speedtest 文件大小选择(50 / 200 / 500 / 1024 MB)
+
+**用户原话**："最好还是可以选择测速文件大小的。比如512MB,1GB,2GB"
+
+UI 在 speedtest-actions 加第二个 `<select>`,4 个预设:50 MB 快速 / 200 MB 默认 / 500 MB / 1 GB 完整。
+
+- `SIZE_PRESETS_MB` 表配 `dl` / `ul` (上行恒为下行一半,节省总测时) / `label` / `hint`
+- 选择持久化到 localStorage(`design-speedtest-size-v1`),下次直接复用
+- `testDownload(bytes)` / `testUpload(bytes)` 参数化,DOWNLOAD_BYTES/UPLOAD_BYTES 常量仅作默认值兜底
+- History entry 多记一个 `sizeLabel` 字段,后续 history UI 可用上
+
+不上 2 GB 预设的原因:
+- iOS Safari Blob 单次分配 ~2 GB 边缘
+- 1 GB 已能稳过 TCP slow-start 测稳态
+- CGI 端也得改(见 Step 65)
+
+### Step 65 — Download CGI clamp 200 MB → 1 GB
+
+Step 64 加了 500MB/1GB 预设,但 CGI 内部仍 `[ "$BYTES" -gt 209715200 ] && BYTES=209715200`,会**silent clamp** 到 200 MB。用户以为跑 1 GB,实际只跑 200 MB。
+
+提升 cap 到 1073741824 (1 GB exact)。Memory 不变(streaming dd 始终 ~64 KB),CPU 是唯一伸缩,/dev/urandom 在 x86_64 上 ~2 GB/s 所以 1 GB ≈ 0.5s CPU。ARM 老机器 30-60s,这一点写进 CGI 注释提醒。
+
+### Step 66 — `scripts/dev-tail.sh` 流路由器日志
+
+dev-sync 推代码上去了,页面不对劲,server 端日志是答案。新增 dev-tail.sh:
+
+```bash
+./scripts/dev-tail.sh              # 全量 logread -f
+./scripts/dev-tail.sh design       # 含 'design' 的行
+./scripts/dev-tail.sh error,fail   # 多 pattern grep
+```
+
+awk 内联上色:
+- 红粗:error/fail/denied/crash/segfault/panic
+- 黄:warn/timeout/retry/drop
+- 暗灰:其余
+
+推荐分屏:左 dev-sync,右 dev-tail。
+
+`doc/development.md` 同步加"配套工具"段。Phase 2 backlog 表里 dev-tail 移除(已 ship)。
+
+---
+
+## 📊 第十一轮（Step 63-66）累计
+
+| 指标 | 第十轮后 | 第十一轮后 |
+|---|---|---|
+| Diff modal 视觉相似度 vs preview §B4 | 扁平 row list | **分组卡 + 旧值红删除线 + 新值绿底** |
+| Speedtest 大小预设 | 硬编码 50/25 MB | **50/200/500/1024 MB + localStorage 记忆** |
+| Download CGI 上限 | 200 MB | **1 GB** |
+| Dev 工具 | dev-sync.sh | **dev-sync.sh + dev-tail.sh** |
+| 工具脚本数 | 1 | **2** |
+| Round 9 用户 explicit complaint 解决数 | 3/5 | **5/5**(全部覆盖) |
+
+
 
 
 
