@@ -208,6 +208,32 @@ sync_all() {
         " 2>/dev/null || true
     fi
 
+    # 6. First-boot scripts (Step 116: shipped via uci-defaults/).
+    #    ipk installs run these once at package install time; dev-sync
+    #    needs to mimic that or features that depend on the script's
+    #    side-effects (cron entry add, service enable, etc.) won't work
+    #    until the user manually flashes an ipk. NO --delete because
+    #    /etc/uci-defaults/ is shared with every package. After rsync we
+    #    explicitly run each script we shipped — they're designed to be
+    #    idempotent (grep-before-mutate pattern), so re-running on every
+    #    dev-sync is safe.
+    if [ -d "${PROJECT_ROOT}/root/etc/uci-defaults" ]; then
+        rsync -az --chmod=Fu=rwx,Fgo=rx \
+            --exclude='.DS_Store' \
+            "${PROJECT_ROOT}/root/etc/uci-defaults/" \
+            "${ROUTER}:/etc/uci-defaults/"
+        # Explicitly execute our managed first-boot scripts. Listing them
+        # by name (rather than `for f in /etc/uci-defaults/*`) avoids
+        # accidentally re-running unrelated scripts left there by other
+        # packages.
+        ssh "${SSH_OPTS[@]}" "$ROUTER" "
+            for f in /etc/uci-defaults/40_design-host-acct; do
+                [ -x \$f ] && \$f >/dev/null 2>&1
+            done
+            true
+        " 2>/dev/null || true
+    fi
+
     # Step 85 (Round 13): bust the router-side LuCI module cache so dispatch
     # tree / menu changes pick up. /tmp/luci-modulecache caches Lua module
     # loads — without removing it, header.htm template changes can serve
