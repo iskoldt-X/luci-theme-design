@@ -1783,7 +1783,18 @@ td > table > tbody > tr > td,
     box-shadow: var(--shadow-md);
 }
 
-/* —— Action / Save / Find / Reload（次主操作，蓝调）—— */
+/* —— Action / Save / Find / Reload（主操作，accent 绿）——
+ *
+ * Round 33 / Step 126:旧设计用 --color-info 蓝色作为"次主操作",
+ * 跟整套绿色 accent 系统脱节(Chrome-Claude 报告 Add 按钮 #60a5fa
+ * tailwind blue-400 跟侧栏 / overview tile 的 accent 绿冲突)。
+ *
+ * 改成 accent 绿统一品牌色。Save & Apply(.cbi-button-positive)依然
+ * 是同色但靠按钮大小 / box-shadow / "important" 变体在视觉上保留
+ * "最终确认行动"的地位 —— color 不再作为唯一的层级信号。
+ *
+ * 蓝色 --color-info token 保留(charts、 .cbi-section-descr 信息标
+ * 注、 ifacebadge info 状态等仍在用),只是不再用于按钮。 */
 .cbi-button-link,
 .cbi-input-find,
 .cbi-input-save,
@@ -1793,7 +1804,7 @@ td > table > tbody > tr > td,
 .cbi-input-reload,
 .cbi-button-reload,
 .cbi-button-action {
-    background-color: var(--color-info) !important;
+    background-color: var(--color-accent-500) !important;
     color: var(--color-text-onaccent) !important;
     border-color: transparent !important;
 }
@@ -1806,7 +1817,7 @@ td > table > tbody > tr > td,
 .cbi-input-reload:hover,
 .cbi-button-reload:hover,
 .cbi-button-action:hover {
-    background-color: #2563eb !important;
+    background-color: var(--color-accent-600) !important;
     transform: translateY(-1px);
     box-shadow: var(--shadow-md);
 }
