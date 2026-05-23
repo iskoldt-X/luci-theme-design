@@ -1012,9 +1012,25 @@ header > .fill > .container {
    the conventional topbar layout. DOM order is showSide → brand →
    indicators → cmdk → qa → theme, so margin-left:auto on .status
    absorbs all free space and shifts itself + the 3 icon buttons
-   that follow to the right. */
+   that follow to the right.
+
+   Step 135 (Round 35): added right padding + 1px subtle divider
+   between #indicators and the .cmdk/.quick-actions/.theme button
+   cluster. Visual semantic split:
+     left of divider  = status indicators (poll, uci-changes, etc.)
+     right of divider = action buttons (search, quick-actions, theme)
+   :not(:empty) skips the divider when #indicators has no children
+   (avoids an orphaned vertical line on pages where LuCI doesn't
+   render any status spans). */
 header > .fill > .container > .status {
 	margin-left: auto;
+	display: inline-flex;
+	align-items: center;
+}
+header > .fill > .container > .status:not(:empty) {
+	margin-right: var(--space-2);
+	padding-right: var(--space-3);
+	border-right: 1px solid var(--color-border-subtle);
 }
 
 header > .fill > .container > #logo {
