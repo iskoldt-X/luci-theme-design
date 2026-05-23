@@ -2466,15 +2466,45 @@ div.cbi-value > .cbi-value-description {
 	cursor: text;
 }
 
+/* Round 34 / Step 129 — .cbi-dynlist .item + ::after × 现代化
+ *
+ * SSH keys / Firewall rules / DHCP IP sets / NTP candidates 等 LuCI 动态
+ * 列表组件,Chrome-Claude 实证 ::after 红 × 按钮用 Bootstrap 3.3.7 时代的
+ * brand-danger #d9534f + 0 圆角,是全站唯一保留 BS3 配色的元素。
+ *
+ * .item 旧规则:
+ *   color: #666                              (hardcoded mid-gray)
+ *   border-bottom: 2px solid rgba(0,0,0,.26) (Material early-era 下划线)
+ *
+ * ::after 旧规则:
+ *   color: #fff
+ *   border: thin solid #d43f3a               (BS3 btn-danger 边框)
+ *   background-color: #d9534f                (BS3 brand-danger)
+ *   min-height: 17px; padding: 0 6px         (扁瘦 10.4×24)
+ *   border-radius: 0                         (全站独此一份直角)
+ *   无 hover / 无 transition
+ *
+ * 改造:.item 用 surface-1 卡片化 + subtle border,token 化 muted text;
+ * ::after 改成 24×24 圆角图标按钮,默认 subtle muted 透明,hover 时变
+ * danger 红色填充。保留 absolute right:-2em 布局(margin-right:2em 给它
+ * 预留位置),不动 dynlist 整体 reflow,降低回归风险。
+ */
 .cbi-dynlist > .item {
 	position: relative;
 	max-width: 25rem;
 	margin-right: 2em;
-	padding: .5em .25em .25em 0;
+	padding: var(--space-2) var(--space-3);
 	pointer-events: none;
-	color: #666;
-	border-bottom: 2px solid rgba(0, 0, 0, .26);
+	color: var(--color-text-muted);
+	background: var(--color-surface-1);
+	border: 1px solid var(--color-border-subtle);
+	border-radius: var(--radius-sm);
 	outline: 0;
+	transition: border-color 0.15s ease;
+}
+
+.cbi-dynlist > .item:hover {
+	border-color: color-mix(in srgb, var(--color-danger) 35%, var(--color-border-subtle));
 }
 
 .cbi-dynlist[name="sshkeys"] > .item {
@@ -2482,18 +2512,38 @@ div.cbi-value > .cbi-value-description {
 }
 
 .cbi-dynlist > .item::after {
-	font-weight: bold;
-	position: absolute;
-	right: -2em;
-	bottom: 0;
-	display: inline-flex;
-	min-height: 17px;
-	padding: 0 6px;
 	content: "\00D7";
+	position: absolute;
+	top: 50%;
+	right: -2em;
+	transform: translateY(-50%);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	font-size: var(--text-lg);
+	font-weight: var(--weight-medium);
+	line-height: 1;
+	color: var(--color-text-muted);
+	background: transparent;
+	border: 1px solid var(--color-border-subtle);
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	opacity: 0.6;
+	transition: opacity 0.15s ease, color 0.15s ease,
+	            background-color 0.15s ease, border-color 0.15s ease,
+	            transform 0.15s ease;
 	pointer-events: auto;
-	color: #fff;
-	border: thin solid #d43f3a;
-	background-color: #d9534f;
+}
+
+.cbi-dynlist > .item:hover::after {
+	opacity: 1;
+	color: var(--color-text-onaccent);
+	background-color: var(--color-danger);
+	border-color: var(--color-danger);
+	transform: translateY(-50%) scale(1.05);
 }
 
 .cbi-dynlist > .item > span {
