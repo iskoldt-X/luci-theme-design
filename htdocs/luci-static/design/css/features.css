@@ -1357,74 +1357,99 @@
 }
 
 .apply-diff-list {
-    max-height: 50vh;
+    max-height: 60vh;
     overflow-y: auto;
+    margin-bottom: var(--space-3);
+    /* No outer background — each group card brings its own */
+}
+
+/* Step 63: each group is a self-contained card with the config.section
+   name as a heading, matching upgrade-preview.html §B4. Rows within a
+   group are the actual + / − diff lines. */
+.apply-diff-group {
+    background: var(--color-surface-1);
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-md);
-    padding: var(--space-2);
-    background: var(--color-surface-1);
+    padding: var(--space-3);
     margin-bottom: var(--space-3);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
+}
+.apply-diff-group:last-child {
+    margin-bottom: 0;
 }
 
-.apply-diff-row {
+.apply-diff-group-head {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+    padding-bottom: var(--space-2);
+    margin-bottom: var(--space-2);
+    border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.apply-diff-group-body {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    gap: 3px;
+}
+
+/* Step 63: one row per +/− line. Background colour signals the op, mark
+   column gives a familiar diff-tool feel, key + val fill the rest. */
+.apply-diff-row {
+    display: grid;
+    grid-template-columns: 18px auto 1fr;
     gap: var(--space-2);
+    align-items: baseline;
     padding: 4px var(--space-2);
     border-radius: var(--radius-sm);
-    line-height: 1.5;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: 1.4;
     word-break: break-all;
-    flex-wrap: wrap;
 }
 
-.apply-diff-row:hover {
-    background: var(--color-surface-2);
+.apply-diff-row-add {
+    background: var(--color-success-bg);
+    color: var(--color-text);
 }
+
+.apply-diff-row-del {
+    background: var(--color-danger-bg);
+    color: var(--color-text-muted);
+    text-decoration: line-through;
+}
+
+.apply-diff-mark {
+    font-weight: var(--weight-bold);
+    text-align: center;
+}
+.apply-diff-row-add .apply-diff-mark { color: var(--color-success); }
+.apply-diff-row-del .apply-diff-mark { color: var(--color-danger); }
 
 .apply-diff-key {
     color: var(--color-text);
     font-weight: var(--weight-medium);
 }
 
-.apply-diff-val {
-    padding: 1px 6px;
-    border-radius: var(--radius-sm);
-    color: var(--color-text);
-}
-
-.apply-diff-add {
-    background: var(--color-success-bg);
-    color: var(--color-success);
-}
-
-.apply-diff-del {
-    background: var(--color-danger-bg);
-    color: var(--color-danger);
-    text-decoration: line-through;
-}
-
-.apply-diff-tag {
-    padding: 1px 6px;
-    border-radius: var(--radius-pill);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.apply-diff-tag.apply-diff-add {
+.apply-diff-row-del .apply-diff-key {
+    /* Don't strikethrough the key — only the value is "old". */
     text-decoration: none;
+    color: var(--color-text-muted);
 }
 
-.apply-diff-arrow {
-    color: var(--color-text-subtle);
+.apply-diff-val {
+    color: var(--color-text);
+    word-break: break-all;
 }
 
 .apply-diff-more {
     color: var(--color-text-muted);
     font-style: italic;
     text-align: center;
+    padding: var(--space-3);
+    background: var(--color-surface-1);
+    border-radius: var(--radius-md);
+    border: 1px dashed var(--color-border-default);
 }
 
 .apply-diff-warnings {

@@ -56,28 +56,54 @@ function detectDangers(changes) {
 	return hits;
 }
 
-// Format one uci change as a colored diff row.
-//   {config, section, option, old, value, op}
-// op: 'set' / 'add' / 'remove'
-function changeRow(c) {
-	var key = c.config + '.' + c.section + (c.option ? '.' + c.option : '');
-	var children = [
-		E('span', { 'class': 'apply-diff-key' }, key)
-	];
+// Step 63: redesigned diff row to match upgrade-preview.html §B4 — old/new
+// pairs as separate strikethrough/highlight rows rather than a single row
+// with arrow, grouped under config headers (handled by caller).
+//
+// op: 'set' (with optional .old populated by enrichChangesWithOldValues)
+//     'add' (new section, value = type name)
+//     'remove' (key wiped)
+//     'rename' / 'reorder' (rare; fall through to a simple "renamed to X" row)
+function changeRowsForOne(c) {
+	var keyPart = (c.option != null && c.option !== '')
+		? c.option
+		: (c.section || '(section)');
 
-	if (c.op === 'add') {
-		children.push(E('span', { 'class': 'apply-diff-tag apply-diff-add' }, _('new')));
-	} else if (c.op === 'remove') {
-		children.push(E('span', { 'class': 'apply-diff-tag apply-diff-del' }, _('removed')));
-	} else {
-		if (c.old !== undefined && c.old !== null && c.old !== '') {
-			children.push(E('span', { 'class': 'apply-diff-val apply-diff-del' }, String(c.old)));
-			children.push(E('span', { 'class': 'apply-diff-arrow' }, '→'));
-		}
-		children.push(E('span', { 'class': 'apply-diff-val apply-diff-add' }, String(c.value !== undefined ? c.value : '')));
+	function row(kind, mark, key, val) {
+		return E('div', { 'class': 'apply-diff-row apply-diff-row-' + kind }, [
+			E('span', { 'class': 'apply-diff-mark' }, mark),
+			E('span', { 'class': 'apply-diff-key' }, key),
+			val !== undefined
+				? E('span', { 'class': 'apply-diff-val' }, val)
+				: null
+		]);
 	}
 
-	return E('div', { 'class': 'apply-diff-row' }, children);
+	if (c.op === 'add') {
+		// New anonymous/named section. `value` is the section type.
+		return [ row('add', '+',
+			(c.section || '?') + (c.value ? ' [' + String(c.value) + ']' : ''),
+			_('new section')) ];
+	}
+	if (c.op === 'remove') {
+		return [ row('del', '−', keyPart, _('removed')) ];
+	}
+	if (c.op === 'rename') {
+		return [ row('add', '↻', keyPart, _('renamed to ') + String(c.value || '?')) ];
+	}
+	if (c.op === 'reorder') {
+		return [ row('add', '⇅', keyPart, _('reordered')) ];
+	}
+
+	// 'set' — show old → new as TWO rows when we have an old value
+	var rows = [];
+	if (c.old !== undefined && c.old !== null && c.old !== '' &&
+	    String(c.old) !== String(c.value)) {
+		rows.push(row('del', '−', keyPart, String(c.old)));
+	}
+	rows.push(row('add', '+', keyPart,
+		String(c.value !== undefined && c.value !== null ? c.value : '')));
+	return rows;
 }
 
 // Normalize LuCI's uci.changes() output into one flat array of {config, section, option, old, value, op}.
@@ -216,10 +242,7 @@ return baseclass.extend({
 
 	showDiff: function () {
 		var self = this;
-		// Step 54: changes is now retrieved via Promise (LuCI 26.x). The whole
-		// rest of showDiff used to assume sync access — which silently broke
-		// the diff modal because Object.keys(promise) === [] → 0 changes →
-		// "No pending changes" toast → bail.
+		// Step 54: changes is now retrieved via Promise (LuCI 26.x).
 		return getChangesPromise().then(function (raw) {
 			var changes = flattenChanges(raw);
 
@@ -228,19 +251,52 @@ return baseclass.extend({
 				return;
 			}
 
+			// Step 63: enrich every 'set' change with its old value from
+			// L.uci.values (the in-memory shadow of on-disk uci before our
+			// uci.set() calls). Lets us render proper diff rows showing
+			// old → new instead of just new. snapshotForUndo() uses the
+			// same source.
+			changes = self.enrichChangesWithOldValues(changes);
+
 			var dangers = detectDangers(changes);
 
 			// Step 45: capture pre-apply state for the Undo button. Must happen
-			// BEFORE apply — once L.uci.apply commits, the "old" values are gone
-			// from the in-memory shadow. snapshotForUndo() is defensive (returns
-			// {} if L.uci.values is unavailable on this LuCI version).
+			// BEFORE apply — once L.uci.apply commits, the "old" values are gone.
 			var snapshot = self.snapshotForUndo(changes);
 
-			// Build the modal body
-			var rows = changes.slice(0, 50).map(changeRow);
-			if (changes.length > 50) {
-				rows.push(E('div', { 'class': 'apply-diff-row apply-diff-more' },
-					_('… and %d more changes').replace('%d', changes.length - 50)));
+			// Step 63: group changes by config.section so the modal reads like
+			// the preview B4 viewer (one card per affected object instead of
+			// a flat firehose). Total count and danger warnings stay at the
+			// top/bottom respectively.
+			var grouped = self.groupChangesByConfigSection(changes);
+			var groupKeys = Object.keys(grouped);
+
+			var groupEls = [];
+			var rowBudget = 80;       // hard cap so the modal stays scrollable
+			var rowsRendered = 0;
+			var truncated = false;
+
+			for (var gi = 0; gi < groupKeys.length; gi++) {
+				if (rowsRendered >= rowBudget) { truncated = true; break; }
+				var gKey = groupKeys[gi];
+				var gChanges = grouped[gKey];
+				var groupRows = [];
+				for (var ci = 0; ci < gChanges.length; ci++) {
+					if (rowsRendered >= rowBudget) { truncated = true; break; }
+					var rowsForChange = changeRowsForOne(gChanges[ci]);
+					rowsForChange.forEach(function (r) { groupRows.push(r); });
+					rowsRendered++;
+				}
+				groupEls.push(E('div', { 'class': 'apply-diff-group' }, [
+					E('div', { 'class': 'apply-diff-group-head' }, gKey),
+					E('div', { 'class': 'apply-diff-group-body' }, groupRows)
+				]));
+			}
+
+			if (truncated) {
+				groupEls.push(E('div', { 'class': 'apply-diff-more' },
+					_('… and %d more changes (open Save & Apply in detail view to inspect)')
+						.replace('%d', changes.length - rowsRendered)));
 			}
 
 			var dangerEl = null;
@@ -254,7 +310,7 @@ return baseclass.extend({
 			ui.showModal(_('Apply pending changes?'), [
 				E('p', { 'class': 'apply-diff-summary' },
 					_('%d changes ready to apply.').replace('%d', changes.length)),
-				E('div', { 'class': 'apply-diff-list' }, rows),
+				E('div', { 'class': 'apply-diff-list' }, groupEls),
 				dangerEl,
 				E('div', { 'class': 'right' }, [
 					E('button', {
@@ -273,15 +329,58 @@ return baseclass.extend({
 			]);
 		}).catch(function (err) {
 			if (console && console.error) console.error('apply-modal: showDiff failed', err);
-			// Last-ditch fallback: surface the error and run the native modal
-			// rather than silently doing nothing.
 			toastSafe('error', _('Diff modal failed: ') + ((err && err.message) ? err.message : 'unknown'));
-			// Try original display fn — Step 58 renames this, but during
-			// rollout both names may coexist for one build.
 			var orig = L.ui && L.ui.changes && (
 				L.ui.changes.__designOriginalDisplay || L.ui.changes.__designOriginal);
 			if (orig) return orig.call(L.ui.changes);
 		});
+	},
+
+	// Step 63: enrich 'set' ops with the old value pulled from L.uci.values.
+	// Same data source as snapshotForUndo(); kept as a separate pass so
+	// downstream rendering (changeRowsForOne) gets a uniform record shape.
+	enrichChangesWithOldValues: function (changes) {
+		try {
+			var values = L.uci && L.uci.values;
+			if (!values) return changes;
+			return changes.map(function (c) {
+				if (c.op !== 'set' || !c.option) return c;
+				var cfg = values[c.config];
+				if (!cfg) return c;
+				var sec = cfg[c.section];
+				if (!sec) return c;
+				var old = sec[c.option];
+				if (old === undefined) return c;
+				// shallow clone so we don't mutate caller's array entry
+				var out = {};
+				for (var k in c) if (Object.prototype.hasOwnProperty.call(c, k)) out[k] = c[k];
+				out.old = old;
+				return out;
+			});
+		} catch (e) {
+			if (console && console.warn) console.warn('apply-modal: enrichChangesWithOldValues failed', e);
+			return changes;
+		}
+	},
+
+	// Step 63: group flattened changes by "config.section" so the modal can
+	// render one card per affected object. Group order is preserved as
+	// first-seen order (uci.changes generally clusters by config naturally).
+	groupChangesByConfigSection: function (changes) {
+		var groups = {};
+		var order = [];
+		changes.forEach(function (c) {
+			var key = c.config + (c.section ? '.' + c.section : '');
+			if (!groups[key]) {
+				groups[key] = [];
+				order.push(key);
+			}
+			groups[key].push(c);
+		});
+		// Return as ordered object via re-insertion (preserves order in modern JS)
+		var ordered = {};
+		order.forEach(function (k) { ordered[k] = groups[k]; });
+		return ordered;
 	},
 
 	// Step 45: capture pre-change values from the L.uci.values shadow.
