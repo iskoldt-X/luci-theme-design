@@ -185,6 +185,17 @@ sync_all() {
         "${PROJECT_ROOT}/root/www/cgi-bin/design/" \
         "${ROUTER}:/www/cgi-bin/design/"
 
+    # Step 85 (Round 13): bust the router-side LuCI module cache so dispatch
+    # tree / menu changes pick up. /tmp/luci-modulecache caches Lua module
+    # loads — without removing it, header.htm template changes can serve
+    # the previous render. Cheap (~10ms) and harmless if the path doesn't
+    # exist; uhttpd / LuCI regenerate on next request.
+    #
+    # NOT enough to fix browser HTTP cache (that needs Cmd+Shift+R or
+    # DevTools 'Disable cache' — see doc/development.md). But this rules
+    # out the server-side half of the equation.
+    ssh "${SSH_OPTS[@]}" "$ROUTER" "rm -rf /tmp/luci-modulecache /tmp/luci-cachelock /tmp/luci-indexcache 2>/dev/null; true" 2>/dev/null || true
+
     ended=$(date +%s)
     elapsed=$((ended - started))
     log "${GREEN}✓ synced${NC} in ${elapsed}s"
