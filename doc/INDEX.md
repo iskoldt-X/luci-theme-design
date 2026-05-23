@@ -5,6 +5,63 @@
 > read this file first to know **where to look for what** without reading
 > all 7,500 lines.
 
+---
+
+## 🚀 If you're a brand-new AI session continuing this project — START HERE
+
+User's kickoff message will probably be **one line** pointing to this file.
+Read it once, then orient yourself with the steps below. Don't read everything.
+
+### Required reading (~15 min, in order)
+
+1. **This section (you're here)** — current state, workflow, preferences
+2. **The 3 memory files** at `~/.claude/projects/-Users-nht435-GitHub-luci-theme-design/memory/` — should auto-load into your context. They cover non-obvious LuCI 26.x quirks: `L.uci.changes()` returns Promise; `network.device.status` is ACL-denied for browser RPC; Save&Apply uses `L.ui.changes.apply()` not `displayChanges()`. Knowing these saves hours.
+3. **`doc/styling-progress.md` LAST 2 ROUNDS** (search "## 🚀" or "## 🤝" headings, read the most recent 2-3) — current journal state. Don't try to read all 2500 lines.
+4. **`doc/development.md`** — the dev-sync.sh / dev-tail.sh workflow
+5. **`git log --oneline -15`** + **`git status`** — what shipped, what's uncommitted
+
+After that you should be able to function as if you'd been on the project all along.
+
+### Current state (snapshot — update this when work paces)
+
+- **Branch:** `js`. The default working branch. Direct commits OK, NEVER push to `origin` without explicit user permission.
+- **Rounds shipped:** 13 (Round 1 = initial cleanup, Round 13 = SVG namespace + CSS layout polish via Chrome-Claude agent collab)
+- **Steps shipped:** 85+ (each Step = one focused commit)
+- **What's in flight:** Chrome-Claude verification pass on Steps 83-85. User reports Chrome-Claude saw "19/42 SVGs in HTML namespace" — but I verified the router files ARE refactored correctly (mtimes recent). It's stale browser cache. User is being told to clear site data + hard refresh, then re-verify.
+
+### Working principles (these are durable, not snapshot)
+
+- **One Step = one commit** on `js`. Atomic. User can revert any Step independently. Match the existing Step numbering (currently 85, next Step is 86).
+- **dev-sync.sh is running on the user's Mac.** It watches the source tree and rsyncs every save to the router at 192.168.45.1 within ~1s. So you commit → it's on the device immediately. NO need to push to GitHub for testing. Push is only for CI validation / releases.
+- **Chrome-Claude is the field reporter.** User has Claude in Chrome extension installed; it inspects the live page (network / DOM / console) and reports back. Treat its findings as ground truth even when surprising — it has more visibility than you. Don't argue, just diagnose and fix.
+- **Static checks before commit:** `node --check` every .js file you touched, CSS brace balance via the inline Python snippet (`re.sub(r'/\\*.*?\\*/', '', src, flags=re.DOTALL); count { vs }`), `grep -rlP '\\x01'` to catch the Edit-tool's SOH-byte corruption (rare but happens). All three are in `.github/workflows/lint.yml`.
+- **Commit messages are long-form.** Open with a one-line summary, then 3-5 paragraphs explaining root cause + fix + verification. The journal in `styling-progress.md` re-uses this content. Look at recent commits for the format.
+- **Never push to origin without permission.** dev-sync handles all dev iteration. Push is a separate explicit action the user OK's. When you do push, the CI may fail on the size budget — re-tune in `.github/workflows/lint.yml` if so (precedent: Step 72 bumped JS budget 35→60 KB).
+- **Memory files auto-load.** When you save a new LuCI 26.x discovery, add a memory file under `~/.claude/projects/-Users-nht435-GitHub-luci-theme-design/memory/`. Always link related memories with `[[other-name]]`.
+
+### User preferences (durable)
+
+- **No Chinese i18n.** Even though user reads Chinese, they explicitly declined adding `.po` for theme strings. Source code stays English-only (`_('...')` wrappers around English).
+- **Target environment:** ImmortalWrt 24.10-SNAPSHOT / LuCI 26.x on x86/64 (QEMU at 192.168.45.1). Lean OpenWrt 18.06/19.07 is the "be universal" secondary target — defensive code patterns, but x86/64 24.10 is what we test against.
+- **User's role:** owner + verifier. They flash, observe, occasionally hand-relay Chrome-Claude's findings. They trust you to drive code/round planning.
+- **Round granularity:** 3-6 Steps per round. Each round ends with a clean recap. Don't blast 12 Steps in one turn without summary.
+
+### How to recognize you're done with a round
+
+- All identified bugs have a Step.
+- Each Step has its own commit on `js`.
+- `styling-progress.md` has a "Round NN" header + Step entries at the bottom.
+- Either: (a) user has verified, or (b) you've handed off a clear "verify list" message for them to relay to Chrome-Claude.
+
+### How to start a new round
+
+- Decide a theme (e.g. "Round 14 — Traffic Analysis preview parity").
+- Mark a chapter with the `mcp__ccd_session__mark_chapter` tool.
+- List Steps with risk + time estimate.
+- Ship.
+
+---
+
 ## 🎯 If you only have time for one file
 
 **`development.md`** — How to work on this theme locally. SSH + fswatch +
