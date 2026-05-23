@@ -259,20 +259,37 @@ jobs:
         # See doc/upgrade.md §6 "性能预算". Lighthouse CI would be the right
         # tool but requires a running LuCI instance. As a tractable proxy we
         # gzip-encode each asset class and verify the bundled size stays
-        # under the documented v2 budget. PRs that explode binary cost fail
+        # under the documented budget. PRs that explode binary cost fail
         # CI here instead of being noticed only at deploy time.
+        #
+        # Step 72 (Round 12, 2026-05-23): budgets bumped to reflect actual
+        # Round 1-11 growth. Originals were set in Step 38 (Round 6) when
+        # we had 3 LuCI modules + base CSS. Round 11 has 12 modules
+        # (wan-stats / cmdk / toast / sparkline / wan-hero / speedtest /
+        # devices / quick-actions / apply-modal / traffic / capability /
+        # i18n-debug) + features.css split.
+        #
+        # Justified increases:
+        #   js     35 → 60 KB  (currently 52 KB; 12 modules vs 3 originally)
+        #   css    35 → 45 KB  (currently 34 KB; features.css added)
+        #   cgi     5 →  8 KB  (added devstats + nlbw since Step 38)
+        #   sprite 15 → 20 KB  (icons.svg has grown from 16 to 38 symbols)
+        #   fonts  25 KB unchanged (no new web fonts; we use system stack)
+        #
+        # Headroom: 15-60% per category. Still tight enough to catch
+        # unintended bloat. Bumping further requires explicit justification.
         run: |
           python3 <<'PY'
           import gzip, glob, os, sys
 
           BUDGETS = {
               # category : (max gzipped bytes, glob patterns)
-              'css':   (35 * 1024, ['htdocs/luci-static/design/css/*.css']),
-              'js':    (35 * 1024, ['htdocs/luci-static/design/js/*.js',
+              'css':   (45 * 1024, ['htdocs/luci-static/design/css/*.css']),
+              'js':    (60 * 1024, ['htdocs/luci-static/design/js/*.js',
                                      'htdocs/luci-static/resources/*.js']),
               'fonts': (25 * 1024, ['htdocs/luci-static/design/fonts/*']),
-              'sprite':(15 * 1024, ['htdocs/luci-static/design/icons.svg']),
-              'cgi':   ( 5 * 1024, ['root/www/cgi-bin/design/*'])
+              'sprite':(20 * 1024, ['htdocs/luci-static/design/icons.svg']),
+              'cgi':   ( 8 * 1024, ['root/www/cgi-bin/design/*'])
           }
 
           fail = False
