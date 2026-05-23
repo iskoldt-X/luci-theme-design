@@ -16,6 +16,62 @@ function fmtBpsSplit(bps) {
 	return { num: (bps / 1e9).toFixed(2), unit: 'Gbps' };
 }
 
+// Step 50: protocol labels for the Connection field. On a DHCP-WAN router
+// w.getProtocol().getI18n() returns null on some LuCI builds because the
+// dhcp Protocol class's i18n string isn't loaded when our view runs (it's
+// registered by luci-app-network's view modules, which Overview doesn't
+// pull in). Fall back to the raw proto config value with a hand-picked
+// label table; fall further back to TitleCase of the raw string.
+var PROTO_LABELS = {
+	dhcp:         'DHCP',
+	static:       'Static IP',
+	pppoe:        'PPPoE',
+	pptp:         'PPTP',
+	l2tp:         'L2TP',
+	wireguard:    'WireGuard',
+	openvpn:      'OpenVPN',
+	'3g':         '3G',
+	qmi:          'QMI cellular',
+	ncm:          'NCM cellular',
+	mbim:         'MBIM cellular',
+	dhcpv6:       'DHCPv6',
+	'6in4':       '6in4 tunnel',
+	'6to4':       '6to4 tunnel',
+	'6rd':        '6rd tunnel',
+	gre:          'GRE',
+	vxlan:        'VXLAN',
+	wwan:         'WWAN',
+	modemmanager: 'ModemManager',
+	none:         'Unconfigured',
+	relay:        'Relay'
+};
+
+function getProtoLabel(w) {
+	try {
+		var p = (typeof w.getProtocol === 'function') ? w.getProtocol() : null;
+		// Try the localized i18n label first — works when network-view loaded
+		if (p && typeof p.getI18n === 'function') {
+			var i18n = p.getI18n();
+			if (i18n) return i18n;
+		}
+		// Fall back: the raw proto name. Some Protocol classes expose it
+		// directly, but worst case w.get('proto') reads it from uci.
+		var raw = null;
+		if (p && typeof p.getProtocol === 'function') {
+			raw = p.getProtocol();
+		}
+		if (!raw && typeof w.get === 'function') {
+			raw = w.get('proto');
+		}
+		if (raw) {
+			return PROTO_LABELS[raw] || (String(raw).charAt(0).toUpperCase() + String(raw).slice(1));
+		}
+	} catch (e) {
+		if (console && console.warn) console.warn('wan-hero: getProtoLabel failed:', e);
+	}
+	return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // WAN Hero card — upgrade.md §2.A1
 //
@@ -236,9 +292,12 @@ return baseclass.extend({
 					return (v6 && v6.length) ? v6[0].split('/')[0] : '—';
 				}, '—');
 
+			// Step 50: proto fallback chain via getProtoLabel() — handles the
+			// LuCI 26.x case where w.getProtocol().getI18n() returns null on
+			// the Overview page (proto i18n strings registered by network-view
+			// only, which we don't load).
 			document.getElementById('wan-hero-proto').textContent = safe(function () {
-				var p = w.getProtocol();
-				return p ? p.getI18n() : null;
+				return getProtoLabel(w);
 			}, '—');
 
 			document.getElementById('wan-hero-uptime').textContent = safe(function () {

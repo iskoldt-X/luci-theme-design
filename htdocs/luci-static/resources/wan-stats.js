@@ -31,11 +31,48 @@
 
 var POLL_INTERVAL_MS = 2000;
 
+// Step 50: declare both no-args (all devices) and per-device variants.
+// LuCI 26.x's network.device.status response shape varies between builds —
+// sometimes flat {ethN: {...}}, sometimes wrapped {'': {...}} from rpc's
+// expect normalization. We try the all-devices call first, and if the
+// target device isn't in the response we fall back to a per-device
+// status call (rarely takes a different shape).
 var deviceStatusAll = rpc.declare({
 	object: 'network.device',
-	method: 'status',
-	expect: { '': {} }
+	method: 'status'
+	// no `expect` — we want the raw response object so we can probe its
+	// shape defensively in pickDeviceStats() below.
 });
+
+var deviceStatusOne = rpc.declare({
+	object: 'network.device',
+	method: 'status',
+	params: ['name']
+});
+
+// Probe a deviceStatus response (either-shape) for a specific device entry
+// that has rx_bytes/tx_bytes counters under .statistics. Returns the entry
+// object or null. The four shapes we've seen across LuCI versions:
+//   1. { 'eth1': { up, statistics } }                    — common 24.10
+//   2. { '': { 'eth1': { ... } } }                       — expect-wrapped
+//   3. { devices: { 'eth1': { ... } } }                  — older variant
+//   4. { up, statistics }                                 — per-device call
+function pickDeviceStats(response, deviceName) {
+	if (!response || typeof response !== 'object') return null;
+	// Shape 4: per-device direct
+	if (response.statistics) return response;
+	// Shape 1
+	if (response[deviceName] && response[deviceName].statistics) return response[deviceName];
+	// Shape 2
+	if (response[''] && response[''][deviceName] && response[''][deviceName].statistics) return response[''][deviceName];
+	// Shape 3
+	if (response.devices && response.devices[deviceName] && response.devices[deviceName].statistics) return response.devices[deviceName];
+	return null;
+}
+
+function warn(msg, obj) {
+	if (console && console.warn) console.warn('wan-stats: ' + msg, obj === undefined ? '' : obj);
+}
 
 // Singleton state — module-private
 var state = {
@@ -66,6 +103,31 @@ function emit(data) {
 	});
 }
 
+// Step 50: shared post-stats processor. Diffs counters vs lastSample,
+// emits rate, anchors next sample. Pulled out so both the all-devices
+// path and the per-device fallback feed into the same code.
+function processStats(s) {
+	var now = Date.now();
+	var rx  = parseInt((s.statistics && s.statistics.rx_bytes) || 0, 10);
+	var tx  = parseInt((s.statistics && s.statistics.tx_bytes) || 0, 10);
+
+	if (state.lastSample) {
+		var dt  = (now - state.lastSample.t) / 1000;
+		var drx = rx - state.lastSample.rx;
+		var dtx = tx - state.lastSample.tx;
+		// Counter wrap or device reset → skip this delta, anchor again
+		if (dt > 0 && drx >= 0 && dtx >= 0) {
+			emit({
+				rxBps:      drx / dt,
+				txBps:      dtx / dt,
+				deviceName: state.wanDevice,
+				online:     s.up !== false
+			});
+		}
+	}
+	state.lastSample = { t: now, rx: rx, tx: tx };
+}
+
 function poll() {
 	// Re-detect if we lost the device (e.g. WAN was down at page load, now up)
 	if (!state.wanDevice) {
@@ -81,38 +143,45 @@ function poll() {
 		});
 	}
 
+	// Try the all-devices call first (one RPC fetches stats for every iface)
 	return deviceStatusAll().then(function (statuses) {
-		var s = statuses && statuses[state.wanDevice];
-		if (!s || !s.statistics) {
-			emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: false });
+		var s = pickDeviceStats(statuses, state.wanDevice);
+		if (s) {
+			processStats(s);
 			return;
 		}
-		var now = Date.now();
-		var rx  = parseInt(s.statistics.rx_bytes || 0, 10);
-		var tx  = parseInt(s.statistics.tx_bytes || 0, 10);
-
-		if (state.lastSample) {
-			var dt = (now - state.lastSample.t) / 1000;
-			var drx = rx - state.lastSample.rx;
-			var dtx = tx - state.lastSample.tx;
-			// Counter wrap or device reset → skip this delta, anchor again
-			if (dt > 0 && drx >= 0 && dtx >= 0) {
-				emit({
-					rxBps:      drx / dt,
-					txBps:      dtx / dt,
-					deviceName: state.wanDevice,
-					online:     s.up !== false
-				});
+		// All-devices response didn't contain our device under any known
+		// shape — try a targeted single-device query, which on some LuCI
+		// builds uses a different (flatter) response shape.
+		warn('all-devices response missing ' + state.wanDevice + ', trying single-device', statuses);
+		return deviceStatusOne(state.wanDevice).then(function (resp) {
+			var s2 = pickDeviceStats(resp, state.wanDevice);
+			if (s2) {
+				processStats(s2);
+			} else {
+				warn('single-device response also missing statistics', resp);
+				emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: false });
 			}
-		}
-		state.lastSample = { t: now, rx: rx, tx: tx };
-	}).catch(function () {
-		// Don't clobber a known-good lastEmit on transient RPC failure — the
-		// ring buffers in sparkline.js handle gaps gracefully.
-		emit({
-			rxBps: null, txBps: null,
-			deviceName: state.wanDevice,
-			online: null
+		}).catch(function (err) {
+			warn('single-device call failed', err);
+			emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: false });
+		});
+	}).catch(function (err) {
+		// All-devices call itself rejected (rpcd down, permissions, etc).
+		// Try single-device as a last resort — same RPC method, sometimes
+		// works when the all-devices form doesn't (rare but seen).
+		warn('all-devices call failed, trying single-device', err);
+		return deviceStatusOne(state.wanDevice).then(function (resp) {
+			var s = pickDeviceStats(resp, state.wanDevice);
+			if (s) {
+				processStats(s);
+			} else {
+				warn('single-device also failed', resp);
+				emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: null });
+			}
+		}).catch(function (err2) {
+			warn('both calls failed', err2);
+			emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: null });
 		});
 	});
 }
