@@ -2920,7 +2920,15 @@ input[name="nslookup"] {
     overflow: hidden;
 }
 
-/* 背景：两个柔和的强调色径向辉光 */
+/* 背景：柔和的强调色径向辉光。
+   Step 101 (Round 19): switched from an asymmetric pair (20%/25% +
+   80%/75%) to a single centered radial. Chrome-Claude's geometry
+   audit found that the bright top-left glow visually anchored the
+   eye away from the form's centerline, exaggerating Step 100's
+   11 px offset by an order of magnitude in perceived skew. A single
+   centered radial leaves no off-axis bright spot, so any sub-pixel
+   geometric drift simply disappears into "the page has a soft
+   accent backdrop". */
 .node-main-login::before {
     content: '';
     position: fixed;
@@ -2928,10 +2936,8 @@ input[name="nslookup"] {
     pointer-events: none;
     z-index: 0;
     background-image:
-        radial-gradient(circle at 20% 25%,
-            var(--color-accent-500-12) 0%, transparent 45%),
-        radial-gradient(circle at 80% 75%,
-            var(--color-accent-500-12) 0%, transparent 50%);
+        radial-gradient(circle at 50% 40%,
+            var(--color-accent-500-12) 0%, transparent 55%);
 }
 
 .node-main-login header,
@@ -2942,6 +2948,18 @@ input[name="nslookup"] {
 
 .node-main-login > .main > .main-right {
     width: 100%;
+    /* Step 100 (Round 19): menu-design.js sets `.main-right { overflow:
+       auto }` for the dashboard scroll behaviour. On the login page,
+       the form fits comfortably in 100vh and never needs scrolling —
+       but the browser still reserves ~11 px of scrollbar gutter,
+       which shrinks #maincontent's content-box and pushes the
+       horizontally-centered form 5-6 px left of dead-center. Chrome-
+       Claude's geometry audit caught this as 315 px left margin vs
+       326 px right margin (11 px asymmetry).
+       Force overflow:visible here to defeat the runtime style override
+       — wins via specificity. Login page is short, no real need to
+       scroll the .main-right container. */
+    overflow: visible !important;
 }
 
 .node-main-login > .main #maincontent {
@@ -2953,6 +2971,10 @@ input[name="nslookup"] {
     padding: var(--space-5);
     position: relative;
     z-index: 1;
+    /* Step 100 belt-and-suspenders: explicit 100% width prevents any
+       inherited width:calc(100% - <sidebar-width>) rule (intended for
+       dashboard layout) from accidentally narrowing this container. */
+    width: 100%;
 }
 
 .node-main-login > .main #maincontent > .container {
