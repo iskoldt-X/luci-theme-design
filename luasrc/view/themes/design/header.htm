@@ -30,6 +30,40 @@
 	local node = disp.context.dispatched
 	local path = table.concat(disp.context.path, "-")
 
+	-- Step 87 (Round 14): per-deploy cache-buster token used on all
+	-- theme-asset `?v=` URLs below.
+	--
+	-- Why: LuCI's default cache-buster is `ver.luciversion` (e.g.
+	-- "26.136.30825~c9cbaea") which only changes when LuCI itself
+	-- upgrades. That means every dev-sync rsync writes new JS/CSS but
+	-- the browser keeps serving cached copies — confirmed by Chrome-
+	-- Claude's Round-13 verify pass where 6 separate iterations on the
+	-- storage-wrap CSS rule appeared to "do nothing" until a manual
+	-- hard refresh. Real cost: ~6 wasted Steps.
+	--
+	-- How: scripts/dev-sync.sh writes /tmp/luci-design.cachebust on the
+	-- router after each successful rsync. We read it here and append
+	-- to our asset URLs. End users (no dev-sync file) fall back to
+	-- ver.luciversion, identical to pre-Step-87 behaviour. /tmp is
+	-- tmpfs (RAM) so reboot wipes it — that's fine, falls back cleanly.
+	--
+	-- Bonus: line 71 also gets `cb` instead of `ver.luciversion`. LuCI's
+	-- own luci.js extracts `?v=...` from its own <script src=...> at
+	-- bootstrap and uses that value as `env.resource_version` for ALL
+	-- `L.require()` calls — so this single change cascades through
+	-- every theme module loaded via L.require (cmdk, sparkline,
+	-- speedtest, devices, traffic, ...). Verified by reading luci.js
+	-- on the router (lines ~142 + ~160).
+	local cb = ver.luciversion
+	do
+		local fd = io.open("/tmp/luci-design.cachebust", "r")
+		if fd then
+			local v = fd:read("*l")
+			fd:close()
+			if v and #v > 0 then cb = v end
+		end
+	end
+
 	http.prepare_content("text/html; charset=UTF-8")
 -%>
 <!DOCTYPE html>
@@ -55,20 +89,20 @@
 	<link rel="apple-touch-icon" sizes="192x192" href="<%=media%>/images/icon.png">
 	<link rel="shortcut icon" type="image/png" href="<%=media%>/images/icon.png">
 
-	<link rel="stylesheet" href="<%=media%>/css/style.css?v=<%= ver.luciversion %>">
+	<link rel="stylesheet" href="<%=media%>/css/style.css?v=<%= cb %>">
 	<%# Step 67 (Round 11): features.css used to be @import-ed from the end
 	    of style.css. CSS spec says @import must come BEFORE all other rules
 	    — Edge/Chrome stopped honouring our trailing @import on 2026-05-23,
 	    breaking every feature card on Overview. Loading via a separate
 	    <link> tag is spec-compliant, parallel-loadable, and faster. -%>
-	<link rel="stylesheet" href="<%=media%>/css/features.css?v=<%= ver.luciversion %>">
+	<link rel="stylesheet" href="<%=media%>/css/features.css?v=<%= cb %>">
 	<% if node and node.css then %>
 	<link rel="stylesheet" href="<%=resource%>/<%=node.css%>">
 	<% end -%>
 
 	<script src="<%=url('admin/translations', luci.i18n.context.lang)%><%# ?v=PKG_VERSION %>"></script>
 	<script src="<%=resource%>/cbi.js"></script>
-	<script src="<%=resource%>/luci.js?v=<%=ver.luciversion%>"></script>
+	<script src="<%=resource%>/luci.js?v=<%=cb%>"></script>
 	<% if css then %>
 	<style title="text/css">
 		<%= css %>
@@ -133,4 +167,4 @@
 				</noscript>
 
 				<div id="tabmenu" style="display:none"></div>
-	<script src="<%=media%>/js/style.js?v=<%=ver.luciversion%>"></script>
+	<script src="<%=media%>/js/style.js?v=<%=cb%>"></script>

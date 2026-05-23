@@ -191,10 +191,24 @@ sync_all() {
     # the previous render. Cheap (~10ms) and harmless if the path doesn't
     # exist; uhttpd / LuCI regenerate on next request.
     #
-    # NOT enough to fix browser HTTP cache (that needs Cmd+Shift+R or
-    # DevTools 'Disable cache' — see doc/development.md). But this rules
-    # out the server-side half of the equation.
-    ssh "${SSH_OPTS[@]}" "$ROUTER" "rm -rf /tmp/luci-modulecache /tmp/luci-cachelock /tmp/luci-indexcache 2>/dev/null; true" 2>/dev/null || true
+    # Step 87 (Round 14): also write /tmp/luci-design.cachebust with the
+    # current epoch. header.htm reads this and uses it as the `?v=` token
+    # on style.css / features.css / style.js / luci.js. Because LuCI's
+    # luci.js extracts `env.resource_version` from its own <script src>
+    # ?v= suffix at bootstrap, the same epoch propagates to every JS
+    # module loaded via `L.require(...)` — cmdk, sparkline, speedtest,
+    # devices, traffic, quick-actions, apply-modal, wan-stats, wan-hero.
+    # End users (no /tmp file → header.htm falls back to luciversion)
+    # are unaffected. /tmp is tmpfs so reboot cleans up.
+    #
+    # Browser HTTP cache (the real Round-13 tarpit) is now fixed at the
+    # server side: each rsync produces a fresh `?v=<epoch>` on every
+    # theme asset URL. Hard refresh / 'Disable cache' no longer needed.
+    ssh "${SSH_OPTS[@]}" "$ROUTER" "
+        rm -rf /tmp/luci-modulecache /tmp/luci-cachelock /tmp/luci-indexcache 2>/dev/null
+        date +%s > /tmp/luci-design.cachebust 2>/dev/null
+        true
+    " 2>/dev/null || true
 
     ended=$(date +%s)
     elapsed=$((ended - started))
