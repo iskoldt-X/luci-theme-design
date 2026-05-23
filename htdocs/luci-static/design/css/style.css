@@ -4111,6 +4111,13 @@ td.cbi-button, .cbi-button-apply,
     }
 }
 
-/* Phase 1-4 feature rules — kept in a separate file for maintainability.
-   See docs/upgrade.md §4.C1 (CSS split). */
-@import url("./features.css");
+/* Step 67 (Round 11): features.css is loaded via a separate <link> tag
+   in luasrc/view/themes/design/header.htm — NOT via @import here.
+   The CSS spec requires @import to precede all other rules; browsers
+   silently ignore @import-at-end past various heuristics, and on
+   2026-05-23 Edge/Chrome stopped honouring this one entirely (every
+   feature card disappeared from Overview while LuCI cbi-section base
+   styles still applied — clear sign of the import being dropped).
+   The separate <link> approach is spec-compliant, parallel-loadable,
+   and faster. The cascade order is preserved because the link tag
+   in header.htm sits AFTER the style.css link. */

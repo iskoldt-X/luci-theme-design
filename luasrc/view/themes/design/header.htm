@@ -56,6 +56,12 @@
 	<link rel="shortcut icon" type="image/png" href="<%=media%>/images/icon.png">
 
 	<link rel="stylesheet" href="<%=media%>/css/style.css?v=<%= ver.luciversion %>">
+	<%# Step 67 (Round 11): features.css used to be @import-ed from the end
+	    of style.css. CSS spec says @import must come BEFORE all other rules
+	    — Edge/Chrome stopped honouring our trailing @import on 2026-05-23,
+	    breaking every feature card on Overview. Loading via a separate
+	    <link> tag is spec-compliant, parallel-loadable, and faster. -%>
+	<link rel="stylesheet" href="<%=media%>/css/features.css?v=<%= ver.luciversion %>">
 	<% if node and node.css then %>
 	<link rel="stylesheet" href="<%=resource%>/<%=node.css%>">
 	<% end -%>
