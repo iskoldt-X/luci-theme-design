@@ -184,30 +184,56 @@ return baseclass.extend({
 			}
 			self.buildDropdown();
 
+			// Step 134 (Round 35): LEFT-anchored positioning.
+			//
+			// History: Step 51 used right:0 to keep the panel inside the
+			// header's right gutter. Step 95 (Round 18) added rAF clamp to
+			// fix narrow-viewport LEFT-edge overflow. But both assumed the
+			// trigger sits in the FAR RIGHT of the header.
+			//
+			// Reality (Chrome-Claude Round-35 audit): trigger is in the
+			// LEFT 1/4 of the header (x=316), header is ~700px wide. With
+			// right-anchor, the 280px dropdown's right edge aligns with
+			// trigger's right edge, putting the dropdown LEFT edge at x=72
+			// — that's UNDER THE BRAND LOGO, not under the trigger.
+			// Measured drift: dropdown center off-by -122px from trigger
+			// center. User-perceived "menu belongs to trigger" link broken.
+			//
+			// Switching to LEFT-anchor (rect.left → dropdown.style.left)
+			// is the shadcn/Radix/Mantine popper default. Dropdown's left
+			// edge follows the trigger's left edge, so it "slides out from
+			// below" the trigger naturally.
+			//
+			// rAF clamp now handles BOTH edges:
+			//   right-overflow: shift left so dropdown fits within
+			//                   viewport - VIEWPORT_MARGIN buffer
+			//   left-overflow:  defensive, should never trigger with
+			//                   standard header layouts but guards corner
+			//                   cases of very narrow viewports.
 			var rect = self.trigger.getBoundingClientRect();
-			self.dropdown.style.top  = (rect.bottom + 4) + 'px';
-			self.dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+			var GAP = 6;
+			var VIEWPORT_MARGIN = 8;
+
+			self.dropdown.style.top = (rect.bottom + GAP) + 'px';
+			self.dropdown.style.right = 'auto';
+			self.dropdown.style.left = rect.left + 'px';
 			self.dropdown.classList.add('open');
 
-			// Step 95 (Round 18): edge-collision clamp. The right-anchored
-			// positioning above pins the dropdown's right edge to align with
-			// the trigger's right edge — fine on desktop, but on narrow
-			// viewports (≤480 px) the 280-px-wide panel hangs off the LEFT
-			// edge of the screen, hiding most of its options. Chrome-Claude
-			// Round-17 responsive sweep caught this at vw=199.
-			//
-			// Fix: defer to next frame so the dropdown has been laid out
-			// with its actual width (after CSS `max-width: calc(100vw - 16px)`
-			// in Step 95's features.css change kicks in), then if its left
-			// edge is <8 px from the viewport, shift `right` so left lands
-			// at exactly 8 px.
 			requestAnimationFrame(function () {
 				if (!self.dropdown) return;
 				var ddRect = self.dropdown.getBoundingClientRect();
-				if (ddRect.left < 8) {
-					self.dropdown.style.right =
-						Math.max(8, window.innerWidth - 8 - ddRect.width) + 'px';
+				var dropdownWidth = ddRect.width;
+				var idealLeft = rect.left;
+
+				// Right-overflow guard (typical narrow-viewport case)
+				if (idealLeft + dropdownWidth > window.innerWidth - VIEWPORT_MARGIN) {
+					idealLeft = window.innerWidth - dropdownWidth - VIEWPORT_MARGIN;
 				}
+				// Left-overflow guard (defensive corner case)
+				if (idealLeft < VIEWPORT_MARGIN) {
+					idealLeft = VIEWPORT_MARGIN;
+				}
+				self.dropdown.style.left = idealLeft + 'px';
 			});
 		});
 	},
