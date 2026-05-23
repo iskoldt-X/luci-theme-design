@@ -113,6 +113,9 @@ return baseclass.extend({
 		this.injectCard();
 	},
 
+	// Step 52: rebuilt to match upgrade-preview.html §A5 — two semicircle
+	// gauges for download/upload (SVG arc with stroke-dashoffset animation)
+	// + 3 small stat cards for latency / jitter / loss.
 	injectCard: function () {
 		var self = this;
 		var card = E('div', { 'class': 'speedtest-card', 'id': 'speedtest-card' }, [
@@ -122,23 +125,16 @@ return baseclass.extend({
 				E('span', { 'class': 'speedtest-title' }, _('Wi-Fi / LAN Link Test')),
 				E('span', { 'class': 'speedtest-meta' }, _('Browser ↔ router'))
 			]),
-			E('div', { 'class': 'speedtest-results', 'id': 'speedtest-results' }, [
-				E('div', { 'class': 'speedtest-stat' }, [
-					E('div', { 'class': 'speedtest-stat-label' }, _('Download')),
-					E('div', { 'class': 'speedtest-stat-value', 'id': 'st-download' }, '—')
-				]),
-				E('div', { 'class': 'speedtest-stat' }, [
-					E('div', { 'class': 'speedtest-stat-label' }, _('Upload')),
-					E('div', { 'class': 'speedtest-stat-value', 'id': 'st-upload' }, '—')
-				]),
-				E('div', { 'class': 'speedtest-stat' }, [
-					E('div', { 'class': 'speedtest-stat-label' }, _('Latency')),
-					E('div', { 'class': 'speedtest-stat-value', 'id': 'st-latency' }, '—')
-				]),
-				E('div', { 'class': 'speedtest-stat' }, [
-					E('div', { 'class': 'speedtest-stat-label' }, _('Jitter')),
-					E('div', { 'class': 'speedtest-stat-value', 'id': 'st-jitter' }, '—')
-				])
+			// Step 52: 2 semicircle gauges (download / upload)
+			E('div', { 'class': 'speedtest-gauges' }, [
+				this.makeGauge('download', _('Download'), 'st-down-num', '↓'),
+				this.makeGauge('upload',   _('Upload'),   'st-up-num',   '↑')
+			]),
+			// Step 52: 3 small stat cards under the gauges
+			E('div', { 'class': 'speedtest-stats' }, [
+				this.makeStat(_('Latency'), 'st-latency', 'ms'),
+				this.makeStat(_('Jitter'),  'st-jitter',  'ms'),
+				this.makeStat(_('Loss'),    'st-loss',    '%')
 			]),
 			E('div', { 'class': 'speedtest-actions' }, [
 				// Step 46: label select lets the user tag the run so history
@@ -156,13 +152,12 @@ return baseclass.extend({
 				]),
 				E('button', {
 					'type':  'button',
-					'class': 'cbi-button cbi-button-action speedtest-run',
+					'class': 'cbi-button cbi-button-action cbi-button-positive speedtest-run',
 					'id':    'speedtest-run',
 					'click': L.bind(this.runTest, this)
 				}, _('Run test'))
 			]),
 			// Step 46: history strip below the actions, hidden if empty.
-			// Rendered on inject and after every successful run.
 			E('div', { 'class': 'speedtest-history', 'id': 'speedtest-history' }, [])
 		]);
 		var view = document.getElementById('view');
@@ -171,43 +166,122 @@ return baseclass.extend({
 		this.renderHistory();
 	},
 
+	// Step 52: build one gauge — semicircle SVG track + animated bar +
+	// big text below with arrow + number + unit. valueId is the span id
+	// for setGauge() to update.
+	makeGauge: function (kind, label, valueId, arrow) {
+		// Arc path: M 20,100 A 80,80 0 0 1 180,100 — semicircle, radius 80,
+		// total path length ≈ 251 (π × 80). dasharray=251 dashoffset=251 →
+		// fully hidden, animate to dashoffset=0 for full.
+		return E('div', { 'class': 'speedtest-gauge speedtest-gauge-' + kind }, [
+			E('div', { 'class': 'speedtest-gauge-label' }, label),
+			E('svg', {
+				'class':   'speedtest-gauge-svg',
+				'viewBox': '0 0 200 110',
+				'preserveAspectRatio': 'xMidYMid meet',
+				'aria-hidden': 'true'
+			}, [
+				E('path', {
+					'class': 'speedtest-gauge-track',
+					'd':     'M 20,100 A 80,80 0 0 1 180,100'
+				}),
+				E('path', {
+					'class':              'speedtest-gauge-bar',
+					'id':                 'st-bar-' + kind,
+					'd':                  'M 20,100 A 80,80 0 0 1 180,100',
+					'stroke-dasharray':   '251',
+					'stroke-dashoffset':  '251'
+				})
+			]),
+			E('div', { 'class': 'speedtest-gauge-value' }, [
+				E('span', { 'class': 'speedtest-gauge-arrow' }, arrow),
+				E('span', { 'class': 'speedtest-gauge-num', 'id': valueId }, '—'),
+				E('span', { 'class': 'speedtest-gauge-unit' }, ' Mbps')
+			])
+		]);
+	},
+
+	// Step 52: build one small stat card (latency / jitter / loss).
+	makeStat: function (label, valueId, unit) {
+		return E('div', { 'class': 'speedtest-stat' }, [
+			E('div', { 'class': 'speedtest-stat-label' }, label),
+			E('div', { 'class': 'speedtest-stat-value' }, [
+				E('span', { 'id': valueId }, '—'),
+				E('span', { 'class': 'speedtest-stat-unit' }, ' ' + unit)
+			])
+		]);
+	},
+
+	// Step 52: update one gauge — both the SVG bar (stroke-dashoffset)
+	// and the value text. mbps=null means "reset to —".
+	// SCALE_MBPS picks the dashoffset scale: 1000 Mbps = full bar.
+	// Linear; sub-Gbps connections will look proportional. Could switch
+	// to log scale later if users with 10 Mbps WAN report the gauge
+	// feels empty.
+	setGauge: function (kind, mbps) {
+		var SCALE_MBPS = 1000;
+		var bar  = document.getElementById('st-bar-' + kind);
+		var num  = document.getElementById('st-' + (kind === 'download' ? 'down' : 'up') + '-num');
+		if (bar) {
+			var progress = (mbps === null || !isFinite(mbps))
+				? 0
+				: Math.min(1, Math.max(0, mbps / SCALE_MBPS));
+			var offset = 251 * (1 - progress);
+			bar.setAttribute('stroke-dashoffset', offset.toFixed(1));
+		}
+		if (num) {
+			num.textContent = (mbps === null || !isFinite(mbps)) ? '—' : mbps.toFixed(1);
+		}
+	},
+
 	runTest: function () {
 		var btn = document.getElementById('speedtest-run');
 		btn.disabled = true;
 		var self = this;
 
-		this.setStat('download', '—');
-		this.setStat('upload', '—');
+		// Step 52: reset both gauges + stats to '—' at the start of a run.
+		this.setGauge('download', null);
+		this.setGauge('upload',   null);
 		this.setStat('latency', '—');
-		this.setStat('jitter', '—');
+		this.setStat('jitter',  '—');
+		this.setStat('loss',    '—');
 
 		// Step 46: capture label + results so we can save a history entry on
 		// success. Initialised as null sentinels; written inside each phase.
 		var labelEl = document.getElementById('speedtest-label');
 		var label   = labelEl ? labelEl.value : 'Other';
-		var result  = { t: Date.now(), label: label, latency: null, jitter: null, download: null, upload: null };
+		var result  = {
+			t: Date.now(), label: label,
+			latency: null, jitter: null, loss: null,
+			download: null, upload: null
+		};
 
 		btn.textContent = _('Testing latency (%d samples)…').replace('%d', PING_COUNT);
 
 		this.testLatency()
 			.then(function (l) {
 				if (l.median !== null) {
-					self.setStat('latency', l.median.toFixed(1) + ' ms');
-					self.setStat('jitter',  l.jitter.toFixed(1) + ' ms');
+					self.setStat('latency', l.median.toFixed(1));
+					self.setStat('jitter',  l.jitter.toFixed(1));
 					result.latency = l.median;
 					result.jitter  = l.jitter;
 				}
+				// Step 52: loss tracked even when no successful samples,
+				// so user sees 100% rather than '—' when CGI unreachable.
+				self.setStat('loss', l.loss.toFixed(0));
+				result.loss = l.loss;
+
 				btn.textContent = _('Testing download (%d MB)…').replace('%d', DOWNLOAD_BYTES / 1024 / 1024);
 				return self.testDownload();
 			})
 			.then(function (mbps) {
-				self.setStat('download', mbps !== null ? mbps.toFixed(1) + ' Mbps' : _('error'));
+				self.setGauge('download', mbps);
 				if (mbps !== null) result.download = mbps;
 				btn.textContent = _('Testing upload (%d MB)…').replace('%d', UPLOAD_BYTES / 1024 / 1024);
 				return self.testUpload();
 			})
 			.then(function (mbps) {
-				self.setStat('upload', mbps !== null ? mbps.toFixed(1) + ' Mbps' : _('error'));
+				self.setGauge('upload', mbps);
 				if (mbps !== null) result.upload = mbps;
 
 				// Step 46: persist + refresh history list. Only save if at
@@ -272,15 +346,27 @@ return baseclass.extend({
 	},
 
 	testLatency: function () {
-		var samples = [];
+		// Step 52: track packet loss (failed pings as % of total) in addition
+		// to median + jitter. .catch() increments failures instead of silently
+		// retrying so the loss metric is meaningful.
+		var samples  = [];
+		var failures = 0;
 		function next() {
-			if (samples.length >= PING_COUNT) {
-				return { median: median(samples), jitter: stddev(samples) };
+			if (samples.length + failures >= PING_COUNT) {
+				return {
+					median: samples.length ? median(samples) : null,
+					jitter: samples.length ? stddev(samples) : 0,
+					loss:   (failures / PING_COUNT) * 100
+				};
 			}
 			var t0 = performance.now();
 			return fetch('/cgi-bin/design/ping?t=' + Date.now(), { cache: 'no-store' })
-				.then(function () { samples.push(performance.now() - t0); return next(); })
-				.catch(function () { return next(); });
+				.then(function (r) {
+					if (!r.ok) throw new Error('http ' + r.status);
+					samples.push(performance.now() - t0);
+					return next();
+				})
+				.catch(function () { failures++; return next(); });
 		}
 		return Promise.resolve().then(next);
 	},
