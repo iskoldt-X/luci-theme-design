@@ -4443,3 +4443,585 @@ td.cbi-button, .cbi-button-apply,
 
     .modal.cbi-modal { max-height: 90vh !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §11 LIVE METRICS TILES — upgrade.md §1.S3
+ * 3-card grid (CPU / Memory / Temperature) injected by sparkline.js into
+ * the Status > Overview page above the LuCI-rendered sections.
+ * Each tile: label + current value + meta + 60-point SVG sparkline.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.design-tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+}
+
+.design-tile {
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+.design-tile-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.design-tile-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--color-accent-500);
+    flex-shrink: 0;
+}
+
+.design-tile-label {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+}
+
+.design-tile-value {
+    font-size: var(--text-2xl);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+}
+
+.design-tile-meta {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: 1.2;
+    min-height: 1em;
+}
+
+.design-tile-spark {
+    width: 100%;
+    height: 40px;
+    display: block;
+    margin-top: var(--space-1);
+}
+
+.design-tile-spark-line {
+    stroke: var(--color-accent-500);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+}
+
+.design-tile-spark-fill {
+    fill: var(--color-accent-500-12);
+    stroke: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §12 WAN HERO CARD — upgrade.md §2.A1
+ * First-fold hero on Status > Overview: "is my internet working?" + IP +
+ * connection method + uptime + gateway latency. 100% local data.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.wan-hero {
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-subtle);
+    border-left: 3px solid var(--color-accent-500);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-5);
+    margin-bottom: var(--space-4);
+}
+
+.wan-hero-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+    flex-wrap: wrap;
+}
+
+.wan-hero-icon {
+    width: 24px;
+    height: 24px;
+    color: var(--color-accent-500);
+    flex-shrink: 0;
+}
+
+.wan-hero-title {
+    font-size: var(--text-lg);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+}
+
+.wan-hero-status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-pill);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    background: var(--color-surface-1);
+    color: var(--color-text-muted);
+}
+
+.wan-hero-status-online {
+    background: var(--color-success-bg);
+    color: var(--color-success);
+}
+
+.wan-hero-status-offline {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+}
+
+.wan-hero-status::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.wan-hero-ping {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    font-family: var(--font-mono);
+}
+
+.wan-hero-body {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--space-3);
+}
+
+.wan-hero-field-label {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin-bottom: 2px;
+    letter-spacing: 0.04em;
+}
+
+.wan-hero-field-value {
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+    word-break: break-all;
+}
+
+@media (max-width: 640px) {
+    .wan-hero { padding: var(--space-4); }
+    .wan-hero-body { grid-template-columns: 1fr 1fr; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §13 SPEEDTEST CARD — upgrade.md §2.A5
+ * Browser↔router throughput test. Lives at bottom of Overview.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.speedtest-card {
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-5);
+    margin-bottom: var(--space-4);
+}
+
+.speedtest-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+}
+
+.speedtest-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--color-accent-500);
+}
+
+.speedtest-title {
+    font-size: var(--text-base);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+}
+
+.speedtest-meta {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin-left: auto;
+}
+
+.speedtest-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+}
+
+.speedtest-stat-label {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin-bottom: 2px;
+    letter-spacing: 0.04em;
+}
+
+.speedtest-stat-value {
+    font-size: var(--text-xl);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+}
+
+.speedtest-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.speedtest-run[disabled] {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §14 DEVICES CARD — upgrade.md §2.A2
+ * Compact LAN-client list with OUI/type inference. Click row → expand.
+ * Lives at the end of Overview.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.devices-card {
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-5);
+    margin-bottom: var(--space-4);
+}
+
+.devices-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.devices-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--color-accent-500);
+}
+
+.devices-title {
+    font-size: var(--text-base);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+}
+
+.devices-count {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+}
+
+.devices-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+.devices-empty {
+    padding: var(--space-4);
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+}
+
+.devices-row {
+    cursor: pointer;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+.devices-row:hover {
+    background-color: var(--color-surface-1);
+}
+
+.devices-row-main {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: 32px;
+}
+
+.devices-row-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+
+.devices-row-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-sm);
+    color: var(--color-text);
+}
+
+.devices-row-ip {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 50px;
+    text-align: right;
+}
+
+.devices-row-type {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    min-width: 90px;
+    text-align: right;
+}
+
+.devices-row-detail {
+    margin-left: calc(16px + var(--space-3));
+    margin-top: var(--space-2);
+    padding-left: var(--space-3);
+    border-left: 2px solid var(--color-border-subtle);
+}
+
+.devices-row:not(.devices-row-expanded) .devices-row-detail {
+    display: none;
+}
+
+.devices-detail-row {
+    display: flex;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+    padding: 2px 0;
+}
+
+.devices-detail-label {
+    color: var(--color-text-muted);
+    min-width: 100px;
+}
+
+.devices-detail-value {
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+    word-break: break-all;
+}
+
+@media (max-width: 640px) {
+    .devices-row-type { display: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §15 QUICK ACTIONS — upgrade.md §2.A3
+ * Header ⚡ trigger + floating dropdown with common one-click operations.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.quick-actions-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: background-color var(--motion-fast) var(--ease-out),
+                color var(--motion-fast) var(--ease-out);
+    padding: 0;
+}
+
+.quick-actions-trigger:hover {
+    background-color: var(--color-surface-1);
+    color: var(--color-accent-500);
+}
+
+.quick-actions-trigger svg { width: 18px; height: 18px; }
+
+.quick-actions-dropdown {
+    position: fixed;
+    z-index: var(--z-overlay);
+    min-width: 200px;
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    padding: var(--space-1);
+    opacity: 0;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition: opacity var(--motion-fast) var(--ease-out),
+                transform var(--motion-fast) var(--ease-out);
+}
+
+.quick-actions-dropdown.open {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.quick-actions-header {
+    padding: var(--space-2) var(--space-3) var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    letter-spacing: 0.05em;
+}
+
+.quick-actions-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    text-align: left;
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    font-family: var(--font-sans);
+}
+
+.quick-actions-item:hover {
+    background-color: var(--color-surface-1);
+}
+
+.quick-actions-item-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+
+.quick-actions-item-danger {
+    color: var(--color-danger);
+}
+
+.quick-actions-item-danger:hover {
+    background-color: var(--color-danger-bg);
+}
+
+.quick-actions-item-danger .quick-actions-item-icon {
+    color: var(--color-danger);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §16 APPLY-CHANGES MODAL — upgrade.md §1.S2b
+ * Diff viewer + danger warnings, replacing LuCI's blocking apply spinner.
+ * Lives inside the standard .modal — picks up Bottom Sheet styles on mobile.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.apply-diff-summary {
+    margin-bottom: var(--space-3);
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+}
+
+.apply-diff-list {
+    max-height: 50vh;
+    overflow-y: auto;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-2);
+    background: var(--color-surface-1);
+    margin-bottom: var(--space-3);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+}
+
+.apply-diff-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 4px var(--space-2);
+    border-radius: var(--radius-sm);
+    line-height: 1.5;
+    word-break: break-all;
+    flex-wrap: wrap;
+}
+
+.apply-diff-row:hover {
+    background: var(--color-surface-2);
+}
+
+.apply-diff-key {
+    color: var(--color-text);
+    font-weight: var(--weight-medium);
+}
+
+.apply-diff-val {
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+}
+
+.apply-diff-add {
+    background: var(--color-success-bg);
+    color: var(--color-success);
+}
+
+.apply-diff-del {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    text-decoration: line-through;
+}
+
+.apply-diff-tag {
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.apply-diff-tag.apply-diff-add {
+    text-decoration: none;
+}
+
+.apply-diff-arrow {
+    color: var(--color-text-subtle);
+}
+
+.apply-diff-more {
+    color: var(--color-text-muted);
+    font-style: italic;
+    text-align: center;
+}
+
+.apply-diff-warnings {
+    margin-bottom: var(--space-3);
+    border: 1px solid var(--color-warning);
+    border-radius: var(--radius-md);
+    background: var(--color-warning-bg);
+    padding: var(--space-3);
+}
+
+.apply-diff-warning {
+    color: var(--color-warning);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+    margin: 2px 0;
+}

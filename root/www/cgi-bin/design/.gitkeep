@@ -1,0 +1,3 @@
+# CGI scripts for luci-theme-design Phase 2+ features.
+# See doc/upgrade.md §0.5 for the scope and conventions.
+# Each script must be chmod +x; see Makefile post-install hook.

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Theme-provided CGI: discard uploaded bytes for upload-side speedtest.
+# Browser POSTs a known-size blob; elapsed time → throughput.
+# See doc/upgrade.md §0.5, §2.A5.
+
+echo "Content-Type: text/plain"
+echo "Cache-Control: no-store"
+echo ""
+
+# Read stdin and discard. dd reads in BS-sized blocks until EOF.
+dd of=/dev/null bs=65536 2>/dev/null
+echo "ok"

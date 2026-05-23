@@ -9,4 +9,20 @@ if [ "$PKG_UPGRADE" != 1 ]; then
 	EOF
 fi
 
+# Ensure uhttpd has CGI enabled at /cgi-bin (default, but defensive against
+# stripped configs). Required for theme-provided CGI scripts under
+# /www/cgi-bin/design/ — see doc/upgrade.md §0.5.
+if [ -f /etc/config/uhttpd ]; then
+	CURRENT_CGI=$(uci -q get uhttpd.main.cgi_prefix)
+	if [ -z "$CURRENT_CGI" ]; then
+		uci set uhttpd.main.cgi_prefix='/cgi-bin'
+		uci commit uhttpd
+		/etc/init.d/uhttpd reload 2>/dev/null
+	fi
+fi
+
+# Belt-and-suspenders for postinst-pkg failures: ensure CGI scripts are
+# executable even if the postinst hook didn't run.
+[ -d /www/cgi-bin/design ] && chmod -R +x /www/cgi-bin/design/ 2>/dev/null
+
 exit 0

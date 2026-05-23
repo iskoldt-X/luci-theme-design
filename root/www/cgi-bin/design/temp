@@ -1,0 +1,21 @@
+#!/bin/sh
+# Theme-provided CGI: thermal zone temperatures.
+# Returns JSON: { "zones": [45, 52, 48] }  (degrees Celsius, integer)
+# Empty array if no thermal sensors are available.
+# See doc/upgrade.md §0.5 and §1.S3.
+
+echo "Content-Type: application/json"
+echo "Cache-Control: no-store"
+echo ""
+
+TEMPS=""
+for z in /sys/class/thermal/thermal_zone*/temp; do
+	[ -r "$z" ] || continue
+	T=$(cat "$z" 2>/dev/null) || continue
+	[ -n "$T" ] || continue
+	# kernel exposes millidegrees; convert to whole degrees
+	[ -n "$TEMPS" ] && TEMPS="$TEMPS,"
+	TEMPS="$TEMPS$((T / 1000))"
+done
+
+printf '{"zones":[%s]}\n' "$TEMPS"

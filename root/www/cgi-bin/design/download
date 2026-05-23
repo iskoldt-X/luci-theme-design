@@ -1,0 +1,22 @@
+#!/bin/sh
+# Theme-provided CGI: stream random bytes for download-side speedtest.
+# Browser measures elapsed time → throughput.
+# See doc/upgrade.md §0.5, §2.A5.
+
+# Query param: bytes=NNN (default 10MB, capped at 100MB for safety).
+QS="${QUERY_STRING:-}"
+BYTES=$(echo "$QS" | sed -n 's/^.*bytes=\([0-9]\+\).*$/\1/p')
+BYTES=${BYTES:-10485760}
+
+# Clamp to [1 KB, 100 MB] — prevents abuse / OOM on tiny routers.
+[ "$BYTES" -lt 1024 ] && BYTES=1024
+[ "$BYTES" -gt 104857600 ] && BYTES=104857600
+
+echo "Content-Type: application/octet-stream"
+echo "Content-Length: $BYTES"
+echo "Cache-Control: no-store"
+echo ""
+
+# /dev/urandom is incompressible — prevents intermediate caches / browser
+# from artificially inflating the measured throughput.
+dd if=/dev/urandom bs="$BYTES" count=1 2>/dev/null
