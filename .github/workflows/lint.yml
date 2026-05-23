@@ -44,10 +44,59 @@ jobs:
             python3 -m json.tool "$f" > /dev/null
           done
 
-      - name: Shellcheck uci-defaults
+      - name: Shellcheck uci-defaults + CGI scripts
+        # CGI scripts under /www/cgi-bin/design/ are user-reachable via the
+        # LuCI auth-gated uhttpd. Any shell-injection bug here is potentially
+        # remote code execution post-login — review carefully.
         uses: ludeeus/action-shellcheck@master
         with:
-          scandir: './root/etc/uci-defaults'
+          scandir: '.'
+          additional_files: 'root/etc/uci-defaults/30_luci-theme-design root/www/cgi-bin/design/ping root/www/cgi-bin/design/temp root/www/cgi-bin/design/download root/www/cgi-bin/design/upload'
+          format: gcc
+          severity: warning
+
+      - name: CGI safety audit
+        # See doc/upgrade.md §4.C5. We've shellchecked above; this step adds
+        # theme-specific assertions about CGI inputs.
+        run: |
+          python3 <<'PY'
+          import re, sys, os, glob
+          fail = []
+
+          cgi_files = glob.glob('root/www/cgi-bin/design/*')
+          cgi_files = [f for f in cgi_files if os.path.isfile(f) and not f.endswith('.gitkeep')]
+
+          for path in cgi_files:
+              src = open(path).read()
+              name = os.path.basename(path)
+
+              # 1. Must start with shebang
+              if not src.startswith('#!/bin/sh') and not src.startswith('#!/bin/bash'):
+                  fail.append(f'{path}: missing #!/bin/sh shebang')
+
+              # 2. Must NOT eval/exec/source untrusted input from $QUERY_STRING
+              if re.search(r'(eval|exec|source|\.\s+)\s+["\']?\$\{?QUERY_STRING', src):
+                  fail.append(f'{path}: dangerous use of $QUERY_STRING with eval/exec/source')
+
+              # 3. download.cgi must clamp bytes (avoid OOM / abuse)
+              if name == 'download':
+                  if 'BYTES' not in src or '-gt' not in src:
+                      fail.append(f'{path}: missing input bounds check on BYTES')
+
+              # 4. Must emit Content-Type header
+              if 'Content-Type:' not in src:
+                  fail.append(f'{path}: missing Content-Type header')
+
+              # 5. Cache-Control no-store (CGI responses change per request)
+              if 'Cache-Control' not in src:
+                  print(f'WARN {path}: no Cache-Control header (may be cached by uhttpd/browser)')
+
+          if fail:
+              print('FAIL — CGI safety audit issues:')
+              for f in fail: print(f'  {f}')
+              sys.exit(1)
+          print(f'OK — {len(cgi_files)} CGI scripts pass theme safety audit')
+          PY
 
       - name: Validate CSS brace balance
         run: |
@@ -161,4 +210,49 @@ jobs:
                   print('\n'.join(sorted(set(fail_tokens))))
               sys.exit(1)
           print('OK — CSS is minifier-safe (no modern rgb()/hsl() with space syntax, no camelCase tokens)')
+          PY
+
+      - name: Performance budget (asset sizes)
+        # See doc/upgrade.md §6 "性能预算". Lighthouse CI would be the right
+        # tool but requires a running LuCI instance. As a tractable proxy we
+        # gzip-encode each asset class and verify the bundled size stays
+        # under the documented v2 budget. PRs that explode binary cost fail
+        # CI here instead of being noticed only at deploy time.
+        run: |
+          python3 <<'PY'
+          import gzip, glob, os, sys
+
+          BUDGETS = {
+              # category : (max gzipped bytes, glob patterns)
+              'css':   (35 * 1024, ['htdocs/luci-static/design/css/*.css']),
+              'js':    (35 * 1024, ['htdocs/luci-static/design/js/*.js',
+                                     'htdocs/luci-static/resources/*.js']),
+              'fonts': (25 * 1024, ['htdocs/luci-static/design/fonts/*']),
+              'sprite':(15 * 1024, ['htdocs/luci-static/design/icons.svg']),
+              'cgi':   ( 5 * 1024, ['root/www/cgi-bin/design/*'])
+          }
+
+          fail = False
+          for cat, (limit, patterns) in BUDGETS.items():
+              total_raw = 0
+              total_gz  = 0
+              files = []
+              for p in patterns:
+                  for f in glob.glob(p):
+                      if not os.path.isfile(f): continue
+                      if f.endswith('.gitkeep'): continue
+                      with open(f, 'rb') as fh: data = fh.read()
+                      total_raw += len(data)
+                      total_gz  += len(gzip.compress(data, compresslevel=9))
+                      files.append(f)
+              marker = '✅' if total_gz <= limit else '❌'
+              print(f'{marker} {cat:6s} {len(files):2d} files  raw={total_raw:>7d}  gz={total_gz:>7d}  budget={limit:>7d}')
+              if total_gz > limit:
+                  fail = True
+                  print(f'   OVER BUDGET by {total_gz - limit} bytes')
+
+          if fail:
+              print()
+              print('Performance budget exceeded. See doc/upgrade.md §6.')
+              sys.exit(1)
           PY
