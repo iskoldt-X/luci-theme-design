@@ -80,31 +80,38 @@ check_repo() {
     fi
 }
 
-# Verify SSH works AND the theme is already installed (we sync into dirs
-# that the ipk creates; if the ipk was never installed, those dirs won't
-# exist and rsync would refuse to push). Bootstrap path: install the
-# ipk once via the GH Actions build, then dev-sync replaces files in
-# place forever after.
+# Verify SSH works AND remote has rsync AND the theme is already installed.
 #
 # Step 60: also probe remote rsync. BusyBox/ash on ImmortalWrt does NOT
-# ship rsync by default — running dev-sync without it produces a cryptic
-# "rsync: unexpected end of file" because the local rsync's remote
-# shell can't find the binary. Catch that here and give the opkg fix.
+# ship rsync by default.
+# Step 61: separate connectivity check from feature probes. Step 60's
+# `if ! probe=$(ssh ...)` misread ssh's non-zero exit (last probe failing)
+# as "can't reach SSH" even when SSH itself worked fine. Now CONNECT_OK
+# is the explicit connectivity signal; missing-feature exit codes are
+# swallowed by `; true` so they can't fool us.
 check_router() {
     log "${BLUE}preflight${NC}: probing ${BOLD}${ROUTER}${NC}..."
+
+    # Single SSH round-trip. Trailing `true` makes the remote shell always
+    # exit 0 regardless of which probes succeeded. Connectivity itself is
+    # detected by the presence of CONNECT_OK line in the captured output.
     local probe
-    if ! probe=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$ROUTER" \
-            "test -d /www/luci-static/design && echo DESIGN_OK; \
-             test -d /usr/lib/lua/luci/view/themes/design && echo VIEW_OK; \
-             command -v rsync >/dev/null 2>&1 && echo RSYNC_OK" \
-            2>&1); then
+    probe=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$ROUTER" "
+        echo CONNECT_OK
+        test -d /www/luci-static/design && echo DESIGN_OK
+        test -d /usr/lib/lua/luci/view/themes/design && echo VIEW_OK
+        command -v rsync >/dev/null 2>&1 && echo RSYNC_OK
+        true
+    " 2>&1) || true
+
+    if ! printf '%s\n' "$probe" | grep -q '^CONNECT_OK$'; then
         err "can't reach $ROUTER over SSH (BatchMode=yes — needs key auth)."
         err "  try: ssh $ROUTER \"echo hello\""
         err "  if that prompts for password, ssh-copy-id first (see doc/development.md)."
         err "  ssh raw output: $probe"
         exit 1
     fi
-    if ! echo "$probe" | grep -q '^RSYNC_OK$'; then
+    if ! printf '%s\n' "$probe" | grep -q '^RSYNC_OK$'; then
         err "$ROUTER reachable, but rsync isn't installed on the router."
         err "  BusyBox / ash doesn't include rsync by default."
         err "  fix in one line:"
@@ -112,8 +119,8 @@ check_router() {
         err "  (~100 KB, then rerun this script.)"
         exit 1
     fi
-    if ! echo "$probe" | grep -q '^DESIGN_OK$' || \
-       ! echo "$probe" | grep -q '^VIEW_OK$'; then
+    if ! printf '%s\n' "$probe" | grep -q '^DESIGN_OK$' || \
+       ! printf '%s\n' "$probe" | grep -q '^VIEW_OK$'; then
         err "$ROUTER reachable, but theme dirs missing."
         err "  /www/luci-static/design                OR"
         err "  /usr/lib/lua/luci/view/themes/design"
