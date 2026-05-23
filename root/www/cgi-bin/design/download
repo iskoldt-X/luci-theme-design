@@ -3,16 +3,22 @@
 # Browser measures elapsed time → throughput.
 # See doc/upgrade.md §0.5, §2.A5.
 
-# Query param: bytes=NNN (default 50 MB, capped at 200 MB for safety).
-# 200 MB upper bound covers measuring a 1 Gbps link's max throughput with
-# a long-enough sample to defeat TCP slow-start (~1.6s @ 1 Gbps).
+# Query param: bytes=NNN (default 50 MB, capped at 1 GB).
+#
+# Step 65 (2026-05-23): upper bound raised 200 MB → 1 GB to honour the
+# new client-side preset selector ('1 GB · thorough'). Streaming dd
+# uses ~64 KB RAM regardless of total size — the clamp's only purpose
+# is to bound CPU time. /dev/urandom on modern x86_64 emits ~2 GB/s,
+# so a 1 GB pull is ~0.5s of CPU plus network time. On older ARM
+# routers it scales to 30-60s of CPU; document this in the JS preset
+# tooltips so users don't accidentally DoS their own slow box.
 QS="${QUERY_STRING:-}"
 BYTES=$(echo "$QS" | sed -n 's/^.*bytes=\([0-9]\+\).*$/\1/p')
 BYTES=${BYTES:-52428800}
 
-# Clamp to [1 KB, 200 MB] — prevents abuse / OOM on tiny routers.
+# Clamp to [1 KB, 1 GB] — prevents abuse / unbounded /dev/urandom drain.
 [ "$BYTES" -lt 1024 ] && BYTES=1024
-[ "$BYTES" -gt 209715200 ] && BYTES=209715200
+[ "$BYTES" -gt 1073741824 ] && BYTES=1073741824
 
 echo "Content-Type: application/octet-stream"
 echo "Content-Length: $BYTES"
