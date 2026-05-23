@@ -1267,3 +1267,58 @@ $ grep -E '\-\-[a-z]+[A-Z]' features.css       # 禁止 camelCase token
 | 全屏切换、tagline "在线 9d 14h" 大字 | 不实现（与 hero-status 信息重复） |
 
 **回滚方式：** `git revert` 该 commit 即可，零数据依赖。
+
+---
+
+### Step 42 — `wan-stats.js` 共享单例：每 2s 拉一次 WAN 吞吐量
+
+**时间**：2026-05-23
+**文件**：
+- 新文件 `htdocs/luci-static/resources/wan-stats.js`（~140 行）
+- `luasrc/view/themes/design/footer.htm` 加 `L.require('wan-stats')` 放在 `wan-hero` / `sparkline` 之前
+
+**做了什么：**
+
+第五轮 ship MVP 时把"实时上下行 throughput tile + WAN Hero ↑↓ 行"显式标了 `deferred — 需要 4 步 ubus chain`。这一 Step 把那 4 步 chain 收口到一个**共享单例**：
+
+```
+network.interface dump          网络接口列表
+  ↓ (network.getWANNetworks)
+找到 WAN interface              wans[0]
+  ↓ (w.getDevice().getName)
+真实物理设备名                  e.g. 'eth0' / 'pppoe-wan'
+  ↓ (rpc.declare network.device.status)
+rx_bytes / tx_bytes 计数器
+  ↓ (diff vs lastSample, ÷ dt)
+rxBps / txBps                  emit 给所有 subscribers
+```
+
+**为什么是单例：** sparkline.js 的 Net tile 和 wan-hero.js 的 ↑↓ 行需要同一份数据。如果各自轮询，CPU 翻倍 + 两份 ring buffer 不同步。共享一个 emitter，订阅一次，所有消费者同时刷新。
+
+**关键设计：**
+
+- **lazy polling** — `subscribe()` 时启动 timer，最后一个 `unsubscribe()` 自动 stop。模块本身 `__init__` 啥也不做，只是注册类，不消耗资源。
+- **counter wrap 保护** — `drx < 0` 或 `dtx < 0` 时跳过那一帧（不出现 spike），用新值重锚 `lastSample`。
+- **device 上线重试** — WAN 在 PPPoE 协商时可能晚于 page load 才 up。`poll()` 每次执行前都检查 `state.wanDevice`，为 null 就重新跑 `detectWanDevice()`。第一次有结果时 reset `lastSample` 避免用陈旧 baseline。
+- **错误降级** — 任何 ubus call 失败都 emit `{ rxBps: null, txBps: null }`。消费者（Step 43）已经写好对 null 的处理 → 显示 "—" 不崩溃。
+- **replay last emit on subscribe** — 后来订阅的消费者立即拿到一个 sample（不用等 2s）。
+
+**为什么放在 footer.htm 里？**
+
+`L.require('wan-stats')` 必须**在** `wan-hero` / `sparkline` 之前 — 后两者 `__init__` 里会 `L.require('wan-stats').then(...)` 订阅，如果 wan-stats 还没解析就会出错（虽然 LuCI 的 require 机制会自动等，但显式排序更稳）。
+
+**没有破坏的事：**
+
+- ❌ 没动 `wan-hero.js` / `sparkline.js` 任何一行 — 消费者迁移留 Step 43
+- ❌ 没改任何已有 ubus 调用 — `network.device.status` 是新增 RPC，原 `system.info` 还是 sparkline.js 在用
+- ❌ 没改 CSS — pure JS infra
+
+**Break change：** 无可见。多了一个 LuCI module 文件 + footer 多一行 `L.require`。运行时多一个 2s 周期的 ubus call（仅 Overview 页且至少一个消费者订阅时）。
+
+**验证：**
+```bash
+$ node --check htdocs/luci-static/resources/wan-stats.js   ✅
+$ grep -c "wan-stats" luasrc/view/themes/design/footer.htm   1
+```
+
+**回滚方式：** `git revert` 删除该 commit。消费者还没来（Step 43 后才会订阅），所以这个 Step 单独存在是无害的 dead code。
