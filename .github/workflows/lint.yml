@@ -44,14 +44,24 @@ jobs:
             python3 -m json.tool "$f" > /dev/null
           done
 
-      - name: Shellcheck uci-defaults + CGI scripts
+      - name: Shellcheck uci-defaults + CGI scripts + dev scripts
         # CGI scripts under /www/cgi-bin/design/ are user-reachable via the
         # LuCI auth-gated uhttpd. Any shell-injection bug here is potentially
         # remote code execution post-login — review carefully.
+        # Step 69 (Round 12): also include devstats + nlbw (added Round 9)
+        # and the Mac-side dev scripts (.sh extension auto-discovered by
+        # scandir: '.', but listed here for completeness/audit visibility).
         uses: ludeeus/action-shellcheck@master
         with:
           scandir: '.'
-          additional_files: 'root/etc/uci-defaults/30_luci-theme-design root/www/cgi-bin/design/ping root/www/cgi-bin/design/temp root/www/cgi-bin/design/download root/www/cgi-bin/design/upload'
+          additional_files: >-
+            root/etc/uci-defaults/30_luci-theme-design
+            root/www/cgi-bin/design/ping
+            root/www/cgi-bin/design/temp
+            root/www/cgi-bin/design/devstats
+            root/www/cgi-bin/design/download
+            root/www/cgi-bin/design/upload
+            root/www/cgi-bin/design/nlbw
           format: gcc
           severity: warning
 
@@ -171,6 +181,39 @@ jobs:
               print('\n'.join(fail))
               sys.exit(1)
           print('OK — no raw CJK in source files')
+          PY
+
+      - name: Forbid misplaced @import in CSS
+        # Step 69 (Round 12, 2026-05-23): CSS spec requires @import to
+        # appear BEFORE all other style rules. Browsers silently ignore
+        # @import that comes after rules — Edge/Chrome enforced this on
+        # 2026-05-23 mid-development and broke our entire features.css
+        # load (Round 11 Step 67 was the live-fire fix). Catch this at
+        # PR time forever now: any @import that appears after the first
+        # `{` in a CSS file fails the build.
+        run: |
+          python3 <<'PY'
+          import re, sys, glob
+          fail = []
+          for path in glob.glob('htdocs/**/*.css', recursive=True):
+              src = open(path).read()
+              no_comments = re.sub(r'/\*.*?\*/', '', src, flags=re.DOTALL)
+              first_brace = no_comments.find('{')
+              if first_brace < 0:
+                  continue
+              for m in re.finditer(r'@import\b', no_comments):
+                  if m.start() > first_brace:
+                      # Approximate line number in stripped source
+                      ln = no_comments[:m.start()].count('\n') + 1
+                      fail.append(f'  {path}:{ln} (approx): @import at offset {m.start()} comes after first rule (`{{` at offset {first_brace})')
+                      break  # one fail per file is enough
+          if fail:
+              print('FAIL — @import must appear before any style rule per CSS spec.')
+              print('Move it into a <link rel=stylesheet> tag in header.htm instead.')
+              print('See Step 67 / 69 in doc/styling-progress.md for the live-fire incident.\n')
+              print('\n'.join(fail))
+              sys.exit(1)
+          print('OK — every @import sits before the first style rule')
           PY
 
       - name: Forbid minifier-unsafe CSS patterns
