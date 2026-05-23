@@ -175,13 +175,35 @@ dev-sync **不替代** CI 和 ipk 分发。它只是让 dev 期内的反馈循�
 
 ---
 
-## 计划中的 Phase 2 (Round 11+)
+## 配套工具
+
+### `./scripts/dev-tail.sh` — 实时看路由器日志（Step 66 已上）
+
+dev-sync 推了代码,但页面行为不对?LuCI / CGI 多半在 `logread` 里留了痕迹。
+
+```bash
+./scripts/dev-tail.sh                # 全量
+./scripts/dev-tail.sh design         # 只看含 'design' 的行
+./scripts/dev-tail.sh error,fail     # 多 pattern,逗号分隔
+```
+
+输出按严重度上色：
+
+| 颜色 | 触发关键词 |
+|---|---|
+| 红粗 | `error` / `fail` / `denied` / `crash` / `segfault` / `panic` |
+| 黄 | `warn` / `timeout` / `retry` / `drop` |
+| 暗灰 | 其余正常 |
+
+推荐用法：开个分屏，左边 `dev-sync.sh`,右边 `dev-tail.sh`,改代码立即看 sync + 日志反馈。
+
+## 计划中的 Phase 2 (Round 12+)
 
 | 增强 | 价值 | 工时 |
 |---|---|---|
 | Playwright e2e 测试，跑在 `luci-router` 上 | 把 Round 1-9 的 9 个 deployment-discovered bug 全部写成回归测试 | ~4-6h |
 | LiveReload 浏览器扩展集成 | 改文件后 Cmd+R 都省了，浏览器自己刷 | ~1h |
 | `./scripts/dev-revert.sh` | 一键回滚到 git HEAD 状态（不止 stash） | ~30 min |
-| `./scripts/dev-tail.sh` | tail 路由器 logread + uhttpd error 日志到 Mac 终端 | ~30 min |
+| ssh ControlMaster 加 `~/.ssh/config` | 4 个 rsync 共用 1 个 SSH 连接,每次 sync 省 300-800ms | ~10 min |
 
 按需上。
