@@ -972,6 +972,172 @@ features.css §13 重写：
 | CSS 行数（features.css） | 1433 | **1604** (+171) |
 | 累计真实部署 bug 数 | 4 (Bug A/B/C 时机) | **6** (新增 Connection fallback、wan-stats shape) |
 
+---
+
+## 🚀 第九轮（Step 53-58）：基于用户实机 DevTools + SSH diagnostic 的精准修复
+
+> 起飞时间：2026-05-23
+> **关键转折**：用户主动跑 DevTools console 探针 + SSH ubus 形状探测，**第一次让我们看到 LuCI 26.x 在真机上的实际行为**。Step 50 用形状探测盲猜的方法被证实**根本不是 shape 问题**——是 ACL 直接拒绝；Step 51 的 pending pill bug 被证实是 `L.uci.changes()` 在 LuCI 26.x 返 Promise。这一轮全部是**看准了再下刀**。
+
+### 用户提供的关键诊断数据
+
+**Console (Network tab + console.warn 输出)**：
+```
+RPCError: RPC call to network.device/status failed with error -32002: Access denied
+```
+50 次重复，每次 wan-stats 轮询都被 ACL 拒绝。
+
+**Console 探针返回**：
+```js
+{
+  hasL: true,
+  uciChangesIsPromise: true,    // ← 关键
+  applyModalPatched: true,       // ← Step 49 patch landed
+  toastWrapped: false,           // ← misleading（probe 用 window.ui 不对）
+  bodyClassesFirst5: 'lang_zh-cn logged-in node-admin-status-overview'
+}
+```
+
+**SSH `ubus` 输出**：
+- `ubus call network.device status` 从 SSH 完全 OK
+- `ubus call network.interface.wan status` 显示 `proto: "dhcp"`, `device: "eth1"`
+- `/sys/class/thermal/` 只有 cooling_device，无温度传感器（QEMU 预期）
+- `/tmp/nlbw.db` 不存在（nlbwmon 装了但还没收数据）
+
+**Console 测试 `L.ui.changes.displayChanges()`** 返 `Promise {fulfilled: undefined}`，**但**右下角同时弹了多个 "No pending changes" toast。说明 patch 跑到了，但走进了 0-changes 分支。
+
+### Step 53 — CGI 旁路 devstats（解决 -32002 Access denied）
+
+**真 bug**：`rpc.declare({object: 'network.device', method: 'status'})` 在 LuCI 26.x **直接被 session ACL 拒绝**。Step 50 那套 `pickDeviceStats` 多形状 fallback 完全徒劳——根本没到 response 处理代码。
+
+**修法**：抛弃 RPC，新增 shell CGI 直接读 `/sys/class/net/`。
+
+新文件 `root/www/cgi-bin/design/devstats`：
+```sh
+#!/bin/sh
+DEV="${QUERY_STRING#*dev=}"
+DEV=$(printf '%s' "${DEV%%&*}" | tr -cd 'a-zA-Z0-9._-')
+case "$DEV" in ""|"."|".."|*..*) DEV="" ;; esac
+echo "Content-Type: application/json"; echo
+[ -z "$DEV" ] || [ ! -d "/sys/class/net/$DEV/statistics" ] && {
+    echo '{"error":"invalid device"}'; exit 0; }
+RX=$(cat /sys/class/net/$DEV/statistics/rx_bytes 2>/dev/null || echo 0)
+TX=$(cat /sys/class/net/$DEV/statistics/tx_bytes 2>/dev/null || echo 0)
+[ "$(cat /sys/class/net/$DEV/operstate 2>/dev/null)" = "up" ] && UP=true || UP=false
+printf '{"dev":"%s","up":%s,"rx_bytes":%s,"tx_bytes":%s}\n' "$DEV" "$UP" "$RX" "$TX"
+```
+
+**安全性**：strict input filter + 拒绝 `..` + 必须存在 `/sys/class/net/<dev>/statistics/` 目录（防 path traversal）。
+
+**wan-stats.js 改动**：删 deviceStatusAll / deviceStatusOne / pickDeviceStats / `require rpc` —— 全部预设 RPC 能工作的代码废弃。新 `fetchDevStats(name)` 一个 fetch 搞定。poll() 收到响应后喂给原有的 processStats（counter diff 逻辑保留）。
+
+**部署后预期**：WAN Traffic tile + WAN Hero ↑↓ 4-6 秒内出实时数字。
+
+### Step 54 — Promise-aware uci changes
+
+**真 bug**：`L.uci.changes()` 在 LuCI 26.x 返 `Promise<map>`。`Object.keys(promise)` 是 `[]`。
+
+**症状链**：
+- apply-modal.showDiff: `flattenChanges(L.uci.changes())` → 0 changes → "No pending changes" toast → 永远不显 modal
+- quick-actions.countPendingChanges: 永远返回 0 → pending pill 永远不渲染
+- 用户点 badge "未保存的配置:3" → 我们 patch 跑了 → 进 0-changes 分支 → 弹 "No pending changes" → 看起来像 patch 没生效
+
+**修法**：
+
+apply-modal.js 新 helper：
+```js
+function getChangesPromise() {
+    var raw;
+    try { raw = L.uci.changes(); } catch (e) { return Promise.resolve({}); }
+    return (raw && typeof raw.then === 'function')
+        ? raw.catch(function () { return {}; })
+        : Promise.resolve(raw || {});
+}
+```
+
+`showDiff()` 整体改 async：`return getChangesPromise().then(function(raw) { var changes = flattenChanges(raw); ... }).catch(function(err) { console.error; toast; fallback to native; })`。
+
+quick-actions.js `countPendingChangesAsync(cb)` 同模式。`open()` 改为先 await pending 数再 build dropdown。
+
+**关键设计**：showDiff 的 catch 用 `console.error` + toast 显式报错 —— **silent fail is the worst kind**。
+
+### Step 55 — Toast wrap 双绑定 + console.log 确认
+
+**Probe 误报**：用户 probe 里 `toastWrapped: false` 是因为测的是 `window.ui` 不是 `L.ui`。
+
+**修法**：toast.js `_tryIntercept` 同时探测 `ui`（require-local）和 `L.ui`（global singleton），把 wrap 应用到两个 refs（在 LuCI 26.x 是同一对象所以是 no-op，但防御未来分叉）。新增 `console.log('toast: ui.addNotification wrap installed', {wrappedLocal, wrappedGlobal, sameRef})` 让 DevTools 能立刻看到 wrap 是否真的成功。
+
+### Step 56 — Speedtest 仪表盘可见性
+
+**两个并发 bug 让弧线完全看不见**：
+1. CSS track stroke `--color-surface-2` (`#e4e4e7`) 与 gauge 卡背景 `--color-surface-1` (`#f4f4f5`) **几乎同色**，灰对灰对比为 0
+2. `<svg width: 100%; height: auto>` 在某些 Chromium build 里 + viewBox 200x110 + 父级 flex column → 算出 0 高度
+
+**修法**：
+- track stroke 改 `--color-border-default` (`#d4d4d8`) —— 至少差 4 个 lightness step，浅暗 mode 都看得见
+- 加 `aspect-ratio: 200 / 110` 保证 SVG 一定有垂直空间
+
+### Step 57 — 图标尺寸 + sparkline 占位
+
+- `.design-tile-icon` 16px → 20px
+- `.quick-actions-item-icon` 16px → 18px
+- `.design-tile-spark-line` stroke 1.5 → 2
+- 新 `.design-tile-spark-line-empty` 状态：`stroke-dasharray: 3 3` + `opacity: 0.6`
+- sparkline.js `renderTileSpark` 在 `ring.path()` 返空字符串时画 dashed 中心 baseline + 加 `-empty` class
+
+**用户体验**：从 "看着没图标没曲线，是不是坏了" 变成 "图标清晰可见 + 曲线区有占位虚线告诉你正在收集"。
+
+### Step 58 — 也 patch `L.ui.changes.apply`（保存并应用按钮路径）
+
+**真 bug**：LuCI 26.x **两条独立 apply 入口**：
+- `L.ui.changes.displayChanges()` ← 顶栏 badge click
+- `L.ui.changes.apply()`          ← 配置页保存并应用按钮 click
+
+我们 Step 34 只 patch displayChanges，保存并应用按钮**完全溜过**，触发 LuCI 原生 "正在等待配置被应用... 86s" 倒计时 UI。
+
+**修法**：双 patch + `_inConfirmFlow` 防 re-entry：
+
+```js
+function diffHook() {
+    if (self._inConfirmFlow) {
+        return L.ui.changes.__designOriginalApply.apply(L.ui.changes, arguments);
+    }
+    return self.showDiff();
+}
+L.ui.changes.displayChanges = diffHook;
+L.ui.changes.apply          = diffHook;
+```
+
+`applyAndProgress` 进入时 `_inConfirmFlow = true`，error 路径 reset 为 false（success 路径 page reload 自然 reset）。
+
+**部署后预期**：保存并应用按钮 ALSO 走我们的 diff modal + 10s Undo flow，不再有 LuCI 原 modal。
+
+---
+
+## 📊 第九轮（Step 53-58）累计变化
+
+| 指标 | 第八轮后 | 第九轮后 |
+|---|---|---|
+| WAN throughput RPC 路径 | `network.device.status` (ACL 拒) | **`/cgi-bin/design/devstats` (CGI bypass)** |
+| CGI 脚本数 | 5 (ping/temp/download/upload/nlbw) | **6** (+devstats) |
+| `L.uci.changes()` 兼容性 | 假设 sync (LuCI 26 上断) | **同时支持 sync + Promise** |
+| Diff modal 在 LuCI 26 badge 点击时 | 弹 "No pending changes" toast | **显示真实 diff** |
+| Diff modal 在保存并应用按钮点击时 | LuCI 原 modal 接管 | **我们的 diff modal** |
+| Toast wrap 确认手段 | 无 | **console.log 显式输出 wrap 状态** |
+| Speedtest 仪表盘可见性 | 灰对灰隐形 | **darker track + aspect-ratio** |
+| Tile/popover icon 可感知度 | 16px 太小 | **20/18px 明显** |
+| Sparkline 空数据状态 | 完全空白 | **dashed baseline 占位** |
+| 累计真实部署 bug 数 | 6 | **9** (+ACL deny / changes Promise / apply 路径分裂) |
+
+## 🎯 LuCI 26.x 兼容性教训沉淀（已写入项目 memory）
+
+1. **`L.uci.changes()` 返 Promise**，不再是 sync map — 任何 `Object.keys` 都会失败
+2. **`network.device.status` 被 session ACL 拒绝**（-32002）— SSH ubus 工作 ≠ 浏览器 RPC 工作；**默认走 CGI bypass**
+3. **保存并应用按钮走 `L.ui.changes.apply()` 不走 `displayChanges()`** — patch 必须 both
+
+这三条已经写进 `/Users/nht435/.claude/projects/.../memory/` 项目记忆，未来 contributor / agent 接手时立刻能避坑。
+
+
 
 ---
 
