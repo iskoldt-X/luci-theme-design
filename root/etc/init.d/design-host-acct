@@ -13,20 +13,32 @@
 #
 # HOW IT WORKS
 # ────────────
-# nftables `netdev` family with the `ingress` hook fires at the NIC RX
-# point, BEFORE the network stack diverges into the nf_flowtable fastpath.
-# Counter objects attached to ingress rules see every packet, including
-# those that will subsequently be offloaded.
+# nftables `netdev` family with ingress/egress hooks fire at the device-
+# level RX/TX point, where flow-offloaded packets are still visible (offload
+# only bypasses the netfilter FORWARD chain — netdev hooks are upstream).
 #
-# Two ingress hooks per host:
-#   - on br-lan:    saddr == host → uploads (LAN → internet bytes)
-#   - on $WAN_DEV:  daddr == host → downloads (internet → LAN bytes)
+# Two chains, both on br-lan (the LAN bridge):
+#   - lan_in  (ingress on br-lan):  saddr == LAN host → UPLOAD bytes
+#   - lan_out (egress  on br-lan):  daddr == LAN host → DOWNLOAD bytes
+#
+# Why egress on br-lan instead of ingress on WAN (Step 115's broken
+# original design):
+#   When a download packet arrives at WAN (eth1) ingress, its destination
+#   address is the router's PUBLIC IP — NAT (DNAT via conntrack) hasn't
+#   happened yet. The LAN host's IP is only restored at PREROUTING. By the
+#   time the packet exits br-lan headed for the LAN device, DNAT has
+#   completed and daddr is the real LAN host IP. So br-lan egress sees
+#   the correct daddr to match against.
 #
 # Counter naming: `host_tx_<ip_underscored>` / `host_rx_<ip_underscored>`
 # (nftables identifiers can't contain dots, so 192.168.45.225 becomes
 # 192_168_45_225 for the name).
 #
-# Round 31 / Step 115 (2026-05-23).
+# Kernel requirement: netdev/egress hook needs Linux 5.16+. ImmortalWrt
+# 24.10 ships kernel 6.6 — well past that. OpenWrt 22.03/23.05 also fine.
+#
+# Round 31 / Step 115 (2026-05-23). Step 117 (Round 31 fix-up) — switched
+# from broken eth1-ingress to br-lan-egress for download direction.
 # ─────────────────────────────────────────────────────────────────────────
 
 START=99
@@ -37,15 +49,7 @@ LAN_DEV="br-lan"
 DHCP_LEASES="/tmp/dhcp.leases"
 
 EXTRA_COMMANDS="refresh"
-EXTRA_HELP="    refresh    Rescan DHCP leases + re-detect WAN; add new host counters"
-
-# Detect current WAN device dynamically. Works for static / DHCP / PPPoE /
-# WireGuard etc. — whatever interface holds the default route. Returns
-# empty string if WAN is down (caller should fall back gracefully).
-get_wan_dev() {
-	ip -4 -o route get 8.8.8.8 2>/dev/null | \
-		awk '{for(i=1;i<=NF;i++) if($i=="dev") { print $(i+1); exit }}'
-}
+EXTRA_HELP="    refresh    Rescan DHCP leases; add new host counters"
 
 # Sanitize IP into nft-safe identifier (dots → underscores). Also gate
 # against weird input (no shell escape chars).
@@ -70,11 +74,16 @@ add_host_counter() {
 	nft add counter netdev "$NFT_TABLE" "host_tx_$id" 2>/dev/null
 	nft add counter netdev "$NFT_TABLE" "host_rx_$id" 2>/dev/null
 
-	# Feed counters from the matching rules. Each rule references its
-	# counter by name — no need to per-IP grep when reading.
+	# UPLOAD: packets entering br-lan from a LAN device on their way out
+	# to the WAN — saddr is the LAN host's IP.
 	nft add rule netdev "$NFT_TABLE" lan_in \
 		ip saddr "$ip" counter name "host_tx_$id" 2>/dev/null
-	nft add rule netdev "$NFT_TABLE" wan_in \
+
+	# DOWNLOAD: packets exiting br-lan headed back to the LAN device.
+	# By this stage of the pipeline, conntrack's DNAT has restored
+	# daddr to the LAN host's IP (whereas at eth1 ingress it was still
+	# the router's public WAN IP — see file header for full reasoning).
+	nft add rule netdev "$NFT_TABLE" lan_out \
 		ip daddr "$ip" counter name "host_rx_$id" 2>/dev/null
 }
 
@@ -82,8 +91,6 @@ add_host_counter() {
 # start. After this returns, counters exist for all currently-known DHCP
 # hosts; new leases get added via refresh().
 setup_table() {
-	local wan_dev
-
 	# Hard reset
 	nft delete table netdev "$NFT_TABLE" 2>/dev/null
 
@@ -105,60 +112,38 @@ setup_table() {
 		return 1
 	}
 
-	# LAN ingress chain — hooks on br-lan. priority -300 places this
-	# before any conntrack-related hooks (which are around 0).
+	# LAN ingress chain — packets entering br-lan FROM a LAN host.
+	# priority -300 places this before any conntrack hooks (around 0).
 	nft add chain netdev "$NFT_TABLE" lan_in \
 		"{ type filter hook ingress device $LAN_DEV priority -300 ; }" \
-		2>/dev/null
+		2>/dev/null || {
+		logger -t design-host-acct "failed to add lan_in chain"
+	}
 
-	# WAN ingress chain — hooks on whatever the default-route device is
-	# right now. Best-effort: if WAN isn't up yet, skip the wan_in chain
-	# and let refresh() add it later.
-	wan_dev=$(get_wan_dev)
-	if [ -n "$wan_dev" ] && [ "$wan_dev" != "$LAN_DEV" ]; then
-		nft add chain netdev "$NFT_TABLE" wan_in \
-			"{ type filter hook ingress device $wan_dev priority -300 ; }" \
-			2>/dev/null
-	fi
+	# LAN egress chain — packets leaving br-lan TO a LAN host. Critical
+	# that this is egress and NOT ingress on the WAN device; at WAN
+	# ingress the daddr is the router's public IP (NAT hasn't run yet).
+	# Egress hook requires kernel 5.16+; if missing the `nft add chain`
+	# returns non-zero and we log a warning. Without it downloads will
+	# not be tracked but uploads (lan_in) still work.
+	nft add chain netdev "$NFT_TABLE" lan_out \
+		"{ type filter hook egress device $LAN_DEV priority -300 ; }" \
+		2>/dev/null || {
+		logger -t design-host-acct \
+			"failed to add lan_out chain — kernel lacks netdev egress hook? Downloads will be 0."
+	}
 
 	# Initial population from current DHCP lease table.
 	refresh_hosts
 }
 
 # Add counters for hosts that aren't yet covered. Idempotent — existing
-# counters are preserved (bytes don't reset). Also re-checks WAN device
-# in case it changed since startup (e.g., PPPoE reconnect, WAN restart).
+# counters are preserved (bytes don't reset).
 refresh_hosts() {
 	local ip
-	local current_wan
-	local existing_wan
 	local existing_ips
 
 	[ -r "$DHCP_LEASES" ] || return 0
-
-	# Check if WAN device changed; rebuild wan_in chain if so.
-	current_wan=$(get_wan_dev)
-	if [ -n "$current_wan" ] && [ "$current_wan" != "$LAN_DEV" ]; then
-		# Pull current chain's device attribute via JSON
-		existing_wan=$(nft -j list table netdev "$NFT_TABLE" 2>/dev/null | \
-			jsonfilter -e '@.nftables[*].chain[@.name="wan_in"].dev' 2>/dev/null)
-		if [ "$current_wan" != "$existing_wan" ]; then
-			nft delete chain netdev "$NFT_TABLE" wan_in 2>/dev/null
-			nft add chain netdev "$NFT_TABLE" wan_in \
-				"{ type filter hook ingress device $current_wan priority -300 ; }" \
-				2>/dev/null
-			# Re-add wan_in rules for all existing counters. We can find
-			# them by grepping existing counter names.
-			nft -j list table netdev "$NFT_TABLE" 2>/dev/null | \
-				jsonfilter -e '@.nftables[*].counter.name' 2>/dev/null | \
-				grep '^host_rx_' | sed 's/^host_rx_//' | tr '_' '.' | \
-				while read ip; do
-					local id=$(ip_to_id "$ip")
-					nft add rule netdev "$NFT_TABLE" wan_in \
-						ip daddr "$ip" counter name "host_rx_$id" 2>/dev/null
-				done
-		fi
-	fi
 
 	# Get current counter names → IP set (so we can skip already-tracked).
 	existing_ips=$(nft -j list table netdev "$NFT_TABLE" 2>/dev/null | \
