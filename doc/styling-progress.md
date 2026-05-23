@@ -2526,8 +2526,281 @@ ship 后用户验证:
 
 ---
 
+## 🎨 第三十二轮(Step 120-124):ifacebox chip dark mode 现代化 + Memory 进度条
 
+> 触发:Chrome-Claude 提交截图 + DOM 实测的 Port Status 夜间模式诊断报告,5 个独立丑陋问题(`.ifacebox-head: #eee` 浅灰 / `box-shadow` 拟物高光 / `.zonebadge` HTML4 命名色 / `.cbi-tooltip: #fff` 白底 / 拟物 inset 高光线)。同时挂带 Memory 进度条 "771 MB / 3.84 GB" 文字几乎看不清。
+>
+> 5 个 Step,1 个独立(Memory progressbar)+ 4 个 chip 重写收敛。
 
+### 校准 — Chrome-Claude 第二次代码细节错(现象 100% 准)
+
+| 报告声明 | 实际项目 |
+|---|---|
+| `.ifacebox` 完全未被主题化 | ❌ L2932-2959 已有 `.network-status-table .ifacebox` 级联 |
+| Dark mode 选择器 `[data-darkmode="true"]` | ❌ 实际 `html[data-theme="dark"]` |
+| Token 用 `--bg-card / --bg-elevated / --bg-overlay / --color-danger-500` | ❌ **全部不存在**。本项目用 `--color-surface-0/1/2` / `--color-danger`(无 -500) / `--color-text-muted` / `--color-success-bg` / `--shadow-md` |
+| `.zonebadge` 用 inline `rgb(144,240,144)` | 项目源码无证据 → LuCI 上游模板 server-side 注入 |
+
+**5 个现象本身 100% 准**,代码片段的错都是"他脑子里项目跟本项目长得不一样"。
+
+### Step 120 — Memory 进度条 mix-blend-mode/invert 数学崩
+
+原规则用一套 over-clever 的双层过滤:
+
+```css
+color: var(--color-text);
+mix-blend-mode: difference;
+filter: invert(1);
+```
+
+理论上 `difference + invert` 等价于 `255 - |text - bg|`,在亮/深/亮 fill/深 fill 各种底色上都该产出可读色。**dark mode 数学崩**:
+
+```
+text = --color-text = #fafafa (250,250,250)
+bg   = --color-surface-2 = #27272a (39,39,42)
+difference: (211,211,208)  ≈ #d3d3d0 浅灰
+invert(1):  (44,44,47)     ≈ #2c2c2f 深灰
+display on bg #27272a:     对比度 ≈ 1.05:1 ❌ 几乎不可见
+```
+
+亮模式 over accent green 还勉强(粉色对绿,~3:1),但 dark 直接消失。
+
+修法:**弃 blend hack,改"白字 + double dark text-shadow halo"**(macOS / Spotify / YouTube overlay 标准):
+
+```css
+color: var(--color-text-onaccent);     /* 白,两 mode 都白 */
+font-weight: var(--weight-semibold);
+text-shadow:
+    0 0 3px rgba(0, 0, 0, 0.7),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+letter-spacing: 0.02em;
+```
+
+halo 提供局部字符边缘对比度,无论底色是亮是暗、是 accent fill 还是 surface tail,白字始终能读出。
+
+### Step 121 — `.ifacebox` 主体 token 化
+
+L3111-3132 4 处硬码:`box-shadow: inset 0 1px 0 rgba(255,255,255,.4)`(dark mode 上变白细线)、`.ifacebox-head { background: #eee }`(发光浅灰)、`.ifacebox-head.active { background: #5bc0de }`(bootstrap info 蓝)、`.ifacebox-body { padding: .25em }`(紧)。
+
+```css
+.ifacebox {
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-xs);  /* dark mode 自动 = none */
+    overflow: hidden;
+}
+
+.ifacebox-head.active {
+    position: relative;
+    background: var(--color-success-bg);
+    color: var(--color-success);
+}
+.ifacebox-head.active::before {
+    /* 3px 强调左条 */
+    content: ""; position: absolute;
+    inset: 0 auto 0 0; width: 3px;
+    background: var(--color-success);
+}
+```
+
+**关键意识**:`--shadow-xs` 在 dark mode token 块里被定义为 `none`(L232)—— ifacebox 自动 flat 化,**无需写 dark mode 专属规则**。这是项目 design system 一处用心:**阴影 token 在亮/暗模式有不同语义,亮 = subtle elevation,暗 = 完全 flat**。
+
+### Step 122 — `.zonebadge` 属性选择器吃下 LuCI inline style 注入
+
+LuCI 上游 Firewall / Network status 视图给 zone 标签直接写 inline `style="background-color: #90F090"`(或 named `lightgreen`)。1990s X11 命名色高饱和粉彩,dark mode 下高 luminance 抢戏。
+
+**CSS 核心事实**:class 选择器**永远输给 inline style**,无论加多少 `!important`。唯一覆盖路径 = **属性选择器 + `!important`**。
+
+```css
+.zonebadge[style*="lightgreen" i],
+.zonebadge[style*="#90ee90" i],
+.zonebadge[style*="#90f090" i],
+.zonebadge[style*="rgb(144, 238, 144)"],
+.zonebadge[style*="rgb(144,238,144)"],
+.zonebadge[style*="rgb(144, 240, 144)"],
+.zonebadge[style*="rgb(144,240,144)"] {
+    background: var(--color-success-bg) !important;
+    color: var(--color-success) !important;
+    border: 1px solid var(--color-success) !important;
+}
+```
+
+(lightcoral → danger 一组同理。)
+
+`i` flag 大小写不敏感。覆盖 4 种常见格式:named / hex(两种 lightgreen 别名)/ rgb-with-space / rgb-no-space —— 加上 Chrome-Claude 报告中见过的两个略偏 RGB,共 7 种拼写。
+
+同步顺手 token 化了 `.ifacebadge`(同样拟物 box-shadow 删)、`.zonebadge .ifacebadge` 灰边硬码 `#6c6c6c` → border-subtle、`.cbi-value-field > ul > li .ifacebadge` 背景 `#eee` → surface-1。
+
+### Step 123 — 6 个 SVG file-override:zero-JS 抢路径
+
+发现一个**优雅得意外**的覆盖机制。`dev-sync.sh` L160-167:
+
+```bash
+# NO --delete: this dir is shared with LuCI core modules — deleting
+# would wipe upstream icons we didn't ship.
+rsync -az \
+    "${PROJECT_ROOT}/htdocs/luci-static/resources/" \
+    "${ROUTER}:/www/luci-static/resources/"
+```
+
+**没有 `--delete`**。意味着:
+1. 项目里 `htdocs/luci-static/resources/icons/port_up.svg` 同步到路由器
+2. 路由器上 `/www/luci-static/resources/icons/port_up.svg` 已存在(LuCI 自带)
+3. rsync 覆盖同名文件 → **我们的 SVG 替换上游**
+4. 其他 LuCI 自带文件(我们没碰的)依然留着
+
+**零 JS、零 CSS hack、零 DOM 改动、零模板 fork。**这条路简单到我都没想到。
+
+写 6 个 Lucide-style SVG(viewBox 24,stroke=1.5,round caps + joins):port_up / port_down / ethernet / ethernet_disabled / wifi / wifi_disabled。颜色硬码 `#10b981` 或 `#a1a1aa` —— `<img>`-loaded SVG 是 sandboxed sub-document,**不继承父 CSS color cascade**,`stroke="currentColor"` 无效。CSS 配 `filter: brightness(1.15)` 在 dark mode 微调亮度。
+
+### Step 124 — `.cbi-tooltip` 白底 + `.zonebadge-empty` 棋盘灰条纹
+
+Chip 周围最后两处 LuCI cosmetic 遗物。Tooltip `background: #fff` 在 dark mode 像探照灯;`.zonebadge-empty` 的 1990s 棋盘条纹"空 zone"指示器 dark mode 灰对灰几乎不可读。
+
+```css
+.cbi-tooltip {
+    max-width: 280px;
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-surface-0);
+    color: var(--color-text);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-md);
+    white-space: pre-wrap;    /* 长 IP 列表自动换行 */
+}
+
+.zonebadge-empty {
+    color: var(--color-text-muted);
+    background: var(--color-surface-1);
+    border: 1px dashed var(--color-border-default);
+}
+```
+
+`pre` → `pre-wrap` + `max-width: 280px` 让长 DNS 列表 / IP 段不再溢屏。
+
+### 📊 第三十二轮(Step 120-124)累计
+
+| 指标 | 第三十一轮后 | 第三十二轮后 |
+|---|---|---|
+| Memory progressbar dark mode 数字可见性 | ❌ ~1.05:1 几乎不可见 | ✅ white + halo 普适可读 |
+| .ifacebox dark mode 视觉 | "发光的白补丁" | flat 卡 + success 绿强调左条 |
+| .zonebadge 颜色 | LuCI 上游 #90F090/#F09090 粉彩 | success-bg / danger-bg 跟随 accent |
+| .cbi-tooltip dark mode | 白底闪瞎 | surface-0 自适 |
+| 端口/网络图标统一性 | 4 套不同时代风格混搭 | 6 个 SVG Lucide-style 统一 |
+| 受益页面数 | 仅 Overview Network status | 全站 6+(Overview / Interfaces / Wireless / Firewall / Switch / VPN) |
+
+---
+
+## 🎨 第三十三轮(Step 125-128):Docker dark mode + button 品牌色 + 收尾图标
+
+> 触发:Chrome-Claude 又一份报告,3 个新问题。Network/Interfaces chip 还有 `bridge.svg` 旧风格混搭(Step 123 跳过没做)、Docker overview 4 个 tile 图标 dark mode 黑底黑图几乎不可见、DHCP/全站 + 和 Save 按钮用 Tailwind blue-400 跟 accent 绿割裂。
+>
+> 4 个 Step,P0 + P1 + P1 + P2 优先级递减。Chrome-Claude **第三次**在报告里用 `[data-darkmode="true"]` —— 他对本项目 dark mode selector 有自己的固定 mental model 而不是看实际,以后该明确告诉他。
+
+### Step 125 — Docker overview dark mode 黑图标 invert(P0,5 行 CSS)
+
+`luci-app-dockerman` 的 SVG(containers / images / networks / volumes / start / stop / restart)**全部硬码 `fill="#000000"`**。dark mode 上 #000 on #18181b 对比度 ~1.1:1(WCAG ≥ 3:1),实际几乎不可见。
+
+修法走 filter:invert 临时救场而不是 file-override:
+
+```css
+html[data-theme="dark"] img[src*="/luci-static/resources/dockerman/"] {
+    filter: invert(0.85) brightness(1.1);
+}
+```
+
+`invert(0.85)` 不是 `invert(1)`—— 完全反白在 flat dark card 上感觉太"硬",留 15% 灰让多色调图标(Images 店铺、Networks 拓扑)保留内部层次。
+
+**理想方案是 file-override 4 个 SVG 用 currentColor + accent green**,但那是 Round 34+ 的 4 个文件 + 重设计工作。这 5 行 CSS 95% benefit / 5% cost,典型 P0 hot-fix。
+
+### Step 126 — button 品牌色统一(蓝 → accent 绿)
+
+`.cbi-button-add / save / action / find / reload / link / input-find / input-save / input-reload` 共 9 个 button class L1786-1812 全部用 `--color-info`(蓝)。L1809 hover 还硬码 `#2563eb`。
+
+旧设计意图(代码注释):**3-tier 颜色层级**
+- `positive` = accent 绿 = Save & Apply(THE 主行动)
+- `info` = 蓝 = Save / Add / Action(次主)
+- `danger` = 红 = Reset / Remove
+
+但实际页面 Save & Apply 通常在 modal 底部或 page header,Save/Add 在表单 row 内 —— **layout 已经表达了层级**,color 信号冗余。剩下的视觉效果只是品牌色断裂:绿主题突然进个表单变蓝。
+
+转向:**单一品牌色 = accent 绿,层级靠 layout / size / shadow 表达**。Linear / Stripe / Notion / Vercel 都是这个模式。
+
+```css
+.cbi-button-add, .cbi-button-save, .cbi-button-action, /* …9 个 */ {
+    background-color: var(--color-accent-500) !important;
+}
+:hover { background-color: var(--color-accent-600) !important; }
+```
+
+`--color-info` 不删,保留给 chart-2 / .cbi-section-descr / ifacebadge info 状态等"真信息"用途。
+
+### Step 127 — `+` 按钮挤瘪 padding 修
+
+L2085-2088 `padding: 1px 6px` 把 + 按钮挤成 23×36px 药片,aspect 0.64。Step 126 改成 accent 绿后看起来"挤扁的绿胶囊"。
+
+修法:正方化 + 居中:
+
+```css
+.cbi-value-field .cbi-button-add {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    min-height: 36px;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-lg);
+    line-height: 1;
+    border-radius: var(--radius-md);
+}
+
+.cbi-value-field .cbi-button-add[value="+"] {
+    /* 纯 + 单字符 → 完美 36×36 正方 */
+    width: 36px;
+    padding: 0;
+}
+```
+
+36px 是 WCAG 2.5.5 桌面 UI 触摸目标合理下限,跟周围 input/select 高度对齐。
+
+### Step 128 — bridge / tunnel / vlan SVG 补完
+
+Step 123 跳过的 3 个,Chrome-Claude 在 Network/Interfaces 报告里点名了 bridge.svg。同 Round 32 file-override 模式:
+
+- `bridge.svg` — 两段横长 + 两根竖柱(L2 桥视觉概念)
+- `tunnel.svg` — 拱形隧道口 + 内深度环(VPN/Wireguard/OpenVPN/GRE)
+- `vlan.svg` — 根盒分支三子盒(一网→多 VLAN)
+
+至此 9 个 SVG file-override 覆盖:`port_up/down`(RJ45 状态)+ `ethernet/ethernet_disabled`(wired)+ `wifi/wifi_disabled`(wireless)+ `bridge`(L2)+ `tunnel`(VPN)+ `vlan`(802.1Q)。
+
+### 📊 第三十三轮(Step 125-128)累计
+
+| 指标 | 第三十二轮后 | 第三十三轮后 |
+|---|---|---|
+| Docker overview dark mode 图标可见性 | ❌ ~1.1:1 几乎不可见 | ✅ ~5:1 invert(0.85) 后清晰 |
+| Save/Add 按钮品牌色一致 | ❌ Tailwind blue-400 跟主题割裂 | ✅ 全主行动 accent 绿统一 |
+| `+` 按钮形状 | ❌ 23×36 药片,+ 贴边 | ✅ 36×36 正方,+ 居中 |
+| Network/Interfaces chip 图标设计语言 | ⚠ 3 套混搭 | ✅ 全 Lucide line-icon 统一 |
+| /icons/ 覆盖数量 | 6 | 9 |
+
+---
+
+## 🎯 Round 32-33 横向观察
+
+**"Chrome-Claude 对 dark mode selector 有自己的 mental model"**:他在 Round 32 报告写 `[data-darkmode="true"]`,Round 33 再写一次同样的错。我们实际是 `html[data-theme="dark"]`。这不是 typo —— 他**坚定地认为** dark mode 选择器是 `data-darkmode`。下次再请他看 dark mode 问题前,**应该在 prompt 里明确告诉他"本项目 dark mode 选择器是 `html[data-theme='dark']`,所有代码片段请用这个"**。**LLM agent 在熟悉的领域(CSS)里反而容易"用脑子里的模板"而不是 grep 实际项目** —— 这是个反直觉的失败模式。
+
+**file-override 是 LuCI 主题化最优雅的工具**:`htdocs/luci-static/resources/` 通过 rsync 无 `--delete` 同步,**同名文件覆盖上游**,零代码 / 零 race / 零升级冲突。Round 32 Step 123 偶然发现,Round 33 Step 125 / 128 直接复用。**值得在 doc/development.md 里专门写一节** —— "如果要换 LuCI 上游图标,直接放同名 SVG 到 `htdocs/luci-static/resources/icons/`,无需任何 JS/CSS/Lua 改动"。
+
+**`<img>` 加载的 SVG 是 sandboxed sub-document,不继承 CSS color cascade**:Step 123 学到的"凡是 `<img src="...svg">`,SVG 内部用 `stroke="currentColor"` 无效"。这是 SVG-as-image 跟 SVG-inline 的根本区别 —— inline `<svg>` 是 host document 的一部分继承 CSS,`<img>` 是独立 sub-document 隔离。**下次设计图标**:预期 host 改色 → 必须 inline `<svg>` 或 sprite `<use>`;接受图标自带固定色 → 用 `<img>` 加 file-override。
+
+**Color hierarchy vs 品牌一致性的设计哲学转折**:Round 33 Step 126 是个**有意识的设计语言转向** —— 从"绿 = positive / 蓝 = info-secondary / 红 = danger" 3-tier 转到"绿 = primary / 红 = danger / 其他靠 layout 区分"。这种转向在现代 design system(Linear / Stripe / Notion / Vercel)是主流,因为 layout 通常已经表达层级,color 重复表达反而稀释品牌。**但意味着 Save & Apply 跟 Save 视觉上不再差异化**(都绿),如果实际页面层级需要,后续要靠 size / shadow / outline-variant 补回。
+
+**"过度聪明的 CSS hack 数学崩"**:Step 120 的 `mix-blend-mode: difference + filter: invert(1)` 是个**理论漂亮但维护痛苦**的 hack。它依赖 4 个参数(text color × bg color × blend math × invert)的精确耦合,任何一个 token 调整都可能让数学崩(就是这次:dark mode `--color-text` 改成 `#fafafa` 后整个数学链失效)。**教训**:CSS 里需要"自适应不同 bg 的文字"时,优先 text-shadow halo 这种 O(1) 简单稳健方案,不是 blend-mode 多层耦合。
+
+**Inline style 覆盖唯一路径 = 属性选择器**:Step 122 实战内化的事实。**任何 LuCI 上游用 inline style 注入颜色/尺寸/状态的场景,class 选择器都救不了你,必须 `[style*="..."]` + `!important`**。其他类似场景:`<div style="display:none">`、`<button style="visibility:hidden">`、`<input style="width:50%">` —— 全是 LuCI 现役 inline 用法,本地化需走属性选择器路。
+
+**Iterative report-fix cycle 已经成为稳定节奏**:从 Round 14 开始 Chrome-Claude 报告 → 我校准 → 用户决策 scope → 我 ship → Chrome-Claude verify 这个 loop 跑了 9+ 轮。**每轮 4-5 个 Step,平均 1.5 小时 dev time,~150 LOC**。可持续节奏的关键是"**校准比执行重要**" —— 在动 Edit 前 grep 验证 5-10 处声明,典型可避开 30-50% 的 Chrome-Claude 归因错误(token 名错、selector 错、文件位置错)。
 
 ---
 
