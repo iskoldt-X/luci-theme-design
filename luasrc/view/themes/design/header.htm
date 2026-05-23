@@ -131,14 +131,45 @@
 	</div>
 </header>
 
+<%# Step 104 (Round 22): bottom navbar upgraded to preview-parity design.
+    Each tab now has:
+      - SVG icon from icons.svg sprite (replaces 28-px PNG, no more
+        loading.gif-era pixelation; scales cleanly on retina)
+      - Visible text label below the icon (preview spec was 10 px,
+        also gains a11y — screen readers read the label, no aria-label
+        needed since visible text is descriptive)
+      - .navbar-tab-{home|proxy|network|stats|admin} class so CSS can
+        cross-match against body[data-page^="..."] for active state.
+    Icon ↔ section map (consistent with preview's iPhone mockup):
+      Overview  → i-home
+      OpenClash → i-globe  (preview's "代理" / proxy slot)
+      Network   → i-network
+      Realtime  → i-bar-chart
+      Admin     → i-user
+-%>
 <div class="navbar">
-  <a href="<%=url('admin/status/overview')%>" aria-label="<%:Overview%>"><img src="<%=media%>/images/home.png" alt="<%:Overview%>" /></a>
+  <a class="navbar-tab navbar-tab-home" href="<%=url('admin/status/overview')%>">
+    <svg class="navbar-tab-icon" aria-hidden="true"><use href="<%=media%>/icons.svg#i-home"/></svg>
+    <span class="navbar-tab-label"><%:Home%></span>
+  </a>
   <% if disp.lookup('admin/services/openclash') then %>
-  <a href="<%=url('admin/services/openclash')%>" aria-label="OpenClash"><img src="<%=media%>/images/openclash.png" alt="OpenClash" /></a>
+  <a class="navbar-tab navbar-tab-proxy" href="<%=url('admin/services/openclash')%>">
+    <svg class="navbar-tab-icon" aria-hidden="true"><use href="<%=media%>/icons.svg#i-globe"/></svg>
+    <span class="navbar-tab-label">OpenClash</span>
+  </a>
   <% end %>
-  <a href="<%=url('admin/network/network')%>" aria-label="<%:Network%>"><img src="<%=media%>/images/link.png" alt="<%:Network%>" /></a>
-  <a href="<%=url('admin/status/realtime')%>" aria-label="<%:Realtime Graphs%>"><img src="<%=media%>/images/rank.png" alt="<%:Realtime Graphs%>" /></a>
-  <a href="<%=url('admin/system/admin')%>" aria-label="<%:Administration%>"><img src="<%=media%>/images/user.png" alt="<%:Administration%>" /></a>
+  <a class="navbar-tab navbar-tab-network" href="<%=url('admin/network/network')%>">
+    <svg class="navbar-tab-icon" aria-hidden="true"><use href="<%=media%>/icons.svg#i-network"/></svg>
+    <span class="navbar-tab-label"><%:Network%></span>
+  </a>
+  <a class="navbar-tab navbar-tab-stats" href="<%=url('admin/status/realtime')%>">
+    <svg class="navbar-tab-icon" aria-hidden="true"><use href="<%=media%>/icons.svg#i-bar-chart"/></svg>
+    <span class="navbar-tab-label"><%:Graphs%></span>
+  </a>
+  <a class="navbar-tab navbar-tab-admin" href="<%=url('admin/system/admin')%>">
+    <svg class="navbar-tab-icon" aria-hidden="true"><use href="<%=media%>/icons.svg#i-user"/></svg>
+    <span class="navbar-tab-label"><%:Admin%></span>
+  </a>
 </div>
 
 <div class="main">

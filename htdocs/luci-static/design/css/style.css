@@ -3908,6 +3908,13 @@ input[name="nslookup"] {
 }
 
 
+/* Step 104 (Round 22): bottom navbar upgraded to preview-parity design.
+   Was: 50 px tall, plain backdrop-filter blur, child <a><img/></a> with
+        a 28-px PNG icon, no labels, no active state.
+   Now: 72 px tall (icon 22 px + 2 px gap + 10 px label + 14 px padding),
+        stronger frosted-glass (saturate 140% + blur 20 px — matches
+        preview's iOS-style nav), .navbar-tab flex-column children, and
+        per-section active state keyed off body[data-page^="..."]. */
 .navbar {
 	z-index: 200;
 	overflow: hidden;
@@ -3915,15 +3922,16 @@ input[name="nslookup"] {
 	bottom: 0;
 	width: 100%;
 	border-top: var(--navborder);
-	height: calc(50px + constant(safe-area-inset-bottom));
-	height: calc(50px + env(safe-area-inset-bottom));
+	height: calc(72px + constant(safe-area-inset-bottom));
+	height: calc(72px + env(safe-area-inset-bottom));
+	padding-bottom: env(safe-area-inset-bottom);
 	background-color: var(--navbgcolor);
-	-webkit-backdrop-filter: blur(10px);
-	backdrop-filter: blur(10px);
+	-webkit-backdrop-filter: saturate(140%) blur(20px);
+	backdrop-filter: saturate(140%) blur(20px);
 	/* flex 布局自适应：openclash 缺失时其余项均分宽度，不再留 20% 空位 */
 	display: flex;
 	justify-content: center;
-	align-items: center;
+	align-items: stretch;
 }
 
 /* Step 74 (Round 13): hide the mobile bottom-bar on desktop. README marks
@@ -3944,33 +3952,79 @@ input[name="nslookup"] {
 	}
 }
 
-/* Step 96 (Round 18): bottom navbar is position:fixed and sits over the
-   content column. Without an offsetting padding-bottom on .main-right,
-   the last ~60 px of the page (the last hero stat, the last tile meta
-   line, the last device row…) is permanently hidden behind the navbar.
-   Chrome-Claude's responsive sweep caught this on a landscape-phone
-   profile (vw=901 vh=290) — Internet hero's Public IP row had its
-   bottom half clipped.
-   Match the navbar's own height formula: 50 px base + safe-area
-   on iOS notch / Android gesture bar, plus var(--space-4) of breathing
-   room so content doesn't visually butt against the navbar's top edge. */
+/* Step 96 + 104 (Round 22): bottom navbar is position:fixed and sits
+   over the content column. Without an offsetting padding-bottom on
+   .main-right, the last ~70 px of the page (the last hero stat, the
+   last tile meta line, the last device row…) is permanently hidden
+   behind the navbar. Step 96 added a 50-px buffer; Step 104 bumped
+   the navbar height to 72 px so we match here too. */
 @media (max-width: 1100px) {
 	.main-right {
-		padding-bottom: calc(50px + env(safe-area-inset-bottom) + var(--space-4));
+		padding-bottom: calc(72px + env(safe-area-inset-bottom) + var(--space-4));
 	}
 }
 
-.navbar a {
+/* Step 104 (Round 22): individual tab — flex-column icon over label,
+   replaces the old <a><img> 28×28 PNG layout. */
+.navbar-tab {
+	flex: 1 1 0;
+	display: inline-flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	padding: 8px 0;
+	text-decoration: none;
+	color: var(--color-text-subtle);
+	font-size: 10px;
+	font-weight: var(--weight-medium);
+	line-height: 1;
+	min-width: 0;
+	transition: color var(--motion-fast) var(--ease-out);
+}
+
+.navbar-tab:hover:not(.active) {
+	color: var(--color-text);
+}
+
+.navbar-tab-icon {
+	width: 22px;
+	height: 22px;
+	stroke-width: 1.75;
+	flex-shrink: 0;
+}
+
+.navbar-tab-label {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Active state — match body[data-page] (set by header.htm:78) against
+   each tab's section URL prefix. Overview also matches an empty path
+   (root after login). Network / Realtime / System are prefix-matched
+   so sub-pages still keep the tab highlighted. */
+body[data-page^="admin-status-overview"] .navbar-tab-home,
+body[data-page=""]                       .navbar-tab-home,
+body[data-page^="admin-services-openclash"] .navbar-tab-proxy,
+body[data-page^="admin-network"]            .navbar-tab-network,
+body[data-page^="admin-status-realtime"]    .navbar-tab-stats,
+body[data-page^="admin-system"]             .navbar-tab-admin {
+	color: var(--color-accent-500);
+}
+
+/* Step 104 backward-compat shim: the old PNG-image .navbar a rule
+   doesn't fire anymore (no plain <a><img> children), but keep this
+   block as documentation in case future LuCI changes re-emit them. */
+.navbar a:not(.navbar-tab) {
 	flex: 1 1 0;
 	text-align: center;
 	padding: 8px 0;
 	text-decoration: none;
 	max-width: 100px;
 }
-
-  .navbar a img {
-	width: 28px;
-  }
+.navbar a:not(.navbar-tab) img { width: 28px; }
 
   .cbi-input-apply,
   .cbi-button-apply,
