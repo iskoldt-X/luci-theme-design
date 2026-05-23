@@ -451,13 +451,49 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .wan-hero {
-    background: var(--color-surface-0);
+    /* Diagonal accent sheen + surface base. The middle stop is the only
+       coloured one so the gradient feels like a subtle glint, not a wash.
+       --color-accent-500-12 is pre-derived rgba() (see style.css §1.8) —
+       do NOT switch to relative-color rgb(from ...) syntax, the LuCI
+       build minifier mangles it (see styling-progress.md Step 21). */
+    background:
+        linear-gradient(135deg,
+            transparent 0%,
+            var(--color-accent-500-12) 50%,
+            transparent 100%),
+        var(--color-surface-0);
     border: 1px solid var(--color-border-subtle);
     border-left: 3px solid var(--color-accent-500);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
     padding: var(--space-5);
     margin-bottom: var(--space-4);
+    /* Needed for the ::before glow to anchor inside the card and clip. */
+    position: relative;
+    overflow: hidden;
+}
+
+/* Soft accent glow nudged off the top-right corner — gives the hero card
+   visual weight without adding a heavy shadow. Sits behind content. */
+.wan-hero::before {
+    content: '';
+    position: absolute;
+    top: -40%;
+    right: -10%;
+    width: 280px;
+    height: 280px;
+    background: radial-gradient(circle,
+        var(--color-accent-500-12) 0%,
+        transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Lift every direct child above the ::before glow so text/icons render
+   on top regardless of insertion order from wan-hero.js. */
+.wan-hero > * {
+    position: relative;
+    z-index: 1;
 }
 
 .wan-hero-head {
@@ -510,6 +546,17 @@
     height: 6px;
     border-radius: 50%;
     background: currentColor;
+}
+
+/* Pulse only on the online state — gives a "live, breathing" cue that
+   distinguishes the card from a static dashboard. Auto-halts under
+   prefers-reduced-motion via the global rule in style.css §1. */
+@keyframes wan-hero-online-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px var(--color-success-bg); }
+    50%      { box-shadow: 0 0 0 5px var(--color-success-bg); }
+}
+.wan-hero-status-online::before {
+    animation: wan-hero-online-pulse 2.2s ease-in-out infinite;
 }
 
 .wan-hero-ping {

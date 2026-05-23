@@ -1198,3 +1198,72 @@ handleMenuExpand 三处：
 3. CI 现在会**自动阻止**资产大小超预算 / CGI 不安全模式 / 无 shebang 等
 4. **首次 page load** 多发一个 features.css 请求（局域网 < 10ms，不影响首屏）
 
+---
+
+## 🚀 第七轮（Step 41+）：MVP 视觉打磨 — 关掉 Overview 上 preview html 之间的视觉差
+
+> 起飞时间：2026-05-23（用户对比 `doc/upgrade-preview.html` 后反馈"还没 preview 那么 fancy"）
+> 范围：第五轮 ship MVP 时显式 deferred 的 9 项 polish，按"最高视觉 ROI / 最低风险"排序逐 Step 落地
+> 节奏：一 Step 一 commit，可独立回滚，符合 Step 1-40 的工作流
+> 目标 LuCI：ImmortalWrt 24.10 / LuCI 26.x 为主，所有数据访问用 try/catch + feature detection 保 universal fallback
+
+### Step 41 — WAN Hero 视觉打磨（gradient + accent glow + pulse）
+
+**时间**：2026-05-23
+**文件**：`htdocs/luci-static/design/css/features.css` §12（+45 行 / -8 行）
+**改动量**：纯 CSS，零 JS，零 HTML structure 变化
+
+**做了什么：**
+
+对比 [doc/upgrade-preview.html](upgrade-preview.html) §A1 的 `.wan-hero` 样式，real theme 此前是"平铺白底卡片 + 一根 3px 左边框"，缺少 preview 里那种"hero 卡的份量感"。本 Step 在不动 `wan-hero.js` 注入结构的前提下，给 `.wan-hero` 加三层视觉打磨：
+
+1. **对角 accent sheen** — `linear-gradient(135deg, transparent, accent-12, transparent)` 叠在 surface-0 之上。中间唯一着色的 stop 让它像一道斜光，不是色块铺满。
+2. **右上角 radial glow** — `::before` 伪元素，280×280 圆形径向，从 accent-12 到透明。`position: absolute; top: -40%; right: -10%;` 让它"溢出"卡片视觉边界，再由 `overflow: hidden` 剪掉，得到典型 SaaS hero 卡的发光质感。
+3. **online 状态脉冲** — `@keyframes wan-hero-online-pulse` 在 `.wan-hero-status-online::before` 上做 3px → 5px 的 success-bg 光晕呼吸（2.2s 周期）。**只对 online 启用**——offline / unknown 不动，保持"活着的指示"语义。
+
+**关键技术选择：**
+
+- 用 `--color-accent-500-12` / `--color-success-bg` 两个**预派生 rgba**，**不**用 `rgb(from ... r g b / 12%)` relative-color 语法。Step 21 的 minifier bug 笔记记得很清楚（[styling-progress §第三轮 Step 21](#step-21--minifier-safe-css-重写)）：LuCI build pipeline 的 CSS minifier 会把 space-separated rgb 语法截断成乱码，**所有现代 Color 4 语法仍然不能用**。
+- `.wan-hero > * { position: relative; z-index: 1 }` 是关键护身符 —— `wan-hero.js` 是动态注入子节点的，谁先谁后由 module load 顺序决定，用 universal child selector 一刀切让所有内容压在 `::before` glow 之上，比对每个具体 class 单独抬 z-index 鲁棒。
+- pulse 的 keyframes 写在 `prefers-reduced-motion` 之外，但 style.css §1 已经有全局 `* { animation-duration: 0ms !important }` 在 reduce 模式下生效——**不需要在这条 keyframes 自己再写一遍**，反而会增加维护点。
+
+**没有破坏的事：**
+
+- ❌ `wan-hero.js` 一行没动 — DOM 结构、注入时机、刷新逻辑全保留
+- ❌ `border-left: 3px solid accent-500` 的活动条保留 —— 与 preview 不完全一致（preview 只有 1px 全围边框），但本 theme 的左条已是"WAN online 时强调"的语义，保留更连贯
+- ❌ 既有的 `wan-hero-status / wan-hero-status-offline` 等类全部沿用，pulse 仅作用于 `wan-hero-status-online::before`
+
+**Break change：**
+
+视觉上 WAN Hero 卡片现在：
+- 有一道从左下到右上的浅绿斜向 sheen
+- 右上有一团若即若离的绿色辉光
+- "在线"徽章的圆点会在 2.2 秒内做一次呼吸
+- 离线 / 未知态保持静止，与之前一致
+
+Lighthouse / 性能上：
+- 多了 1 个 keyframes 动画 + 1 层 background gradient + 1 个 ::before composited layer
+- pulse 只动 box-shadow，触发 paint 不触发 layout（composite-friendly）
+- 整体增量 ~45 行 CSS，gzip 后 < 0.5 KB
+
+**验证：**
+
+```bash
+$ python3 -c "import re; c=open('features.css').read(); nc=re.sub(r'/\*.*?\*/','',c,flags=re.DOTALL); print(nc.count('{'), nc.count('}'))"
+179 179  ✅
+$ grep -c 'rgb([0-9]\+ [0-9]\+' features.css   # 禁止 Color 4 空格语法
+0  ✅
+$ grep -E '\-\-[a-z]+[A-Z]' features.css       # 禁止 camelCase token
+0  ✅
+```
+
+**与 preview 的剩余差距（留给后续 Step）：**
+
+| 差距 | 落地 Step |
+|---|---|
+| 实时 ↑↓ throughput row | Step 42-43 |
+| 4 个 tile（含 Net tile）| Step 42-43 |
+| 信号强度 latency bars 5 根 | Step 48 |
+| 全屏切换、tagline "在线 9d 14h" 大字 | 不实现（与 hero-status 信息重复） |
+
+**回滚方式：** `git revert` 该 commit 即可，零数据依赖。
