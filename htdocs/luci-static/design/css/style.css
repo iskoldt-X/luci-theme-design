@@ -2093,10 +2093,34 @@ td > table > tbody > tr > td,
 	text-decoration: none;
 }
 
+/* Round 33 / Step 127 — fix the squashed + button shape
+ *
+ * 旧规则 padding: 1px 6px 把 + 按钮挤成 23 × 36px "药片"。Chrome-Claude
+ * 量了 width/height 比 0.64,+ 号几乎贴边。修法:正方化 36 × 36(最小
+ * 触摸目标),padding 居中,行高 1 让 + 完美居中。配合 Step 126 accent
+ * 绿底色,现在是规整的 "圆角方形 add 按钮" 而不是 2018 Bootstrap chunk。
+ *
+ * 注意 .cbi-value-field 上下文里 + 按钮可能是 <input type="button"
+ * value="+"> 也可能是 <button>+</button> —— 用 min-width/height 而非
+ * fixed,文字按钮(如 "Add" 长字)也能受益。 */
 .cbi-value-field .cbi-button-add {
-	font-weight: bold;
-	margin: 4px 3px;
-	padding: 1px 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 36px;
+	min-height: 36px;
+	margin: var(--space-1);
+	padding: var(--space-1) var(--space-3);
+	font-size: var(--text-lg);
+	font-weight: var(--weight-semibold);
+	line-height: 1;
+	border-radius: var(--radius-md);
+}
+
+/* 纯 + 单字符按钮 → 完美正方 FAB */
+.cbi-value-field .cbi-button-add[value="+"] {
+	width: 36px;
+	padding: 0;
 }
 
 .tabs {
