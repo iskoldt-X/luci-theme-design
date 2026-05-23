@@ -1483,8 +1483,222 @@ Round 13 起,debug 链路是:
 
 不需要 Playwright,不需要 Claude Desktop + MCP,**已有工具就够用**。这是 Round 12 的"Round 12 最大改进 = 本地开发回路"的进一步进化版。
 
+---
 
+## 🤝 第十四轮（Step 87 + 88）：浏览器缓存破坏机制 + 存储 wrap regression
 
+> 触发:Chrome-Claude 在 Round 13 末发现 Step 80-85 反复需要 **手动 Cmd+Shift+R** 才看得到改动 —— 6 个 Step 都因为浏览器 HTTP 缓存被白白验证一遍。他主动提议"`?v=` 应该每次 build 含真正会变的 hash"。同时报告 Step 84 的 `<td>` 排除把存储卡的 path 单元格一起排除了,长 overlay path 又不 wrap。
+
+### Step 87 — 每次部署 `?v=` cache buster
+
+**根因**:`header.htm` 上所有主题资源的 `?v=` 用的是 `ver.luciversion`(`26.136.30825~c9cbaea`),只在 LuCI 自身升级时变。dev-sync 推新 JS 但 `?v=` 字节不变,Chrome 正确命中缓存。Step 85 已经把**服务器端** Lua module cache 清掉,但碰不到浏览器 HTTP cache。
+
+**修法的杠杆点**:读 `/www/luci-static/resources/luci.js` 第 142 行 → LuCI 的 `LuCI.__init__` 用正则 `/^(.*)\/luci\.js(?:\?v=([^?]+))?$/` 从**自己 `<script>` 标签的 `?v=`**提取出 `env.resource_version`。然后 `LuCI.prototype.require`(行 ~160)拿这个值作为所有 `L.require('module')` URL 的 `?v=` 后缀。
+
+→ 改 header.htm 第 71 行 `luci.js?v=` 这一个点,所有 `L.require()` 加载的模块都跟着变。一改撬动全部 11+ JS 模块。
+
+**实现**:
+- `header.htm` 渲染时读 `/tmp/luci-design.cachebust`(若存在),作为 `?v=` token;否则 fall-back 到 luciversion
+- `scripts/dev-sync.sh` 每次 rsync 完往 `/tmp/luci-design.cachebust` 写 epoch(折叠到已有的 SSH 往返)
+- 端用户(ipk 安装,无 dev-sync)文件不存在 → 走 luciversion → 行为不变
+
+### Step 88 — 存储 path wrap regression 精准修
+
+Chrome-Claude DOM dump 揭示 Step 84 我的核心假设错了。原以为"DHCP 用 `<table>`、存储用 `<div>`":
+
+```
+Storage row:  <td class="td left">/dev/sda1 (/boot)</td>
+              <tr class="tr">  <table class="table">  rowCols: 2
+
+DHCP row:     <td class="td">4C:10:D5:2A:E5:A0</td>
+              <tr class="tr cbi-rowstyle-1">  <table id="status_leases" class="table lases">  rowCols: 5
+```
+
+两边**都是 `<table>`**,Step 84 加的 `:not(td)` 把两边都排除了。区分器是**列数**(2 vs 5)而非 class 名。
+
+**修法**:用 `:first-child:nth-last-child(2)` 精准匹配"2-td 行的第一个 td"+ `~ td` 抓第二个。DHCP 5 列永远不匹配。CSS 结构不变性比 class 名(`lases` 还是 LuCI 自己 typo 的)稳定得多。
+
+### 📊 第十四轮(Step 87-88)累计
+
+| 指标 | 第十三轮后 | 第十四轮后 |
+|---|---|---|
+| 浏览器缓存破坏机制 | LuCI 版本字符串(只升级时变) | 每次 dev-sync 写 epoch + propagate to L.require modules |
+| Round-13 Cmd+Shift+R 频率 | 每个 Step 至少 1 次 | 0(自动失效) |
+| 存储长 path 显示 | Step 84 后溢出卡片 ~517px 需横滑 | 恢复多行 wrap |
+| DHCP 表 nowrap 行为 | 正确(Step 84 修了) | 正确(Step 88 不破坏) |
+
+---
+
+## 🚀 第十五轮(Step 89 + 90):Tile preview parity — 大数字 + delta 胶囊 + CPU%
+
+> 触发:用户切换方向 ——"储存我真的不在意。我现在最想实现的,是完美复刻 preview 里的 live tiles + sparkline 效果"。明确点了 4 项:数字应是百分比、升降红绿、内存进度条 + 历史波动、字号变大。
+
+### Step 89 — Tile DOM + CSS 重构到 preview A2-style
+
+**差距**:
+- value 是单文本节点(`"12%"`),preview 是 `<span class="num">12</span><span class="unit">%</span>` 两段不同字号
+- 没有 delta pill(meta 里塞了个 `↗ 0.05` 文字)
+- 内存 tile 只有 sparkline,没进度条
+- 字号 text-2xl(24px),preview 是 text-3xl(30px)
+- 顺序是 `head→value→meta→spark`,preview 是 `head→value→spark→meta`
+
+**修法**:
+- `setTile()` 接口从 `(el, value, meta)` 改为 `(el, opts)`,opts 含 `{num, unit, prefix, trend, progress, meta}`
+- value 行变成 4 个 inline span: `.design-tile-prefix` / `.num` / `.unit` / `.trend`
+- 新 `deltaToTrend(curr, prev, opts)` helper,按 threshold 噪过滤(CPU 0.05 / 内存 1pp / 温度 0.5°C / 网络 50 Kbps)
+- 新 `MetricRing.prototype.avg()`,用于 meta "Past 5 min · Avg N%"
+- `makeTile(id, icon, label, iconBase, hasProgress)` — 内存 tile 传 `true` 拿到一个 6px 高 progress bar
+- CSS:`.design-tile-trend-up/down/flat` 用 success-bg/danger-bg/surface-1 着色;`.design-tile-progress > div` 用 cubic-bezier 600ms ease-out
+- 温度 meta 加 `<span class="design-tile-status-dot-{ok|warm|hot}">●</span>` 状态点
+
+### Step 90 — CPU% 数据源换 loadavg
+
+**根因**:LuCI 自己的 `ubus call system info` 只给 loadavg(运行队列长度),根本不是利用率 —— loadavg 0.8 在 4 核机器是 20%,在 1 核机器是 80%,用同一个数字驱动一个 0-100% 显示数学上就错了。Round 4 MVP 留下的妥协。
+
+**修法**:
+- 新 CGI `/cgi-bin/design/cpustat` 读 `/proc/stat` 第一行的 8 字段(user/nice/system/idle/iowait/irq/softirq/steal),emit JSON + 衍生 `total` 和 `busy = total - idle - iowait`
+- `sparkline.js` 把 CPU 从 `sysInfo().then` 分离出来,独立 `fetchCpuStat()` 链
+- 每次 tick 用上次和这次 sample 的 diff: `pct = (busyDiff / totalDiff) * 100`,clamp 到 [0, 100]
+- 首次 sample 只 anchor 不显示,第二次开始有真值
+- CPU tile 加 `hasProgress: true`(跟内存一样,CPU% 也是天然 0-100)
+- Label 从 `'CPU Load'` 改成 `'CPU Usage'` —— 语义更准
+
+### 📊 第十五轮(Step 89-90)累计
+
+| 指标 | 第十四轮后 | 第十五轮后 |
+|---|---|---|
+| Tile 数字字号 | 24px(text-2xl) | 30px(text-3xl)统一 |
+| CPU tile 含义 | loadavg(运行队列) | CPU 利用率 % |
+| 内存 tile | 大数字 + sparkline | + 进度条 |
+| Delta 提示 | meta 内联字符 | 独立红/绿/灰胶囊 |
+| 温度 tile meta | 纯文字 "normal" | 彩色状态点 + 文字 |
+
+---
+
+## 🚀 第十六轮(Step 91 + 92):WAN Hero 像素级复刻
+
+> 触发:用户看完 Round 15 tile 落地说"非常好,我已经看到效果了 ... 接下来我们把工作重心放到 hero 吧。也是,要求像素级复刻。比如几个字体可以变大啥的"。同时 Chrome-Claude verify 报告 WAN tile num 是 24px(Step 89 时为了窄 220px tile 容纳 throughput 字符串故意降的),需要还原。
+
+### Step 91 — WAN tile num 字号还原 30px
+
+简单 CSS 撤销:删 `#design-tile-net .design-tile-num { font-size: var(--text-2xl) }` 和 `.design-tile-prefix` override。`.design-tile-value` 上已经有的 `flex-wrap: wrap` 处理窄屏 fallback —— pill 换行比数字常驻偏小好。
+
+### Step 92 — Hero card 整体 DOM + CSS 重写
+
+**结构差距**:
+- 老:4 元素 head 行(globe SVG + title + 状态胶囊 + ping bars)拥挤一行
+- 新:单行 `.wan-hero-status`("Internet · Online" + CSS `::before` 绿点带 pulse)+ 一行 `.wan-hero-tagline`("Online for Xh Ym · Last check Xs ago")
+
+**字段重排**:
+- 老 4 字段:Public IP / Connection / Uptime / Interface,全等字号
+- 新 4 字段:Public IP(.big)/ Connection(.big)/ Latency(原 head 里的 bars 移进来,放 dd 里)/ Interface
+- Uptime 移出 grid,吸收进 tagline
+- `.big` 修饰符:dd 升到 text-xl + sans-serif + semibold(强调 2 个最重要事实)
+- 其他 dd:text-base + mono(IP/Interface 等技术字符串)
+
+**装饰**:
+- 老 hero 左边有 3px 绿色 border-left
+- preview 没有 → 删
+- padding 从 `var(--space-5)` 改为 `var(--space-5) var(--space-6)`
+
+**Throughput 行**:
+- 老顺序 ↓ down 在前 ↑ up 在后
+- preview 顺序 ↑ up 在前 ↓ down 在后 → 互换
+- 老每行有 `.wan-hero-throughput-cell` wrapper
+- preview 是裸 `<div>`,删 wrapper class
+
+**Tagline 滚动**:
+- `_taglinePrefix` 每次 30 s refresh 由 WAN state 设置
+- 单独 5 s `setInterval` 调 `updateTagline()` 重算 "Xs ago" 文字
+- 廉价文本 swap,无 fetch
+
+**清理**:
+- 删 svgEl/svgUse helpers(全模块就一个 globe 用 SVG,被 CSS dot 替代了)
+- 删 `this.iconBase` 初始化(同理)
+
+### 📊 第十六轮(Step 91-92)累计
+
+| 指标 | 第十五轮后 | 第十六轮后 |
+|---|---|---|
+| WAN tile num 字号 | 24px(偏低) | 30px(跟 CPU/Mem/Temp 对齐) |
+| Hero 标题区 | 4 元素拥挤一行 | 单状态行 + 副 tagline |
+| Globe 图标 | SVG sprite use | CSS ::before 绿点 + pulse |
+| Hero 字段字号 | 全 text-sm 等 | 2 大字 sans + 2 小字 mono |
+| Hero 左边 accent | 3px 绿色 stripe | 无(preview 一致) |
+| Throughput 顺序 | ↓ 在前 | ↑ 在前 |
+| Tagline | 无 | "Last check Xs ago" 每 5s 滚动 |
+
+---
+
+## 🚀 第十七轮(Step 93 + 94):Devices card 像素级复刻 + Wi-Fi 数据源
+
+> 触发:用户看完 Hero 后转向 ——"接下来我们把工作重心放到设备列表"+ 2 个边界条件:(1)他的路由器只是 LAN,无法测 Wi-Fi 功能,**但不妨碍我们加上**为别的用户考虑;(2)preview 里的"猜应用(Netflix?)"这部分**不要加**——"有一点越界了"。
+
+### Step 93 — Devices card DOM + CSS 重构到 A2 layout
+
+**差距**:
+- 老:`<ul>` of `<li>`,每行 flex(16px icon + 名 + IP + 类型文字 + chev)
+- 新:`.devices-table` 含 `.devices-thead` 列标题 + `.devices-rows` —— 每行用 6-col grid: `32 icon | 1fr name | 60 ip | 130 sig | 80 seen | 24 chev`
+- 加 "信号" 和 "上次见到" 两列(原 "type" 列吸收到详情)
+
+**视觉**:
+- 32×32 圆角盒包图标,hover/expanded 时背景从 surface-1 变成 accent-500-12(精准 preview 行为)
+- 详情区从老的 left-margin + dashed line 改成 full-width + padding-left 对齐图标右缘
+- 4 按钮:Rename(可用)/ Whitelist(新 stub)/ Limit / Block(红)—— 用 `.cbi-button-action` / `-negative` LuCI 类,在 `.devices-actions` 内 override 成 compact pill(28px min-height)
+
+**"上次见到" 推断**:
+- DHCP lease.expires > now → "Now"(绿色)
+- lease 过期 → 行加 `.devices-row-offline` → opacity 0.55 + "Xm/Xh/Xd" 灰色相对时间
+- 静态 lease(无 expires)→ 假设在线("Now" 绿色)
+
+**Icon 修正**:DEVICE_TYPES 调整 —— iPhone/iPad/Android 现在用 `i-phone`(以前是 `i-info`);新增 TrueNAS → `i-hard-drive`,Windows → `i-monitor`,Gemma4-Node 等 → `i-cpu`,HP-LaserJet 在 windows 规则前置(避免误判成 PC)。
+
+**意识到的设计选择 — App detection**:
+preview 里 "本次会话流量 ↓ 4.8 GB · ↑ 32 MB (Netflix?)" 这种 "Netflix?" 推断属于深度包检查 / 行为监控范畴,**主动不实现** —— 用户原话 "有一点越界了"。我们做的只是 hostname / OUI 静态推断,不窥探流量内容。
+
+### Step 94 — Wi-Fi 信号数据源(iwinfo CGI)
+
+**修法**:
+- 新 CGI `/cgi-bin/design/wifi-stations`:probe `ubus` → `ubus call iwinfo devices` → 对每个 wlanN 执行 `info` + `assoclist`,structured JSON 透传 `{available, interfaces: {wlanN: {info, assoclist}}}`
+- 无 Wi-Fi 硬件(用户的 QEMU x86/64)→ `{available:false, reason:"no-iwinfo"}` → 视觉零变化(Step 93 wired-pill 行为)
+- `devices.js` 加 5 个 helper:`fetchWifiStations` / `buildStationMap` / `signalToBarsClass(dBm)` / `formatBand(MHz)` / `formatWifiConnection(info, station)`
+- `refresh()` 用 `Promise.all([leases, wifi])` 并发抓 —— wifi 单独 fetch 失败永远不阻塞主列表
+- buildRow 看到 MAC 在 station map 里 → signal bars(>= -55 强 / -55..-65 medium 灰 4th / < -65 weak 黄 1-2)+ dBm 文字
+- 详情多一行 Rate:"Rx 433 Mbps · Tx 866 Mbps"(只在 Wi-Fi 客户端出现)
+
+**优雅降级矩阵**:
+
+| 路由器情况 | CGI 输出 | 视觉效果 |
+|---|---|---|
+| 无 ubus | `{available:false, reason:"no-ubus"}` | 全 wired pill |
+| 无 iwinfo | `{available:false, reason:"no-iwinfo"}` | 全 wired pill |
+| Wi-Fi 0 客户端 | `{available:true, interfaces:{wlanN:{}}}` | 全 wired pill(map 空) |
+| Wi-Fi N 客户端 | 含 assoclist | 匹配 MAC 显示 bars;未匹配显示 wired |
+
+### 📊 第十七轮(Step 93-94)累计
+
+| 指标 | 第十六轮后 | 第十七轮后 |
+|---|---|---|
+| Devices card 列结构 | 4 字段 flex | 6-col grid + 列标题 |
+| 设备图标 | 16px 平铺 | 32×32 圆角盒(hover/expand 变 accent 色) |
+| "信号" 列 | 无 | bars(强/中/弱)or wired pill |
+| "上次见到" 列 | 无 | 租约过期推断 + 灰化 |
+| 详情按钮 | 3 (Rename/Limit/Block) | 4 (+Whitelist stub) |
+| Wi-Fi 数据源 | 无 | `/cgi-bin/design/wifi-stations` |
+| 别的用户(有 Wi-Fi) | 看不到信号信息 | 自动点亮 + Connection/Rate 详情 |
+| 用户(LAN-only)行为 | — | 跟 Step 93 完全一致(graceful) |
+
+---
+
+## 🎯 Round 14-17 横向观察
+
+**Chrome-Claude verify 工作流持续验证有效**:Round 14-15 全部走"我 ship → 用户传话给 Chrome-Claude → DOM dump 回来 → 我精修"的回路。Round 16 末 Chrome-Claude 用完 quota,Round 17 直接 ship + 用户视觉验证。事实证明 dev-sync + 视觉对照对绝大部分修改足够,Chrome-Claude 真正不可替代的场景是**陌生 DOM 结构第一次探查**(Round 14 storage selector 那次)。
+
+**"先 CSS 后数据"的拆 Step 模式**:Round 17 Step 93 把所有视觉(包括 `.devices-sig-bars` 三种状态)CSS 先 ship,Step 94 才接 Wi-Fi 数据。Step 93 用户立刻能视觉对齐 preview,Step 94 即使在他 LAN-only box 上看不出差别,也不影响主进度。**单 Step 范围窄、单功能聚焦**比"一次性大 Step 全做完"更适合 dev-sync 工作流。
+
+**"为别的用户考虑" 的原则**:用户多次明确我们应该为没他这种 hardware constraints 的用户实现完整功能,他自己接受 graceful degradation。Step 90 / 94 / 91 都是这种心态产物。代码里因此多了大量 fallback 路径(无 thermal sensors / 无 Wi-Fi 硬件 / 无 nlbw 等),但每条都经过实测验证不破当前行为。
+
+---
 
 
 
