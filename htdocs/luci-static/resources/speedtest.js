@@ -24,10 +24,13 @@
 //   - Theoretical-link-rate comparison (needs iwinfo channel/bandwidth)
 // ─────────────────────────────────────────────────────────────────────────────
 
-var PING_COUNT      = 10;
-var DOWNLOAD_BYTES  = 10 * 1024 * 1024;   // 10 MB
-var UPLOAD_BYTES    =  5 * 1024 * 1024;   //  5 MB
-var TIMEOUT_MS      = 30000;
+var PING_COUNT      = 20;                 // 20 samples → median is robust to outliers
+var DOWNLOAD_BYTES  = 50 * 1024 * 1024;   // 50 MB — at 1 Gbps wired = 400ms (post TCP slow-start),
+                                          // at 5 GHz Wi-Fi ≈ 1s, at 2.4 GHz Wi-Fi ≈ 4s
+                                          // User feedback: 10 MB was finished before the
+                                          // browser even rendered progress on gigabit LAN.
+var UPLOAD_BYTES    = 25 * 1024 * 1024;   // 25 MB — same logic, upload is typically slower
+var TIMEOUT_MS      = 60000;              // 60 s per phase covers worst-case 2.4 GHz on a busy AP
 
 function median(arr) {
 	if (!arr.length) return null;
@@ -115,7 +118,6 @@ return baseclass.extend({
 	runTest: function () {
 		var btn = document.getElementById('speedtest-run');
 		btn.disabled = true;
-		btn.textContent = _('Testing...');
 		var self = this;
 
 		this.setStat('download', '—');
@@ -123,16 +125,20 @@ return baseclass.extend({
 		this.setStat('latency', '—');
 		this.setStat('jitter', '—');
 
+		btn.textContent = _('Testing latency (%d samples)…').replace('%d', PING_COUNT);
+
 		this.testLatency()
 			.then(function (l) {
 				if (l.median !== null) {
 					self.setStat('latency', l.median.toFixed(1) + ' ms');
 					self.setStat('jitter',  l.jitter.toFixed(1) + ' ms');
 				}
+				btn.textContent = _('Testing download (%d MB)…').replace('%d', DOWNLOAD_BYTES / 1024 / 1024);
 				return self.testDownload();
 			})
 			.then(function (mbps) {
 				self.setStat('download', mbps !== null ? mbps.toFixed(1) + ' Mbps' : _('error'));
+				btn.textContent = _('Testing upload (%d MB)…').replace('%d', UPLOAD_BYTES / 1024 / 1024);
 				return self.testUpload();
 			})
 			.then(function (mbps) {

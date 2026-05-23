@@ -39,11 +39,23 @@ function cached(key, fn) {
 }
 
 return baseclass.extend({
-	// luci-app-nlbw installed? (gates D2 traffic analysis full UI)
+	// Netlink-based bandwidth accounting installed? Gates D2 traffic
+	// analysis full UI. We accept either:
+	//   - luci-app-nlbwmon  (modern, ImmortalWrt 24.10+ / OpenWrt 23.05+)
+	//   - luci-app-nlbw     (legacy, older builds)
+	// Detection method: probe /etc/config/{nlbwmon,nlbw} via uci.load.
+	// NB: the UCI config file name is just 'nlbwmon' / 'nlbw' (NOT the
+	// 'luci-app-' prefix — that's only the opkg package name). The original
+	// `uci.load('luci-app-nlbw')` was a bug — it would never find /etc/config/luci-app-nlbw
+	// because that file doesn't exist regardless of installation state.
 	nlbw: function () {
 		return cached('nlbw', function () {
-			return L.resolveDefault(uci.load('luci-app-nlbw'), null)
-				.then(function (r) { return r !== null; })
+			return L.resolveDefault(uci.load('nlbwmon'), null)
+				.then(function (r) {
+					if (r !== null) return true;
+					return L.resolveDefault(uci.load('nlbw'), null)
+						.then(function (r2) { return r2 !== null; });
+				})
 				.catch(function () { return false; });
 		});
 	},

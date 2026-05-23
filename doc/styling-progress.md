@@ -1094,5 +1094,107 @@ handleMenuExpand 三处：
 | 测速理论上限对比 | 暂无 | 需 iwinfo channel/bandwidth 查询 |
 | 设备列表 rename 持久化 UCI | 暂无 | 需要新 UCI section + UI |
 | 设备列表 iwinfo signal 合并 | 暂无 | 需多 ubus call merge |
-| Apply modal Undo 按钮 | 暂无 | LuCI 有 rollback API，需要 window 期内 toast 提供撤销
+| Apply modal Undo 按钮 | 暂无 | LuCI 有 rollback API，需要 window 期内 toast 提供撤销 |
+
+---
+
+## 🚀 第六轮（Step 35-40）：upgrade.md v2 Phase 4 + Phase 5 落地
+
+> 起飞时间：2026-05-23（Phase 2+3 测试并行）
+> 范围：流量分析（渐进增强）+ 5 项工程加固
+> 节奏：6 个 task 一批 ship；测试由用户独立线推进
+> 备注：本轮起仓库结构第一次有 `htdocs/luci-static/design/css/features.css` —— style.css 不再是 single-file
+
+### Step 35 — T14 流量分析（渐进增强）
+
+**改动**：
+- 新文件 `traffic.js`（~85 行）
+- `style.css` §17（~55 行）
+
+**渐进增强**：通过 capability.nlbw() 检测 luci-app-nlbw → 装了显示 "Open full Traffic Analysis →" 跳转链接；没装显示样式化占位卡 + opkg 跳转按钮。
+
+**MVP scope**：inline nlbw 数据图表（top-N consumers, 24h sparkline）延后 — 跨 ImmortalWrt/OpenWrt/Lean LuCI fork 的 nlbw RPC surface 差异需要更深 integration。本轮先 ship "discovery + bridge"。
+
+### Step 36 — T15 CSS 拆分（部分）
+
+**改动**：
+- 新文件 `css/features.css`（1038 行，§8 cmdk 到 §18 i18n-debug 整体迁出）
+- `style.css` 末尾加 `@import url("./features.css")` 接续 cascade
+- style.css 从 5127 行降到 4091 行（base + components + plugins + responsive）
+
+**保守版**：spec 提议拆 8 个 module，本轮先拆**1**——把 v2 新增的 features 块挪出。理由：features 段语义独立、风险最低；base/components/responsive 等老段拆分易破坏 cascade 顺序，留独立 PR。
+
+**部署影响**：浏览器多一个 HTTP 请求（features.css）。LuCI 局域网 < 10ms，HTTP/2 multiplex 下基本免费。
+
+### Step 37 — T16 i18n 压力测试模式
+
+**改动**：新文件 `i18n-debug.js`（~75 行）+ §18 CSS（~25 行）
+
+**用法**：在任意 LuCI URL 加 `?design-debug=pseudo-long`：所有可见文本自动加倍（拷贝 + 空格 + 拷贝），暴露 overflow。其他 mode：`pseudo-short` 把 Latin 单词换成 `一`，`rtl` 给 html 加 dir="rtl"，`outline` 给所有元素加红框。多个 flag 用逗号组合。
+
+**实现细节**：TreeWalker 只走 text nodes，skip `<script>/<style>/<textarea>/<input>`。3 秒间隔重 walk，catch 动态注入的 cards。
+
+### Step 38 — T17 性能预算 CI
+
+**改动**：`lint.yml` 加 "Performance budget" step
+
+**5 类资产 gzipped 上限**（与 upgrade.md §6 对齐）：
+- CSS ≤ 35 KB（当前 28KB，79%）
+- JS ≤ 35 KB（当前 31KB，86% — 接近上限）
+- Fonts ≤ 25 KB（当前 18KB，71%）
+- SVG sprite ≤ 15 KB（当前 2.6KB，16%）
+- CGI 脚本 ≤ 5 KB（当前 1.5KB，28%）
+
+任何 PR 让 gzip 大小超预算 → CI fail。
+
+**为什么不是 Lighthouse**：Lighthouse 完整版需要 running LuCI 实例（mock server）。本轮先 ship gzip 预算（足够拦住明显 regression），完整 Lighthouse 留后续接入 qemu 镜像后做。
+
+### Step 39 — T18 CGI 安全审计
+
+**改动**：`lint.yml` "Shellcheck" step 扩展 + 新 "CGI safety audit" step
+
+**Shellcheck**：原仅扫 uci-defaults；现追加 4 个 CGI（ping/temp/download/upload）。
+
+**Theme-specific audit**：
+- 每个 CGI 必须有 `#!/bin/sh` shebang
+- 禁止用 `eval/exec/source $QUERY_STRING`（shell injection 防护）
+- `download` CGI 必须 clamp `BYTES`（已实现 1KB-100MB 边界）
+- 每个 CGI 必须发 `Content-Type` header
+- 缺 `Cache-Control` 发 warning（不 fail）
+
+### Step 40 — T19 LuCI 兼容矩阵（文档版）
+
+**改动**：新文件 `doc/luci-compat.md`
+
+**内容**：
+- 已验证版本表（当前仅 ImmortalWrt 24.10-SNAPSHOT / LuCI 26.136）
+- 完整 LuCI API 依赖清单（按 globals / ui surface / ubus 分类）
+- **`L.ui.changes.displayChanges` 标注 "internal — no stability contract"**（已有 try/catch 兜底）
+- 跨版本手动测试 checklist
+
+**为什么不上 docker matrix CI**：每个 LuCI version build SDK + 起 docker 在 CI 跑成本太高，价值 / 工时不划算。文档化 + 手动 checklist 是务实选择。真正的自动化跨版本测试留 T21 Visual Regression。
+
+---
+
+## 📊 第六轮（Step 35-40）累计变化
+
+| 指标 | 第五轮后 | 第六轮后 |
+|---|---|---|
+| LuCI module 文件数 | 10 | **12** (+traffic +i18n-debug) |
+| CSS 文件数 | 1 | **2** (split features.css) |
+| style.css 行数 | 5127 | **4091**（features 挪出） |
+| features.css 行数 | — | **1038** |
+| lint.yml CI 检查数 | 7 | **9** (+Perf budget +CGI safety audit) |
+| 文档：LuCI API 依赖 | 散在 doc 各处 | **`luci-compat.md` 集中** |
+| upgrade.md Phase 4 完成 | 0/1 | **1/1 ✅** (MVP) |
+| upgrade.md Phase 5 完成 | 0/5 | **5/5 ✅** |
+| Phase 6 backlog | 0/2 | 0/2 (future) |
+| **累计 v2 进度** | 13/21 (62%) | **19/21 (90%)** |
+
+## 🎯 用户能立刻看到的变化（第六轮）
+
+1. **Overview 底部多了 Traffic Analysis 卡**——装了 luci-app-nlbw 会显示 "Open full Traffic Analysis →"，没装会显示安装提示
+2. **任何 LuCI 页面 URL 加 `?design-debug=pseudo-long`** 会触发 i18n 压测模式（所有文本自动加倍，看哪里 overflow）
+3. CI 现在会**自动阻止**资产大小超预算 / CGI 不安全模式 / 无 shebang 等
+4. **首次 page load** 多发一个 features.css 请求（局域网 < 10ms，不影响首屏）
 

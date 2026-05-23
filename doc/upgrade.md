@@ -65,19 +65,19 @@
 | T11 A2 设备列表 + OUI | §2.A2 | 7h | ✅ shipped (MVP) — rename / iwinfo signal 合并延后 |
 | T12 A3 快速操作浮层 | §2.A3 | 3h | ✅ shipped — 4 个操作（Wi-Fi/防火墙/DHCP/重启） |
 | T13 S2b 应用变更体验重塑 | §1.S2b | 5h | ✅ shipped (MVP) — Undo 按钮延后 |
-| **第四波 — 流量分析** | | **10h** | ⏳ 下批 |
-| T14 D2 流量分析（渐进增强） | §5.D2 | 10h | ⏳ |
-| **长期 — 工程加固** | | **11h** | ⏳ |
-| T15 C1 CSS 拆分 | §4.C1 | 4h | ⏳ |
-| T16 C3 i18n 压测 | §4.C3 | 2h | ⏳ |
-| T17 C4 Lighthouse CI | §4.C4 | 2h | ⏳ |
-| T18 C5 CGI 安全审计 | §4.C5 | 1h | ⏳ blocked by T7 |
-| T19 C6 LuCI 兼容矩阵 | §4.C6 | 2h | ⏳ |
+| **第四波 — 流量分析** | | **10h** | **✅ 完成（MVP）** |
+| T14 D2 流量分析（渐进增强） | §5.D2 | 10h | ✅ shipped (MVP) — capability 检测 + 占位/跳转；inline nlbw 数据 follow-up |
+| **长期 — 工程加固** | | **11h** | **✅ 完成** |
+| T15 C1 CSS 拆分 | §4.C1 | 4h | ✅ shipped (部分) — §8-§18 features 拆到 features.css；§1-§7 base 留 style.css |
+| T16 C3 i18n 压测 | §4.C3 | 2h | ✅ shipped — i18n-debug.js 支持 `?design-debug=pseudo-long\|short\|rtl\|outline` |
+| T17 C4 Lighthouse CI | §4.C4 | 2h | ✅ shipped (size budget) — Lighthouse 完整版需要 mock server，本轮先做 gzip 预算检查 |
+| T18 C5 CGI 安全审计 | §4.C5 | 1h | ✅ shipped — shellcheck + theme-specific CGI 输入检查（bytes clamp / Content-Type / shebang） |
+| T19 C6 LuCI 兼容矩阵 | §4.C6 | 2h | ✅ shipped (文档版) — `doc/luci-compat.md` 列出所有 LuCI API 依赖 + 手动测试 checklist |
 | **加固 — 部署期 backlog** | | **~10h** | ⏳ |
 | T20 Build-time CSS diff | finalplan §10.7 | 2h | ⏳ |
 | T21 Visual regression test | finalplan §10.7 | 6-8h | ⏳ |
 
-**进度**：13 / 21 task 完成（62%），~50h / 70h 工时（71%）。剩余 Phase 4（流量分析）+ Phase 5（工程加固）+ Phase 6（部署期 future）。
+**进度**：19 / 21 task 完成（90%），~64h / 70h 工时（91%）。剩余仅 Phase 6（部署期加固 future）：T20 build-time CSS diff + T21 visual regression test。
 
 ---
 

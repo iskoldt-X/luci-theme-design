@@ -27,7 +27,8 @@ var MENU_ICON_MAP = {
 	'Logout':            'i-log-out',
 	'Reboot':            'i-power',
 	// by data-node-name (fallback for menus whose title varies by locale)
-	'nlbw':              'i-bar-chart',
+	'nlbw':              'i-bar-chart',   // legacy nlbw package
+	'nlbwmon':           'i-bar-chart',   // modern nlbwmon package (ImmortalWrt 24.10+)
 	'wizard':            'i-sparkles'
 };
 

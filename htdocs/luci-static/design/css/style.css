@@ -3405,7 +3405,10 @@ input[name="nslookup"] {
         display: inline-table;
         overflow: auto;
     }
-    .node-nlbw-usage table {
+    /* covers both legacy `luci-app-nlbw` (body.node-nlbw-usage) and modern
+       `luci-app-nlbwmon` (body.node-nlbwmon-*) — selector prefix-matches both */
+    .node-nlbw-usage table,
+    [class*="node-nlbwmon"] table {
         display: block;
         overflow: auto;
     }

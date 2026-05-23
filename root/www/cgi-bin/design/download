@@ -3,14 +3,16 @@
 # Browser measures elapsed time → throughput.
 # See doc/upgrade.md §0.5, §2.A5.
 
-# Query param: bytes=NNN (default 10MB, capped at 100MB for safety).
+# Query param: bytes=NNN (default 50 MB, capped at 200 MB for safety).
+# 200 MB upper bound covers measuring a 1 Gbps link's max throughput with
+# a long-enough sample to defeat TCP slow-start (~1.6s @ 1 Gbps).
 QS="${QUERY_STRING:-}"
 BYTES=$(echo "$QS" | sed -n 's/^.*bytes=\([0-9]\+\).*$/\1/p')
-BYTES=${BYTES:-10485760}
+BYTES=${BYTES:-52428800}
 
-# Clamp to [1 KB, 100 MB] — prevents abuse / OOM on tiny routers.
+# Clamp to [1 KB, 200 MB] — prevents abuse / OOM on tiny routers.
 [ "$BYTES" -lt 1024 ] && BYTES=1024
-[ "$BYTES" -gt 104857600 ] && BYTES=104857600
+[ "$BYTES" -gt 209715200 ] && BYTES=209715200
 
 echo "Content-Type: application/octet-stream"
 echo "Content-Length: $BYTES"
@@ -18,5 +20,11 @@ echo "Cache-Control: no-store"
 echo ""
 
 # /dev/urandom is incompressible — prevents intermediate caches / browser
-# from artificially inflating the measured throughput.
-dd if=/dev/urandom bs="$BYTES" count=1 2>/dev/null
+# from artificially inflating the measured throughput. Stream in 64 KB
+# blocks so the kernel doesn't have to materialise the whole payload before
+# starting the wire-send (lower TTFB, faster perceived start).
+dd if=/dev/urandom bs=65536 count=$((BYTES / 65536)) 2>/dev/null
+# Tail end if BYTES isn't a multiple of 64 KB
+REM=$((BYTES % 65536))
+[ "$REM" -gt 0 ] && dd if=/dev/urandom bs=$REM count=1 2>/dev/null
+:
