@@ -25,9 +25,10 @@ After that you should be able to function as if you'd been on the project all al
 ### Current state (snapshot — update this when work paces)
 
 - **Branch:** `js`. The default working branch. Direct commits OK, NEVER push to `origin` without explicit user permission.
-- **Rounds shipped:** 13 (Round 1 = initial cleanup, Round 13 = SVG namespace + CSS layout polish via Chrome-Claude agent collab)
-- **Steps shipped:** 85+ (each Step = one focused commit)
-- **What's in flight:** Chrome-Claude verification pass on Steps 83-85. User reports Chrome-Claude saw "19/42 SVGs in HTML namespace" — but I verified the router files ARE refactored correctly (mtimes recent). It's stale browser cache. User is being told to clear site data + hard refresh, then re-verify.
+- **Rounds shipped:** 42. Round 1 = initial cleanup; Round 42 = cross-branch fork to luci-theme-design-x (Sub-A icon/JS namespace + Makefile rename + collision-check CI; Sub-B1 ucode template dual-track; Sub-B2 CGI→rpcd/controller migration; Sub-C compat-matrix + weekly nightly CI matrix).
+- **Steps shipped:** 170 (each Step = one focused commit).
+- **Package identity:** the IPK forked to `luci-theme-design-x` at Round 42 Step 159 — `PKG_CONFLICTS:=luci-theme-design` enforces opkg-level mutual exclusion with the legacy package. The theme DISPLAY NAME stays `Design`; install path is `/luci-static/design-x/`; LuCI session for the new fork.
+- **What's in flight:** MTK build verification at `Actions-OpenWrt` repo's `build-immortalwrt-SSR-AX6000.yml` workflow (Round 42 Sub-A target — proving the icon collision regression that triggered Round 42 is closed). Expected ~5 hours; user is sitting on the result. Sub-B/C are in-place but haven't been runtime-tested yet (next session's complaint window).
 
 ### Working principles (these are durable, not snapshot)
 

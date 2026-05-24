@@ -2,40 +2,80 @@
 
 > Living document. Updated at major decision points to capture: what's locked in next, what's deferred, what's explicitly opted out, and what needs deep redesign.
 >
-> Last updated: 2026-05-24, after Round 40 + dnsmasq incident postmortem.
+> Last updated: 2026-05-24, after Round 42 completion (cross-branch fork to luci-theme-design-x). MTK build verification at Actions-OpenWrt is in flight; Sub-B/C runtime verification deferred to next session.
 
 ---
 
-## 🎯 Round 41 — Locked-in next (defensive grooming)
+## ✅ Round 41 — DONE (defensive grooming, doc-only)
 
-After Round 40's first production incident, the user chose "defensive补课" over new features. Two deliverables:
+Shipped two reference docs that distill 40 rounds of accumulated tribal knowledge:
+- **`doc/luci-theme-toolbox.md`** — 15-section LuCI 26.x theming cookbook (file-override, `:has()`, UCI input validation, streaming metrics, etc.)
+- **`doc/chrome-claude-briefing.md`** — Chrome-Claude prompt prefix template with 5 audit variants
 
-- **A. `doc/luci-theme-toolbox.md`** — consolidate the LuCI-26.x theming power tools we've discovered across 40 rounds into one developer-facing reference. Topics:
-    - file-override via rsync no-`--delete` (Rounds 32/33 SVG icons)
-    - `:has(#stable-id) + !important` for non-invasive HTML modification (Round 40 Step 151)
-    - Inline SVG data-URI mask on `::before` for icon injection when LuCI controls inner HTML (Round 35 Step 136)
-    - Attribute selectors + `!important` to override LuCI's inline styles (Round 32 Step 122 zonebadge; Round 34 Step 131 DiskMan)
-    - UCI input validation before write (Round 40 Step 153 — see also `memory/uci-write-needs-service-validation.md`)
-    - Sliding-window + UI-throttle for streaming metrics (Round 39 Step 143/144 speedtest)
-    - Adaptive scale + monotone-up ratchet for variable-range UIs (Round 39 Step 145)
-    - Tooltip vs inline for ancillary stats (Round 39 Step 146)
-
-- **B. `doc/chrome-claude-briefing.md`** — Chrome-Claude prompt prefix template. Round 32-35 he consistently wrote `[data-darkmode="true"]` instead of `html[data-theme="dark"]`, and used non-existent token names (`--bg-card`, `--color-danger-500`, `--border-subtle`). Formalize a copy-pasteable "project environment briefing" block to drop at the start of every Chrome-Claude audit request.
+3 commits (`6fe0f6c → 2182582 → 10de729 → d1000ba` journal entry).
 
 ---
 
-## 🧪 Round 42+ candidates (data layer enhancements)
+## ✅ Round 42 — DONE (cross-branch fork as luci-theme-design-x)
+
+Triggered by MTK ipk build failure at Actions-OpenWrt's build-immortalwrt-SSR-AX6000.yml. immortalwrt 24.10's luci-base started shipping the 9 SVG paths our theme had been file-overriding since Round 32 → opkg refused double-ownership → MTK build aborted. x86 build had been passing on older luci-base snapshot, soon to hit same wall.
+
+Decision: clean break to `luci-theme-design-x` IPK with `PKG_CONFLICTS:=luci-theme-design`. 15 Steps across 4 sub-rounds, all shipped:
+
+**Sub-A — build-time fixes (Steps 156-160, 5 commits)**
+- Tree rename `design/` → `design-x/` (Step 156)
+- Move 9 colliding SVGs to design-x/icons/ + CSS substitution via `content: url()` (Step 157, the MTK build unblocker)
+- Namespace 13 JS modules under `resources/design-x/` + `L.require('design-x.X')` rewrites (Step 158)
+- Makefile `PKG_NAME:=luci-theme-design-x` + `PKG_CONFLICTS:=luci-theme-design` + hook reorder (Step 159)
+- lint.yml `luci-base path-collision check` job — defends against future repeats (Step 160)
+
+**Sub-B1 — ucode template dual-track (Steps 161-162, 2 commits)**
+- Both `header.htm`+`footer.htm` (Lua) AND `header.ut`+`footer.ut` (ucode 24.10+) shipped (Step 161). luci-lua-runtime not required for ucode track.
+- lint.yml ucode-template syntax check (Step 162)
+- Known limitation: root-no-password warning fails-closed on ucode track (rpcd non-root can't read /etc/shadow). Lua track still shows it.
+
+**Sub-B2 — CGI → rpcd/controller migration (Steps 163-167, 5 commits)**
+- rpcd ubus skeleton + ACL declaration (Step 163) — `luci-theme-design-x` ubus object grants read-only to authed LuCI sessions
+- 6 JSON endpoints migrate to ubus methods (Steps 164 devstats canonical + 165 batch of 5)
+- 3 streaming endpoints (download/upload/ping) → LuCI Lua controller at `/cgi-bin/luci/admin/design-x/{ping,download,upload}` (Step 166). Adds `+luci-lua-runtime` to LUCI_DEPENDS.
+- apply-modal.js + toast.js gain `L.env.luciversion` major-in-[18,27] whitelist on the monkey-patches (Step 167, Codex P2-10 close)
+- **Legacy 9 CGI scripts NOT deleted yet** — retained as rollback fallback pending MTK build verification
+
+**Sub-C — doc + cross-branch CI (Steps 168-170, 3 commits)**
+- `doc/luci-compat.md` updated with rpcd ubus + LuCI controller + ucode template + version-pinning sections (Step 168)
+- `.github/workflows/build-matrix.yml` weekly cron: 7 cells across (immortalwrt-24.10, immortalwrt-master, openwrt-24.10, lean-master) × (x86_64, mt7986) running `make package/.../prepare` (Step 169)
+- This very file + INDEX.md + development.md path refs updated for design-x rename (Step 170)
+
+**Net effect on file count**: +5 new files (build-matrix.yml, luci-theme-design-x rpcd script, ACL JSON, header.ut, footer.ut, design_x.lua), +0 deleted (legacy CGIs preserved). Effective namespace fully forked.
+
+---
+
+## 🎯 Round 43 — Locked-in next (post-verification cleanup + ucode controller)
+
+Two work items, the first BLOCKED on user verification of MTK build:
+
+**A. Legacy /cgi-bin/design/* cleanup** (~10 min). Once user confirms the new rpcd/controller paths are working on the MTK build:
+- `git rm root/www/cgi-bin/design/{devstats,cpustat,temp,host-traffic,wifi-stations,nlbw,ping,download,upload}`
+- Update `Makefile` postinst-pkg to drop the `chmod -R +x /www/cgi-bin/design/` line
+- Update `lint.yml` `Shellcheck additional_files` to drop the 5 CGI scripts listed
+- Update `doc/development.md` to drop the `root/www/cgi-bin/design/` row from sync-targets table
+
+**B. ucode-controller dual-track** (~1-2h). Round 42 Step 166 added `+luci-lua-runtime` to LUCI_DEPENDS (~200 KB) so the Lua controller can register. To match the ucode-template dual-track from Sub-B1, write a parallel ucode controller at `root/usr/share/ucode/luci/controller/design-x.uc` (or wherever LuCI 24.10 expects ucode controllers). Once both tracks are in place, the `+luci-lua-runtime` dep can revert to optional.
+
+---
+
+## 🧪 Round 44+ candidates (data layer enhancements, previously Round 42+)
 
 Sorted by user-visible value:
 
 - **OUI vendor database** — LAN Clients detail panel currently shows "Vendor: Unknown" for every device. Embed a compact OUI prefix → vendor name table (~5KB JSON for top 1000 OUIs) keyed by first 3 MAC octets. Falls back to "Unknown" for unrecognized; optionally show a link to macvendors.com for manual lookup. **~1h work**.
-- **ARP-based real Last Seen** — Step 140 renamed the column to "Lease" to be honest about data source (DHCP lease validity ≠ device activity). Real last-seen needs `/proc/net/arp` REACHABLE/STALE/DELAY/FAILED state + `iwinfo.assoclist[].inactive` for Wi-Fi. Likely new CGI `/cgi-bin/design/lan-activity` returning per-MAC last-seen seconds. **~1-2h work**.
+- **ARP-based real Last Seen** — Step 140 renamed the column to "Lease" to be honest about data source (DHCP lease validity ≠ device activity). Real last-seen needs `/proc/net/arp` REACHABLE/STALE/DELAY/FAILED state + `iwinfo.assoclist[].inactive` for Wi-Fi. Now should go through the new `luci-theme-design-x` rpcd ubus object (Round 42 architecture) as a new method, NOT a raw CGI. **~1-2h work**.
 - **IPv6 addresses in expand detail** — `getHostHints.ip6addrs` returns array; render a line per address in the detail panel. **~10 min work**.
 - **Column header click-to-sort** — Name / IP / Lease columns become sortable on click. Round 38 Chrome-Claude P1 suggestion. **~30 min work**.
 
 ---
 
-## 🛠️ Round 43+ candidates (action button completions)
+## 🛠️ Round 45+ candidates (action button completions, previously Round 43+)
 
 Currently three of the five LAN Clients action buttons are placeholders that just toast "not yet implemented":
 
@@ -43,11 +83,11 @@ Currently three of the five LAN Clients action buttons are placeholders that jus
 - **Limit** — per-MAC bandwidth limit via tc/qdisc or sqm-scripts. Touches `/etc/config/qos` or `/etc/config/sqm`. **~2-4h, depends on which QoS stack**.
 - **Block** — drop traffic to/from MAC. Easiest via `nftables` set + drop rule in firewall, or via `dhcp.@host.dns_set` to give wrong DNS. **~1-2h**.
 
-These all involve persistent service config and **MUST follow Step 153's input-validation lesson** (sanitize before any UCI write).
+These all involve persistent service config and **MUST follow Step 153's input-validation lesson** (sanitize before any UCI write). Action-button writes should land in the rpcd ubus object as new methods under the existing `luci-theme-design-x` ACL grant.
 
 ---
 
-## 🎨 Round 44+ candidates (icon / visual finishing)
+## 🎨 Round 46+ candidates (icon / visual finishing, previously Round 44+)
 
 - **DockerMan SVG file-override** — Round 33 Step 125 used CSS `filter: invert(0.85)` as 5-line hot-fix for dark-mode invisibility of upstream `fill="#000"` icons. Real fix is 4 file-override SVGs with `currentColor` (containers / images / networks / volumes). **~30 min**.
 - **Disabled-variant icons** — Round 32/33 shipped active versions of port_up / ethernet / wifi / bridge / tunnel / vlan SVGs but not all the `_disabled` variants. Likely need bridge_disabled, tunnel_disabled, vlan_disabled if upstream uses them. **~20 min**.

@@ -65,16 +65,18 @@ ssh luci-router "echo ok"
 # 应该直接打印 "ok"，不问密码
 ```
 
-### 3. 初装主题 ipk（一次性，让 `/www/luci-static/design/` 等目录存在）
+### 3. 初装主题 ipk（一次性，让 `/www/luci-static/design-x/` 等目录存在）
 
-走 GH Actions 出的官方 ipk：
+走 GH Actions 出的官方 ipk(Round 42 fork 后包名是 `luci-theme-design-x`):
 
 ```bash
 # 在路由器上跑：
-opkg update && opkg install luci-theme-design
+opkg update && opkg install luci-theme-design-x
 # 或者把本地 build 出的 ipk scp 过去：
-scp -O luci-theme-design_*.ipk luci-router:/tmp/
-ssh luci-router "opkg install --force-reinstall /tmp/luci-theme-design_*.ipk"
+scp -O luci-theme-design-x_*.ipk luci-router:/tmp/
+ssh luci-router "opkg install --force-reinstall /tmp/luci-theme-design-x_*.ipk"
+# 若设备上仍有 legacy luci-theme-design,先卸:
+#   opkg remove luci-theme-design   (PKG_CONFLICTS 会强制要求这一步)
 ```
 
 这一步给后面的 rsync 创建目标目录，之后再也不需要装 ipk —— dev-sync 直接覆盖里面的文件。
@@ -123,10 +125,14 @@ ROUTER=root@10.0.0.1 ./scripts/dev-sync.sh
 
 | 本地 | 路由器 | 用 `--delete` |
 |---|---|---|
-| `htdocs/luci-static/design/` | `/www/luci-static/design/` | ✅ (theme 自己的子目录) |
-| `htdocs/luci-static/resources/` | `/www/luci-static/resources/` | ❌ (与 LuCI core 共享，删了会炸) |
-| `luasrc/view/themes/design/` | `/usr/lib/lua/luci/view/themes/design/` | ✅ |
-| `root/www/cgi-bin/design/` | `/www/cgi-bin/design/` | ✅ + 自动加可执行位 |
+| `htdocs/luci-static/design-x/` | `/www/luci-static/design-x/` | ✅ (theme 自己的子目录) |
+| `htdocs/luci-static/resources/` | `/www/luci-static/resources/` | ❌ (与 LuCI core 共享，删了会炸 — 我们模块在 `resources/design-x/` 子目录) |
+| `luasrc/view/themes/design-x/` | `/usr/lib/lua/luci/view/themes/design-x/` | ✅ |
+| `luasrc/controller/admin/` | `/usr/lib/lua/luci/controller/admin/` | ✅ (Round 42 Step 166 — design_x.lua) |
+| `root/usr/libexec/rpcd/` | `/usr/libexec/rpcd/` | ✅ (Round 42 Step 163 — rpcd ubus shell script) |
+| `root/usr/share/rpcd/acl.d/` | `/usr/share/rpcd/acl.d/` | ✅ (Round 42 Step 163 — ACL grants) |
+| `root/usr/share/ucode/luci/template/` | `/usr/share/ucode/luci/template/` | ✅ (Round 42 Step 161 — ucode templates) |
+| `root/www/cgi-bin/design/` | `/www/cgi-bin/design/` | ✅ + 自动加可执行位 (legacy — Round 42 Sub-B2 has rpcd/controller replacements; CGIs retained for rollback until verified) |
 
 ---
 
