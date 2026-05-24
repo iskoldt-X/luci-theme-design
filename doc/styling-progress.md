@@ -2804,6 +2804,289 @@ Step 123 跳过的 3 个,Chrome-Claude 在 Network/Interfaces 报告里点名了
 
 ---
 
+## 🎨 第三十四轮(Step 129-133):Bootstrap-era 残留大扫除 + LuCI 上游 inline-style 覆盖战
+
+> 触发:Chrome-Claude "猎巫大行动" 报告系统性扫描 20+ 页面,枚举 24 个新问题分 P0/P1/P2/P3。
+>
+> 校准发现:报告里 3 个 "已诊断仍未修" 实际 Round 32/33 已 ship(.cbi-button-add 蓝 Step 126、DockerMan 黑 SVG Step 125、.ifacebox lightgreen Step 122)—— 他看 stale 快照。这是个**信号 vs 噪声**问题,值得专门讨论(见横向观察)。
+>
+> 真新发现:6 处 `#eee`/`#101010` 硬码、SSH-keys `.cbi-dynlist .item::after` BS3 `#d9534f` 红 ×、DiskMan 4 个 inline 分区色、Realtime/Connections SVG polyline inline X11 命名色、`.cbi-dropdown` 缺 border-radius。5 个 Step 分别承担。
+
+### Step 129 — `.cbi-dynlist .item + ::after` BS3 红 × 现代化
+
+L2484-2497 是**全主题最后一处 Bootstrap 3 配色残留**:
+
+```css
+border: thin solid #d43f3a;           /* BS3 btn-danger 边框 */
+background-color: #d9534f;            /* BS3 brand-danger 2013-2017 */
+min-height: 17px;                     /* 扁瘦 10.4×24 */
+padding: 0 6px;                       /* × 字符顶边 */
+border-radius: 0;                     /* 全站独此一份直角 */
+```
+
+加上 `.item` 自身的 LuCI Material-early-era 残留:`color: #666` 硬码 + `border-bottom: 2px solid rgba(0,0,0,.26)` underline-input 风。
+
+**改造方案 — 不走 hover-reveal,改 60% 可见 + hover 全显**
+
+Chrome-Claude 原方案是经典 hover-reveal(`opacity: 0` 默认,hover 时 1)。我考虑后**没全照做** —— hover-reveal 在 router admin UI 上对发现性不友好,用户可能不知道每行有 delete 按钮。改成 "60% opacity 默认 + hover 时 100% + danger 红填充 + scale(1.05)"。
+
+```css
+.cbi-dynlist > .item::after {
+    content: "\00D7";
+    position: absolute;
+    top: 50%; right: -2em;             /* 保留 absolute layout */
+    transform: translateY(-50%);
+    width: 24px; height: 24px;
+    color: var(--color-text-muted);
+    background: transparent;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    opacity: 0.6;
+}
+
+.cbi-dynlist > .item:hover::after {
+    opacity: 1;
+    color: var(--color-text-onaccent);
+    background-color: var(--color-danger);
+    border-color: var(--color-danger);
+    transform: translateY(-50%) scale(1.05);
+}
+```
+
+**关键决策**:`right: -2em` 保留(`.item` `margin-right: 2em` 已预留位置)。改 position 会让所有 dynlist 页面 reflow,回归风险高。
+
+受益页面:SSH keys、Firewall rules、DHCP IP sets、NTP candidates、WPA-EAP server list —— 一处 cascade,6 个页面同时受益。
+
+### Step 130 — `#eee/#101010/#ccc` Bootstrap-era 大扫除
+
+style.css 全文 grep,定位 **7 处** 硬码需要 token 化:
+
+| 位置 | 原硬码 | 改 token |
+|---|---|---|
+| `hr` L771 | `border-color:#eee` + `opacity:.1` 几乎不可见 | `border-color: var(--color-border-subtle)` + 去 opacity |
+| `code` L756 | `color:#101010` + `bg:#ddd` | text + surface-2 |
+| `table, .table` L1601 | `border: 0px solid #eee` | `0 solid var(--color-border-subtle)`(0px 视觉无影响,但语义清洁) |
+| `.modal > pre/textarea` L2868 | `color:#eee + bg:#101010` 终端风 | surface-2 + text,markdown code-block 风 |
+| `.uci-change-list var` L3153 | `bg:#EEEEEE + border:#CCCCCC + color:black` | surface-2 + border-subtle + text |
+| `#command-rc-output > pre` L3600 | 同 `.modal > pre` 终端风 | 同 surface-2 |
+| `.commandbox` L3997 | `bg:#eee + border:#ccc + 拟物 inset 高光` | surface-1 + border-subtle + shadow-xs |
+
+**设计决策:放弃 LuCI 的"终端风格"**:LuCI 继承 UNIX 习俗,代码/日志输出用深底浅文模拟 terminal CRT。在统一 light/dark 主题里这就是"亮模式中突兀的深色补丁、暗模式中又一种 layer 的深色补丁"。改用 GitHub/Linear/Notion 的 markdown code-block 风格(`surface-2` 在亮 = `#e4e4e7`,暗 = `#3f3f46`),两边语义一致。
+
+### Step 131 — DiskMan 分区条 inline 颜色覆盖
+
+`/admin/system/diskman` 用 inline `style` attribute 直接喷 4 色:
+
+```html
+<div style="background-color:#c0c0ff">sda128 raw</div>      <!-- 淡紫 -->
+<div style="background-color:#fbbd00">sda1 fat16</div>      <!-- 芥末 -->
+<div style="background-color:#e97c30">sda2 squashfs</div>   <!-- 烧橙 -->
+<div style="background-color:#a0e0a0">free space</div>      <!-- 薄荷 -->
+```
+
+1990s 高饱和粉彩,dark mode 上像彩虹糖撒黑桌布。
+
+**class 选择器永远输给 inline style**(Round 32 Step 122 学的 CSS specificity 铁律)。**唯一覆盖路径 = 属性选择器 + `!important`**。
+
+每色覆盖 4 种 inline 拼写(LuCI 模板格式不统一):
+```
+style*="background-color:#XXXXXX"   ; 无空格,full property
+style*="background-color: #XXXXXX"  ; 有空格,full property
+style*="background:#XXXXXX"         ; 无空格,shorthand
+style*="background: #XXXXXX"        ; 有空格,shorthand
+```
+
+加 `i` flag 大小写不敏感。4 色 × 4 拼写 = **16 selectors**。
+
+语义映射:raw → info / FAT → warning / squashfs → chart-3 / free → accent。文字色统一 `--color-text-onaccent`(白)保证 solid bg 上对比度。
+
+### Step 132 — Realtime/Connections SVG polyline + legend inline 覆盖
+
+`/admin/status/realtime/connections` 上游 .htm 模板用 X11 命名色:
+
+```html
+<polyline style="fill:green;stroke:green">    <!-- TCP -->
+<polyline style="fill:blue;stroke:blue">      <!-- UDP -->
+<polyline style="fill:red;stroke:red">        <!-- Other -->
+<strong style="border-bottom:2px solid green">TCP:</strong>
+```
+
+**为什么 Step 110 (Round 26) 的 nth-of-type 调色板规则没覆盖?**
+
+Step 110 给 realtime 全套加了:
+```css
+[class*="node-admin-status-realtime"] #view svg polyline:nth-of-type(N) {
+    stroke: var(--chart-N) !important; fill: var(--chart-N) !important;
+}
+```
+
+在 `/realtime/load` 和 `/bandwidth` 上 DOM flat(4 个 polyline 是 svg 直接子),nth-of-type 命中。**但 `/connections` 把 polyline 包在额外的 `<g>` group 里**,nth-of-type 索引相对父变化,规则不命中。
+
+属性选择器 **不依赖 DOM 顺序**:
+```css
+polyline[style*="stroke:green" i],
+polyline[style*="fill:green" i] {
+    stroke: var(--chart-1) !important;
+    fill:   var(--chart-1) !important;
+}
+```
+
+每色 × 4 spelling(stroke/fill × with/without space)= **12 polyline selectors** + 3 个 legend `<strong>` border-bottom 覆盖。
+
+### Step 133 — `.cbi-dropdown` border-radius 加 1 行
+
+`<select>` 元素 L693 有 `border-radius: var(--radius-md)`,但 LuCI 用 `.cbi-dropdown` div widget 替换了 native select,**该 div 从未声明 radius** → 浏览器默认 0,与全站 8-14px 圆角冲突,形成"直角缺口"。
+
+```css
+.cbi-dynlist,
+.cbi-dropdown {
+    /* … existing … */
+    border-radius: var(--radius-md);   /* +1 行 */
+}
+```
+
+`.cbi-dynlist` 顺带拿到 radius 无影响(它没 border/bg,Step 129 已把 radius 推给 `.item` 子元素)。**1 行 CSS 全站 dropdown 受益**(/dhcp Chrome-Claude 数到 6 个、/wireless/edit、/system 等)。
+
+### 📊 第三十四轮(Step 129-133)累计
+
+| 指标 | 第三十三轮后 | 第三十四轮后 |
+|---|---|---|
+| `.cbi-dynlist .item::after` 配色 | BS3 `#d9534f` 直角红方块 | token-ized + 24×24 圆角 + hover-reveal danger |
+| `#eee/#101010/#ccc` 硬码处数 | 7 | 0(注释引用除外) |
+| DiskMan 分区条 dark mode | 1990s 粉彩 + 蓝灰文字 contrast ~2:1 | 4 个 semantic token,白字 ≥4.5:1 |
+| Realtime/Connections SVG 调色板 | X11 named (red/green/blue) | chart-1/2/3 token 化 |
+| `.cbi-dropdown` 圆角 | 0(直角缺口) | var(--radius-md)(10px) |
+
+---
+
+## 🎨 第三十五轮(Step 134-136):Header toolbar 收尾
+
+> 触发:Chrome-Claude focused 报告 header 区两个问题 —— Quick Actions 菜单视觉位置错(实测 trigger 中心 x=334、菜单中心 x=212,偏左 122px,菜单看起来挂在品牌 logo 下面)、左上角"扁条按钮"(poll-status indicator)看起来不像按钮。
+>
+> **校准重大发现:这次 Chrome-Claude 报告 token 名 100% 准确**(`--color-surface-1`、`--motion-fast`、`--space-2`、`--radius-md` 等等全是本项目实际 token,不再出现错误的 `--bg-card`/`--border-subtle`/`--color-danger-500`)。**对比 Round 32/33 屡次写错 → Round 34 仍部分写错,Round 35 全对**。这种"经过 prompt briefing 后 LLM agent 校准"的效果意外明显,值得记。
+>
+> 3 个 Step:一个真 bug + 一个 small polish + 一个设计哲学转折。
+
+### Step 134 — Quick Actions JS right-anchor → left-anchor
+
+quick-actions.js L189 自 Step 51 起一直用:
+```js
+self.dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+```
+
+right-anchor pin 菜单右边到 trigger 右边,**假设 trigger 在 header 远右**(Step 51 设计 mental model)。但实际 trigger 在 header **左 1/4**(brand 占 240px,然后 search/qa/theme 按钮组)。280px 的菜单 right-anchor 到 x=352 → 菜单左边 x=72 → **挂在 ImmortalWrt 品牌 logo 下面**,与 ⚡ 触发按钮完全脱节。
+
+Chrome-Claude 实测 drift -122px。这是个 ~5 个月没被注意到的 bug,因为 (a) "菜单出来了能用就行" (b) Round 18 Step 95 修了窄屏 left-edge overflow,误以为问题解决了。
+
+**修法**:换 left-anchor(shadcn / Radix / Mantine popper 默认):
+
+```js
+var rect = self.trigger.getBoundingClientRect();
+var GAP = 6, VIEWPORT_MARGIN = 8;
+
+self.dropdown.style.top  = (rect.bottom + GAP) + 'px';
+self.dropdown.style.right = 'auto';
+self.dropdown.style.left = rect.left + 'px';
+
+requestAnimationFrame(function () {
+    /* 双向 viewport collision 兜底 */
+    var ddRect = self.dropdown.getBoundingClientRect();
+    var idealLeft = rect.left;
+    if (idealLeft + ddRect.width > window.innerWidth - VIEWPORT_MARGIN)
+        idealLeft = window.innerWidth - ddRect.width - VIEWPORT_MARGIN;
+    if (idealLeft < VIEWPORT_MARGIN) idealLeft = VIEWPORT_MARGIN;
+    self.dropdown.style.left = idealLeft + 'px';
+});
+```
+
+CSS 配:min-width 280 → 220(4 个短词条只要 ~190px)、max-width `min(320px, calc(100vw - 16px))`(320 防长翻译撑爆)。
+
+### Step 135 — `#indicators` 与右侧按钮组视觉分隔
+
+`header.fill.container.status` 自 Step 109 用 `margin-left:auto` push 到右,布局:
+```
+[brand] … gap … [#indicators] [cmdk] [qa] [theme]
+                ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+                4 元素 flush 紧贴,视觉一组
+```
+
+但**语义不是一组** —— `#indicators` 是**状态**(poll-status / uci-changes 计数等),右侧三个是**工具**(search / quick-actions / theme-toggle)。
+
+加 1px subtle 右 divider + space-2 margin:
+
+```css
+header > .fill > .container > .status:not(:empty) {
+    margin-right: var(--space-2);
+    padding-right: var(--space-3);
+    border-right: 1px solid var(--color-border-subtle);
+}
+```
+
+`:not(:empty)` 守卫很重要 —— LuCI 不总是 render 状态 span(某些页面无 polling、无 uci changes),空 `.status` 不该显示孤儿 divider。
+
+### Step 136 — poll-status 8×8 dot → 36×36 icon button
+
+**设计哲学转向**。Round 25 Step 109 设计 poll-status 为 8×8 success 圆点 —— 当时意图 "indicator = subtle status signal,不与工具按钮争权重"。视觉层级靠 size 区分。
+
+Round 35 Chrome-Claude 抓到的问题:**8×8 圆点不可识别为"可点击暂停轮询"的按钮**。Step 109 用 cursor:pointer + title attribute 试图弥补,但 title 要 hover 1 秒才出,圆点本身没有 button 视觉语言。结果用户根本不知道这个 polling 暂停功能存在。
+
+转向 "indicator = first-class button,与 cmdk/qa/theme 同尺寸 36×36"。代价是失去 "size hierarchy",由 Step 135 的 divider 用 "grouping hierarchy" 补回(状态-左 vs 工具-右)。
+
+**实现细节 — inline SVG data URI + CSS mask**
+
+LuCI 控制 indicator span 的 inner HTML,我们**不能注入 `<svg><use href="icons.svg#i-refresh-cw"/>`**。所以走 `::before` pseudo:
+- `mask-image: url("data:image/svg+xml;utf8,<svg>…</svg>")` 描出图标形状
+- `background-color: currentColor` 填充
+- `color: var(--color-success | --text-subtle)` 控制颜色
+
+这是 `.node-main-login` 登录页盾牌 logo(Step 79 era)用过的同一 pattern,Chromium 111+ / FF 113+ / Safari 15.4+ 全 OK。
+
+**没用 `mask: url('icons.svg#i-refresh-cw')` sprite fragment** —— Chrome-Claude 原方案是这个,但 Chromium 历史上对 SVG fragment as mask source 有 bug,可靠性低。**inline data URI 是 boring-but-robust 路**。
+
+状态机:
+| data-style | icon | color | animation |
+|---|---|---|---|
+| 默认/无 | refresh-cw | text-muted | 无 |
+| active | refresh-cw | success | spin 5s linear |
+| inactive | pause | text-subtle | 无 |
+
+**5 秒旋转匹配 LuCI 典型 5s polling cadence** —— 一圈 = 一轮 polling,intuitive rhythmic feedback。
+
+### 📊 第三十五轮(Step 134-136)累计
+
+| 指标 | 第三十四轮后 | 第三十五轮后 |
+|---|---|---|
+| Quick Actions 菜单定位 | right-anchor → drift -122px 在 wide trigger 位置 | left-anchor + 双向 viewport clamp,trigger 中心对齐 |
+| Quick Actions 菜单宽度 | min 280 / max 100vw-16 | min 220 / max min(320, 100vw-16),长翻译有 cap |
+| `#indicators` 与按钮组关系 | 4 元素 flush 一组 | divider 显式分两组(状态 / 工具) |
+| poll-status indicator 形态 | 8×8 success 圆点(易忽略) | 36×36 icon button,active 时 refresh 5s 旋转 |
+| poll-status pause/active 切换可见性 | 仅靠 color/opacity 差异 | icon 形状差异(refresh ↔ pause)+ animation 差异 |
+
+---
+
+## 🎯 Round 34-35 横向观察
+
+**Chrome-Claude 的 stale-capture 问题成为可量化的信号噪声**:Round 34 报告里"P1.5 DockerMan 黑 SVG"、"P1.6 ifacebox lightgreen"、"P1.7 cbi-button-add 蓝"三个全是 Round 32/33 已 ship 的修复,他看的是缓存或更早的快照。**对策**:每次 audit 前在 prompt 明确"请先 Cmd+Shift+R hard refresh 再 audit"、并在 audit 末尾自报"本次 audit 基于 commit SHA 或时间戳"。这是 Chrome-Claude 工作流的固有失败模式,但可以靠 prompt prefix 系统性缓解。
+
+**Chrome-Claude 经过 briefing 后真的能内化 project context**:Round 32/33 屡次写错 dark mode selector(`[data-darkmode="true"]`)和 token 名(`--bg-card`/`--color-danger-500`),Round 34 仍部分错。Round 35 报告 **token 完全正确**(`--color-surface-1`、`--motion-fast`、`--space-2`、`--radius-md`、`--color-accent-500` 等)。这意味着前几轮在 prompt prefix 里给他的 "本项目 token 列表" briefing 真的被读了。**教训:LLM agent 的"项目 context"不会自然继承,但 explicit briefing 能持久内化** —— 类似 in-context learning 但跨 session。
+
+**Class 选择器永远输给 inline style,这是第三次记**:Round 32 Step 122 .zonebadge、Round 34 Step 131 DiskMan、Round 34 Step 132 Realtime polyline,全是 "LuCI 上游用 inline style 强行注入颜色,我们必须 `[style*="..."]` + `!important`"。**应该有一个 doc/development.md 章节归纳这个 pattern**,标题类似 "How to override LuCI upstream inline styles"。
+
+**LuCI 主题化 icon 处理三件套**:Round 32-35 累计验证了三种"LuCI 上游图标不好看"的处理路径:
+1. **file-override 同名 SVG 抢路径**(Round 32 Step 123 / Round 33 Step 128)—— 适合 LuCI HTML 用 `<img src="...">`
+2. **CSS filter invert + brightness**(Round 33 Step 125)—— 适合不便重画 SVG 时的临时救场
+3. **inline data URI mask + ::before pseudo**(Round 35 Step 136)—— 适合 LuCI 控制元素 inner HTML、我们不能注入 `<svg>` 时
+
+这三招覆盖 95% 的 "上游图标不好看" 场景。值得记入 dev doc。
+
+**Step 136 是项目设计哲学第二次明确转折**:Round 33 Step 126 转 "color hierarchy → brand consistency"(蓝/绿 secondary tier 去掉,统一绿色)。Step 136 转 "size hierarchy(8px dot vs 36px button)→ grouping hierarchy(状态组 vs 工具组)"。两次转折都是 "current pattern 局部 OK,但放在 design system 全局看不一致" —— 这是**设计系统化(systemic design)成熟标志:愿意为一致性而放弃局部最优**。
+
+**"过度聪明的 hack" 教训第二次出现**:Round 32 Step 120 是 mix-blend-mode + invert(1) hack 数学崩。Round 35 Step 134 是 right-anchor positioning + rAF clamp hack ~5 个月未被发现的 wrong-direction bug。两个都是 "理论巧妙但实际维护痛苦 + 关键 assumption 隐式" 的 hack。**模式识别**:任何依赖 4+ 参数精确耦合的 CSS/JS hack,在 design system token 调整或布局变化时极易崩。**对策**:写 hack 时**显式 comment 其 assumption**(left-anchor 直接 = "trigger left edge → dropdown left edge",可读性 1 行,远胜 right-anchor + 反向计算)。
+
+**Iterative report-fix loop 累计:Round 14-35 共 22 轮 / ~70 Steps / ~5 个月**。能持续到现在没崩,关键不是"修得快",而是 (a) 一轮 4-5 个 Step 控制 scope (b) 每个 Step 一个 atomic commit 可独立 revert (c) Chrome-Claude 现象 → 我校准 → 用户决策 scope → ship → verify 这个 4-stage loop 清晰职责分配。预计这个节奏还能跑 20+ 轮直到主题 "perceived completeness"。
+
+---
+
 ## 📊 第三轮（Step 21 + 22）累计变化（更新）
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
