@@ -3384,26 +3384,47 @@ td > .ifacebadge,
 	color: var(--color-text);
 }
 
-/* Round 32 / Step 123 — file-override icons for ifacebox port indicators
+/* Round 42 / Step 157 — CSS-mediated override of upstream LuCI port/iface icons
  *
  * Upstream LuCI emits <img src="/luci-static/resources/icons/port_up.svg">
- * for the chip's status icon. dev-sync.sh L160-167 syncs
- *   htdocs/luci-static/resources/ → /www/luci-static/resources/
- * WITHOUT --delete, so files we put at htdocs/luci-static/resources/icons/
- * occupy the same path on the router as upstream's PNG/SVG icons and
- * replace them at sync time. Zero JS, zero DOM, zero LuCI patching.
+ * (and 8 sibling filenames) for the ifacebox chip's status icon.
  *
- * Our SVGs hardcode stroke="#10b981" (success green) or "#a1a1aa" (zinc-400
- * muted) because <img>-loaded SVGs don't inherit the surrounding CSS color
- * cascade (each img is a sandboxed sub-document). CSS here just bumps
- * brightness in dark mode where the green stroke can look a touch dim
- * against the #18181b card bg.
+ * History — Round 32 / Step 123 originally used a FILE-SYSTEM override:
+ * we shipped same-named SVGs under htdocs/luci-static/resources/icons/
+ * and relied on dev-sync.sh's `rsync` without --delete to lay our
+ * Emerald-stroked SVGs on top of upstream's at runtime on the router.
+ * Zero JS, zero LuCI patching — beautifully simple for dev-sync.
  *
- * If upstream uses .png at these names instead of .svg on a given build,
- * the override is a no-op — upstream PNG continues to display. Follow-up
- * if user reports remaining "creepy gray chip" sightings: ship PNG
- * versions of the same icons alongside the .svg.
+ * Why we changed (Round 42 Step 157): immortalwrt 24.10's luci-base
+ * Files: clause now claims ownership of all 9 of these paths. IPK
+ * install thus fails with "file is already provided by package
+ * luci-base", and the MTK build pipeline aborts. File-override worked
+ * for dev-sync but is incompatible with the production opkg path.
+ *
+ * Current approach: ship our custom SVGs in the theme's own namespace
+ * at /luci-static/design-x/icons/{name}.svg — zero collision with
+ * luci-base. Use CSS `content: url(...)` on <img> (Generated Content
+ * for Replaced Elements, modern Chrome/Firefox/Safari) to substitute
+ * our SVG at render time, keeping upstream's emit-time DOM untouched.
+ *
+ * Our SVGs continue to hardcode stroke="#10b981" (success green) or
+ * "#a1a1aa" (zinc-400 muted) — <img>-loaded SVGs don't inherit the
+ * cascade, so color is baked in.
+ *
+ * Fallback: if `content: url()` isn't supported (very old browsers),
+ * the upstream SVG renders unmodified — degrades cleanly to LuCI
+ * defaults rather than broken images.
  */
+img[src$="/luci-static/resources/icons/port_up.svg"]            { content: url("/luci-static/design-x/icons/port_up.svg"); }
+img[src$="/luci-static/resources/icons/port_down.svg"]          { content: url("/luci-static/design-x/icons/port_down.svg"); }
+img[src$="/luci-static/resources/icons/ethernet.svg"]           { content: url("/luci-static/design-x/icons/ethernet.svg"); }
+img[src$="/luci-static/resources/icons/ethernet_disabled.svg"]  { content: url("/luci-static/design-x/icons/ethernet_disabled.svg"); }
+img[src$="/luci-static/resources/icons/wifi.svg"]               { content: url("/luci-static/design-x/icons/wifi.svg"); }
+img[src$="/luci-static/resources/icons/wifi_disabled.svg"]      { content: url("/luci-static/design-x/icons/wifi_disabled.svg"); }
+img[src$="/luci-static/resources/icons/bridge.svg"]             { content: url("/luci-static/design-x/icons/bridge.svg"); }
+img[src$="/luci-static/resources/icons/tunnel.svg"]             { content: url("/luci-static/design-x/icons/tunnel.svg"); }
+img[src$="/luci-static/resources/icons/vlan.svg"]               { content: url("/luci-static/design-x/icons/vlan.svg"); }
+
 img[src*="/luci-static/resources/icons/port_"],
 img[src*="/luci-static/resources/icons/ethernet"],
 img[src*="/luci-static/resources/icons/wifi"],
@@ -3441,9 +3462,10 @@ html[data-theme="dark"] img[src*="/luci-static/resources/icons/vlan"] {
  * hint of weight so multi-tone icons (Images store-front, Networks
  * topology) preserve depth.
  *
- * Selector NOT extended to our own Step 123 icons at /resources/icons/
- * (those have stroke #10b981 which would invert to pink #ef467e).
- * Limited strictly to /dockerman/ paths to avoid collateral.
+ * Selector NOT extended to our own port/iface icons at /design-x/icons/
+ * (Round 32 Step 123 + Round 42 Step 157 — those have stroke #10b981
+ * which would invert to pink #ef467e). Limited strictly to /dockerman/
+ * paths to avoid collateral.
  */
 html[data-theme="dark"] img[src*="/luci-static/resources/dockerman/"],
 html[data-theme="dark"] img[src*="dockerman/containers"],
