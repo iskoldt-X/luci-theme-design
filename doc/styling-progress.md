@@ -3712,6 +3712,109 @@ if (next !== raw && next !== '') {
 
 ---
 
+## 🛠️ 第四十一轮(Step 154-155 + backlog):defensive grooming — 趁热把"技能树"和"协作模板"落盘
+
+> 触发:Round 40 事故 + 复盘刚结束,记忆最新。用户拍板"先做防御性整理,不急于推新功能" —— 写 `doc/luci-theme-toolbox.md`(LuCI 26.x 主题化技巧手册)+ `doc/chrome-claude-briefing.md`(Chrome-Claude prompt prefix 模板)+ `doc/backlog.md`(决策落盘 + 待办池)。
+>
+> **Round 41 是项目第一次"纯文档轮"** —— 没有任何 router-facing 代码变更,没有 dev-sync ship。3 个 commit 全部是 `doc/*.md` 新增。
+>
+> 价值在折现:这次写的几小时,以后**每次 session 续接 / 每次 reviewer 进来 / 每次 Chrome-Claude review 任务**都能节省半小时定向解释。Round 40 之前积累的"踩过的坑"知识在我脑子里 + 历史 commit message 里,但没在任何"入口文档"中索引 —— Round 41 把它们做成可检索的索引。
+
+### 提前 Step:doc/backlog.md(commit 6fe0f6c)
+
+用户在 Round 40 复盘后明确说"请帮我把以上的决策先落盘 md,再推进"。所以在 Step 154 之前先做了一个 `doc/backlog.md`,把会话里讨论的决策固化:
+
+- **Round 41 锁定** = doc 工作(toolbox + chrome-claude briefing)
+- **Round 42+ 候选**:OUI vendor / ARP-based Last Seen / IPv6 detail / 列排序 / LAN Clients action 实装(Whitelist/Limit/Block)
+- **Round 43+/44+ 候选**:DockerMan SVG override / disabled-variant icons + PNG fallback
+- **深度研究无 timeline**:per-host bandwidth(Round 31)是"一坨垃圾不可用",需要从头围绕 nftables bridge family + flow offload 重设计,不是 tweak 范围
+- **CLAUDE.md 老 audit 状态盘点**:用户问"那几个 P0 拖了一年是什么情况"。**grep 验证 HEAD 后发现:Section 1(P0)13/14 已悄悄修了,Section 2(P1)~7-8/12 已修**。审计文档只是没更新 —— 实际代码早就修好。这是个好消息:**审计 backlog 项的 ground truth 不在 audit 文档里,而是在 HEAD 代码里**。以后要不要更新 audit 文档,看是否值得;不更新也不影响实际质量。
+- **显式 opt-out**(写入 backlog 防止 Chrome-Claude / 未来 Claude 误提):OpenClash 集成、Chinese i18n、crontab UX、reboot warning 重设计
+
+backlog.md 把"现在不做但记下了"和"现在做"分开,让 Round 41 真正"小而专"。
+
+### Step 154 — doc/luci-theme-toolbox.md(732 行,15 节)
+
+把 Rounds 32-40 散落各处的"非平凡 LuCI 主题化技巧"收敛到一份索引。每节都按 **Problem → Pattern → Why it works → Pitfalls → First seen in** 五段式写,可以当 cookbook 查。
+
+15 节涵盖:
+
+1. **File-override**(Rounds 32-33)— `htdocs/luci-static/design/<upstream-path>` 同名替换 + rsync 无 `--delete` 是设计原意(让 override 持久)
+2. **CSS `:has()` + stable LuCI ID**(Step 151)— "JS-vs-rerender 战场,CSS 主场"
+3. **覆盖 LuCI inline styles**(Round 34)— `[style*="..."]` + `!important` 是唯一办法
+4. **Inline SVG data URI + CSS mask**(Rounds 32-33)— `currentColor`-tinted 图标的正确做法,**`#` 在 url() 里必须 `%23`** 编码
+5. **UCI write → service validation pipeline**(Steps 152-153 + 事故)— sanitizeHostname 模板 + 各服务约束表(dnsmasq / fw4 / UCI / ifname / bridge member)
+6. **流式 metrics**(Steps 143-144)— ReadableStream pump + XHR.upload.onprogress + sliding window + 10fps UI throttle
+7. **Adaptive scale + monotone-up ratchet**(Steps 145-146)— 离散 scale 列表 + 不回退
+8. **Save&Apply double-patch**(memory)— 必须同时 patch `apply()` 和 `displayChanges()`
+9. **`L.uci.changes()` is async**(memory)— sync `Object.keys()` 永远 `[]`
+10. **resource_version cascading**(memory)— 改 luci.js 的 `?v=` 一次,所有 `L.require()` 模块自动跟上
+11. **诊断纪律 — 不要盲目重启**(Round 40 教训)— `ps w` + `logread` + `cat /etc/config` + `sed -n` + functional probe
+12. **CGI bypass for ACL-denied RPC**(memory)
+13. **Tooltip vs inline** — 主扫视 inline / 二级 detail tooltip / 三级 expand row
+14. **`toastSafe`** — feature-detect L.ui.addNotification + 降级
+15. **dev-sync.sh** — 为什么 no `--delete`(Round 32+ override 持久化设计)
+
+每节都交叉引用对应的 `memory/*.md`(当存在时),以及 Round/Step 编号(让人能去 commit history / 工程 journal 看更详细的"为什么这么做"的过程)。
+
+**新章节增加的标准**(写在文档底部,防止"toolbox 变废柴抽屉"):
+
+1. 显而易见的做法**确实失败了**(下个人也会撞墙)
+2. 有效做法**非平凡**(单行能解决就 inline 在 code,别进 toolbox)
+3. **可能被重用**(一次性 hack 进 commit message,不进 toolbox)
+
+### Step 155 — doc/chrome-claude-briefing.md(375 行,5 个变种)
+
+Chrome-Claude(浏览器侧的另一个 Claude 实例,跑在真实 Chrome 里)在过去几轮里反复犯**同样的错**:
+
+- 把 dark mode selector 当成 `[data-darkmode="true"]`,实际是 `html[data-theme="dark"]`
+- 提议用 `.cbi-button-primary`,实际我们已经迁移到 `.btn-primary`
+- 提议 hex 字面值,而不是 design token
+- 想给 per-host bandwidth 提 CSS 改建议(已知该 widget 不可用,不接受 tweak)
+- 提议把源字符串翻译成中文(明确 opt-out)
+- 把 trend arrow 当成 `↑/↓`,实际我们用 `▲/▼`
+
+每次重新解释成本是几分钟,但 review session 累计起来就是几十分钟。**briefing 文档把这些"经常被搞错的事实"前置,让 Chrome-Claude 第一次就答对**。
+
+文档结构:
+
+- 一段总通用 prompt prefix(可直接复制粘贴到 Chrome-Claude 首条消息)
+- 4 个变种 TASK 段:light-mode audit / dark-mode audit / responsive(narrow viewport)audit / a11y quick-pass
+- "review 完之后" 集成流程(分级 → 分组 → backlog 入档 → 按 Step 提交 → 验证)
+- **"Chrome-Claude consistently gets wrong" 活表**:每次发现它再次搞错同一件事,就追加一行(让 briefing 自我演化)
+
+**写 briefing 时的发现**:我以为 design token 系统里有 `--color-primary`、`--color-fg`、`--color-bg-elevated`、`--radius-full` 这些常见命名,**但 grep HEAD 后发现都不存在**。实际系统用的是 `--color-accent-{50..900}` 9-stop 主色阶 + `--color-text/-muted/-subtle/-onaccent` + `--color-surface-{0,1,2}` + `--radius-pill`。**写 briefing 这件事本身强制做了一次完整的 token audit**,把 5 个虚构的 token 名抓出来改正 —— 否则 Chrome-Claude 拿到错误 briefing,可能花几小时根据错误名字调 CSS,然后我们再花几小时反查"为什么不生效"。
+
+> 教训:**写给"另一个人"看的文档,会强制 review 自己以为知道的事**。这是文档基建的隐藏收益 —— 与其叫"写文档",不如叫"用文档形式做自检"。
+
+### 📊 第四十一轮(Step 154-155 + backlog)累计
+
+| 指标 | 第四十轮后 | 第四十一轮后 |
+|---|---|---|
+| `doc/*.md` 入口文档数 | 3(styling-progress, CLAUDE, claude_style) | **6**(+ backlog, luci-theme-toolbox, chrome-claude-briefing) |
+| 文档化的 LuCI 26.x 主题化技巧 | 散落各处 | **15 节集中索引**(toolbox.md) |
+| Chrome-Claude prompt prefix | 每次手敲(且常带错信息) | **复制粘贴 + 5 变种**(briefing.md) |
+| 已落盘的 backlog 项数 | 0(在用户脑子里) | **20+**(backlog.md) |
+| 已显式 opt-out 项数 | 0(隐式约定) | **5**(OpenClash / Chinese i18n / crontab / reboot / per-host bw) |
+| Memory 文件交叉引用 | toolbox 里 0 | toolbox 里 5 个 `memory/*.md` 双向交叉引用 |
+| 项目生产事故修复后的防御层 | memory 文件单点 | memory + toolbox §5 + briefing 双重提醒 |
+
+## 🎯 Round 41 横向观察
+
+**"文档轮"作为 routine 的价值**:Round 40 是高强度 code + 事故 + 复盘,Round 41 主动选择"轮换休息"做整理,而不是立即推 Round 42 新功能。**这是 sustainable 工程节奏 —— 像 sprint review,但每 5-7 轮一次**。如果一直 ship 代码不整理,Rounds 50+ 时就会出现"哪个文件 owns 这件事 / 这个技巧上次什么时候用的 / Chrome-Claude 为什么又错了"这种**摩擦逐渐变大、定位时间逐渐变长**的状态。Round 41 把摩擦债清掉,后续 Round 42-45 的人均效率会回到 Round 30-39 的水平。
+
+**写文档强制 verification**(token name 事件):本来打算把 briefing 写完直接 ship,实际过程中 grep 一次源码,**发现自己脑内的 token 名字模型有 5 处错误**。这种错误在仅写代码时不会暴露 —— 因为我会在写代码时 cmd+F 看一眼,正确地用 token。但**当你给"另一个人"列 token 清单时,你必须凭记忆**,记忆错的会暴露。**所以 Round 41 真正的 unique 价值不在"写出文档",而在"被迫做了一次完整的 token audit"**。同样道理也适用于以后每次写 ai-facing 文档:**列清单 = 做 audit**。
+
+**"已悄悄修了"模式 — CLAUDE.md audit 真实状态**:用户以为"P0 拖了一年"。grep HEAD 后发现 Section 1 的 14 项 P0 里 13 项早就在 Steps 1-153 里悄悄修了(jquery.min.js 删了,style copy.css 删了,X5 浏览器 meta 删了,Inital Setup typo 修了,@font-face cleaned,etc.)—— 只是**没人回去更新 audit 文档**。这揭示一个项目治理的实情:**审计文档的"ground truth"是 HEAD 代码,不是文档自己**。下次 audit 该用 grep 验,不该看文档自报状态。这条经验入 backlog.md。
+
+**Round 41 ↔ Round 40 关系**:Round 40 留下的最大教训是"系统级写入需要客户端校验"。这条已经在 3 个层次落地 —— `memory/uci-write-needs-service-validation.md`(短形式) + `doc/luci-theme-toolbox.md §5`(长形式 + 例子) + `doc/chrome-claude-briefing.md`(给 review 用的 BUG 标识符)。**单条经验在 3 个不同访问角度都能查到**,意味着以后即使我忘记,Chrome-Claude / 新 session Claude / 人 reviewer 都会从他们各自最自然的入口撞上同一条规则。这是好的"知识冗余"模式。
+
+**为什么 Round 41 不 push origin**:习惯上,doc-only commit 也是 commit,但**用户的 push 政策是"显式批准才 push"**。Round 40 的 journal 已经 push 了(因为用户当时明确批准)。Round 41 三个 commit 现在停在本地 js 分支(`6fe0f6c` → `2182582` → `10de729`),等用户下次说"push"时一起带走。**保持这个纪律比每轮都 push 重要** —— 一旦养成"反正只是 doc 自己 push"的习惯,就会有一天 push 了不该 push 的东西。
+
+**下一轮(Round 42+)的优先级**:backlog.md 里候选已经分级,但**用户没拍板"立刻做哪个"**。可能的下一轮:(a)OUI vendor lookup — 小、价值正、和 Step 148 MAC 列联动;(b)ARP-based real Last Seen — 小、修一个 Round 38 留下的语义不准确;(c)更激进的——开始处理 backlog 里的 Whitelist/Limit/Block 实装,这个有"系统级写入"风险,**Round 41 写完的 toolbox §5 + briefing 正好能在这里被立刻 stress-test**。**Round 41 不主动选,留给用户**。
+
+---
+
 ## 📊 第三轮（Step 21 + 22）累计变化（更新）
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
