@@ -47,6 +47,11 @@ define Package/$(PKG_NAME)/postinst-pkg
     chmod +x "$${IPKG_INSTROOT}/etc/init.d/design-host-acct" 2>/dev/null
 [ -f "$${IPKG_INSTROOT}/etc/uci-defaults/40_design-host-acct" ] && \
     chmod +x "$${IPKG_INSTROOT}/etc/uci-defaults/40_design-host-acct" 2>/dev/null
+# Round 44 Step 207: bandwidth Tier 2 conntrack-acct sysctl bootstrap
+# needs +x on the uci-defaults trigger so it actually applies the
+# sysctl on first install.
+[ -f "$${IPKG_INSTROOT}/etc/uci-defaults/45_design-conntrack-acct" ] && \
+    chmod +x "$${IPKG_INSTROOT}/etc/uci-defaults/45_design-conntrack-acct" 2>/dev/null
 # Round 42 Step 163: rpcd ubus object script needs +x. The IPKG_INSTROOT
 # guard around the rpcd reload ensures we only call /etc/init.d/rpcd at
 # real install time (target), not at ipk pack time (fakeroot).
