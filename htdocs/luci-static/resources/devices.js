@@ -105,26 +105,43 @@ function inferType(hostname) {
 	return { icon: 'i-info', label: _('Unknown') };
 }
 
-// Step 93 (Round 17): "Last seen" inference from DHCP lease expiry. Without
-// a true presence signal (ARP cache, iwinfo assoclist), this is the cheapest
-// available proxy. Semantics:
-//   - Static lease (no expires) → assume online. Static leases imply the
-//     admin pinned the address; the device may or may not be present, but
-//     showing it as "offline forever" looks wrong.
-//   - Lease still valid (expires > now) → "Now". Device renewed within
-//     the lease lifetime (typically 12 h).
-//   - Lease expired (expires <= now) → "Xm" / "Xh" / "Xd" depending on
-//     how long ago. UI also marks the row with .devices-row-offline so
-//     CSS can dim it via opacity.
+// Step 93 (Round 17) → Step 140 (Round 38):"Lease" column from DHCP
+// lease.expires.
+//
+// CRITICAL UNIT NOTE — Step 140 fix:
+// luci-rpc.getDHCPLeases returns lease.expires as **remaining seconds**
+// (how many seconds until the lease expires), NOT a Unix epoch timestamp.
+// Step 93 treated it as epoch — `new Date(expires * 1000)` produced
+// "1970-01-01 11:55:45" for a normal expires=39345 (=~10.9 hours
+// remaining). The "Last Seen" column then computed `(nowSec - 39345) /
+// 86400 ≈ 20596 days` for every device — showing 56-year-old "Last
+// seen" for every active client. ALL rows got .devices-row-offline.
+//
+// Also semantically wrong: DHCP lease validity says NOTHING about "when
+// the device was last seen". A device could be powered off but still
+// have a valid lease (lease lifetime ≠ device activity). True last-seen
+// would need /proc/net/arp REACHABLE state or iwinfo.assoclist.inactive.
+// We don't have that without a new CGI, so the column is renamed
+// "Lease" (honest about the data we have) and shows time-remaining.
+//
+// Semantics now:
+//   - Static lease (expires == 0 or undefined) → "Static"
+//   - Lease still valid (expires > 0) → "Xm / Xh / Xd left"
+//   - Negative or already-expired (rare; dnsmasq usually drops these) →
+//     "Expired" + .devices-row-offline class for visual dimming
 function formatLastSeen(lease) {
-	if (!lease || !lease.expires || lease.expires <= 0) {
-		return { stale: false, text: _('Now') };
+	if (!lease || lease.expires === undefined || lease.expires === null) {
+		return { stale: false, text: _('Static') };
 	}
-	var nowSec = Math.floor(Date.now() / 1000);
-	var exp    = lease.expires;
-	if (exp > nowSec) return { stale: false, text: _('Now') };
-	var age = nowSec - exp;
-	return { stale: true, text: relativeAge(age) };
+	if (lease.expires === 0) {
+		return { stale: false, text: _('Static') };
+	}
+	if (lease.expires > 0) {
+		// Time remaining on lease. Valid lease → not stale.
+		return { stale: false, text: relativeAge(lease.expires) + ' ' + _('left') };
+	}
+	// expires < 0 means already expired (rare).
+	return { stale: true, text: _('Expired') };
 }
 
 function relativeAge(ageSec) {
@@ -277,7 +294,7 @@ return baseclass.extend({
 					E('span', { 'class': 'devices-col-name' }, _('Device')),
 					E('span', { 'class': 'devices-col-ip' },   _('IP')),
 					E('span', { 'class': 'devices-col-sig' },  _('Signal')),
-					E('span', { 'class': 'devices-col-seen' }, _('Last seen')),
+					E('span', { 'class': 'devices-col-seen' }, _('Lease')),
 					E('span', { 'class': 'devices-col-chev' }, '')
 				]),
 				E('div', { 'class': 'devices-rows', 'id': 'devices-rows' }, [
@@ -479,8 +496,12 @@ return baseclass.extend({
 			cells.push(this.detailCell(_('Connection'), _('Wired')));
 		}
 
-		cells.push(this.detailCell(_('Lease expires'), lease.expires
-			? new Date(lease.expires * 1000).toLocaleString()
+		// Step 140 (Round 38):lease.expires is REMAINING SECONDS, not Unix
+		// epoch. To show "when this lease expires" as an absolute time,
+		// add expires*1000 ms to current time. Step 93's
+		// `new Date(expires*1000)` was wrong — produced 1970 dates.
+		cells.push(this.detailCell(_('Lease expires'), lease.expires > 0
+			? new Date(Date.now() + lease.expires * 1000).toLocaleString()
 			: _('static / no expiry')));
 
 		return cells;
