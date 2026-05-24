@@ -1336,29 +1336,43 @@
     overflow: hidden;
 }
 
-/* Column header strip — same grid as .devices-summary so labels align.
-   Round 43 Step 179 + 181: per Principle 10 (table header alignment) —
-   ALL column headers centered, but RELATIVE TO THE COLUMN'S ACTUAL
-   CONTENT WIDTH, not the full flex-column space.
+/* Column header strip — must match .devices-summary grid EXACTLY so
+   header cells line up vertically with data cells.
 
-   Step 179 first try used `text-align: center` alone — but the
-   original `grid-template-columns: 1.4fr 0.9fr 0.9fr ...` stretches
-   each column to fill the row width, so "center" landed FAR to the
-   right of where the actual data sits at the column's left edge.
-   User screenshot showed DEVICE header floating in the middle of a
-   ~600px-wide column over data that ends at ~150px.
+   Round 43 evolution:
+     Step 179 — added `text-align: center`. But grid was flex (1.4fr
+                etc), columns stretched to fill row, headers landed
+                center-of-column ≠ center-of-content. Visually wrong.
+     Step 181 — switched all columns to `auto`. Each row's grid
+                computes column widths independently from its own
+                cells. Data rows aligned by coincidence (same-width
+                data). Header row's cells were narrow (header text
+                widths), columns collapsed → header row didn't line
+                up with data rows. Worse.
+     Step 182 (this) — use FIXED widths matching expected content
+                widths, plus a trailing `1fr` filler column to fill
+                the card. All rows use the IDENTICAL grid-template so
+                columns line up. Header text-align center within its
+                fixed column ≈ centered over content (column width ≈
+                content width). Filler at end eats leftover space.
 
-   Step 181 fix: switch to `auto`-sized columns. Each column shrinks
-   to its widest content (data or header, whichever is larger).
-   Header centered within an auto column = centered over content
-   (since column width ≈ content width). Trailing whitespace on the
-   right of the card is fine — Linear/Stripe dashboards leave that
-   too when content is short. */
+   Width rationale (measured against actual data):
+     32px      icon
+     200px     name (fits "iPhone-of-John" + icon + padding)
+     140px     IP   (fits "192.168.45.224")
+     170px     MAC  (fits "BC:24:11:AC:63:CA" with mono font)
+     90px      signal pill ("Wired" / "70 dBm")
+     100px     lease ("10h 33m ↓")
+     24px      chevron
+     1fr       filler — takes whatever's left in the card width
+
+   If user later adds IPv6 / longer hostnames / etc., bump the
+   corresponding column width. Don't add another flex track — the
+   trailing 1fr is the only flex slot. */
 .devices-thead {
     display: grid;
-    grid-template-columns: 32px auto auto auto auto auto 24px;
+    grid-template-columns: 32px 200px 140px 170px 90px 100px 24px 1fr;
     gap: var(--space-3);
-    justify-content: start;
     padding: var(--space-2) var(--space-4);
     background: var(--color-surface-1);
     font-size: var(--text-xs);
@@ -1397,14 +1411,13 @@
    stays full opacity when expanded so the user can still read it. */
 .devices-row-offline .devices-summary { opacity: 0.55; }
 
-/* Summary row — must keep grid identical to .devices-thead so columns
-   line up vertically. Step 181: switched to `auto` widths to match
-   the thead change (see thead comment for rationale). */
+/* Summary row — grid IDENTICAL to .devices-thead (Step 182: fixed
+   widths + 1fr filler) so columns line up across header and data.
+   See .devices-thead comment for column width rationale. */
 .devices-summary {
     display: grid;
-    grid-template-columns: 32px auto auto auto auto auto 24px;
+    grid-template-columns: 32px 200px 140px 170px 90px 100px 24px 1fr;
     gap: var(--space-3);
-    justify-content: start;
     align-items: center;
     padding: var(--space-2) var(--space-4);
     min-height: 44px;
