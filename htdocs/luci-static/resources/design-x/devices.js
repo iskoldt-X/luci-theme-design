@@ -332,9 +332,58 @@ return baseclass.extend({
 			return;
 		}
 		this.startHideUpstreamDhcp();
+		this.startHideStorageDockerOverlay();
 		this.injectCard();
 		this.refresh();
 		this._timer = setInterval(L.bind(this.refresh, this), 30000);
+	},
+
+	// Round 43 Step 190 — Bug #3 (Chrome-Claude). The Storage card on
+	// Overview lists every mounted filesystem returned by `/proc/mounts`.
+	// On boxes running Docker, that includes container overlay layers:
+	//   /opt/docker/overlay2/<64hex>/merged   (per-container merged FS)
+	//   /var/lib/docker/overlay2/<64hex>/...  (legacy path)
+	// These occupy 3-N rows of the Storage card with zero value to a
+	// router admin — they push real disks (/dev/sda1, /dev/sdb) below
+	// the fold.
+	//
+	// Strategy: same as DHCP hide. Scan Storage <tr>s, match path
+	// column against docker overlay patterns, stamp data-design-hidden=1.
+	// Step 188's universal CSS rule does the actual hiding.
+	startHideStorageDockerOverlay: function () {
+		var self = this;
+		this.hideStorageDockerOverlayRows();
+		var view = document.getElementById('view');
+		if (!view || typeof MutationObserver === 'undefined') return;
+		var observer = new MutationObserver(function () {
+			self.hideStorageDockerOverlayRows();
+		});
+		observer.observe(view, { childList: true, subtree: true });
+		// Same 10s window as DHCP hide — LuCI finishes staged renders by then.
+		setTimeout(function () { observer.disconnect(); }, 10000);
+	},
+
+	hideStorageDockerOverlayRows: function () {
+		var view = document.getElementById('view');
+		if (!view) return;
+		// Docker overlay paths:
+		//   /opt/docker/overlay2/...
+		//   /var/lib/docker/overlay2/...
+		//   any /overlay/<sha>/ pattern as defence-in-depth
+		var DOCKER_RE = /\/(?:opt|var\/lib)\/docker\/overlay2\/|\/overlay\/[0-9a-f]{32,}/i;
+		// Storage card rows are real <tr>s within .cbi-section tables.
+		// Cheapest selector: any <tr> with a first <td> whose text matches.
+		var rows = view.querySelectorAll('.cbi-section tr');
+		for (var i = 0; i < rows.length; i++) {
+			var row = rows[i];
+			if (row.dataset && row.dataset.designHidden) continue;
+			var firstCell = row.querySelector('td');
+			if (!firstCell) continue;
+			var text = (firstCell.textContent || '').trim();
+			if (DOCKER_RE.test(text)) {
+				row.dataset.designHidden = '1';
+			}
+		}
 	},
 
 	// Step 149 (Round 40) + Step 150 (Round 40 patch):hide upstream LuCI
