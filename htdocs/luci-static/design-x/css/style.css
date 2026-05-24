@@ -3036,14 +3036,30 @@ div.cbi-value > .cbi-value-description {
      *   invert(1)                          → (44,44,47) 深灰 ≈ #2c2c2f
      *   在 #27272a 上对比度 ≈ 1.05:1,几乎不可见
      *
-     * 改用"白字 + 强 dark halo"标准 overlay 文本套路:white + double text-shadow
-     * 在 fill(accent green #10b981/#34d399)和未填(surface-2 任何深浅)上都靠 halo
-     * 维持局部对比度。Spotify / macOS / YouTube 在叠加文字时都用同一套路。
+     * Round 32 改用"白字 + 强 dark halo"。理论 OK,Spotify/macOS 都用。
+     * 但 Round 43 Chrome-Claude 在 light mode 测试发现:fill < 50% 时,
+     * 文字大半压在 surface-2 浅灰(#f4f4f5)上,白字 + 0.7/0.5 halo 在浅灰
+     * 上仍 ~1.5:1,几乎看不见。Memory 6% / Buffered 0% / Connections 2%
+     * 全部不可读。
+     *
+     * Step 189 方案:让 color 跟着 --color-text 走,halo 用 --color-bg
+     * (页面主底色)。
+     *   - light: color=深(#18181b) / halo=白(#fff) → 在 emerald fill 上
+     *     是 dark text + white halo 双层对比;在 surface-2 上文字自身已经
+     *     深色,halo 与 bg 同色不破相
+     *   - dark : color=浅(#fafafa) / halo=深(#18181b) → 反过来,在两段背景
+     *     上都靠 dark halo 隔离自身白字 → fill / 未填都可读
+     * paint-order: stroke fill 保证 halo 渲染在文字之下,文字本身锐利。
      */
-    color: var(--color-text-onaccent);
+    color: var(--color-text);
+    paint-order: stroke fill;
     text-shadow:
-        0 0 3px rgba(0, 0, 0, 0.7),
-        0 1px 2px rgba(0, 0, 0, 0.5);
+        0 0 2px var(--color-bg),
+        0 0 3px var(--color-bg),
+         1px 0 0 var(--color-bg),
+        -1px 0 0 var(--color-bg),
+         0 1px 0 var(--color-bg),
+         0 -1px 0 var(--color-bg);
 }
 
 #modal_overlay {
