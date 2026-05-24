@@ -151,13 +151,48 @@ var OUI_HINTS = {
 	'B0:F8:93': 'TP-Link', '14:CC:20': 'TP-Link'
 };
 
+// Round 43 Step 180 — Chrome-Claude design review feedback.
+// Old fallback `mac.slice(-5)` produced "8B:35"-style stubs:
+// - Inconsistent with LAN Clients card which says "Unknown device"
+// - Information entropy LOWER than just showing the full MAC
+//   (loses OUI, can't be searched, looks like a port number)
+// - Misleading: looks like a meaningful ID but isn't
+//
+// New behaviour: return { primary, secondary, title }.
+//   - primary   = the big text on row 1 (hostname / "Private device" /
+//                 "Unknown device")
+//   - secondary = mono small-grey text on row 2 (full MAC) when there
+//                 is no hostname — gives the user something to grep
+//                 against LAN Clients OR copy-paste
+//   - title     = hover tooltip; always full MAC, with OUI vendor name
+//                 prefixed when known (progressive disclosure: OUI
+//                 doesn't pollute the main label, but is still
+//                 accessible on hover)
+//
+// "Private device" vs "Unknown device" — first MAC byte has bit-1
+// (0x02) set means locally-administered, which is what iOS / Android /
+// Windows "private Wi-Fi address" feature emits (MAC randomisation).
+// Calling these "Private" rather than "Unknown" tells the user the
+// device is HIDING its identity on purpose — not "missing config".
 function deviceLabel(mac, leasesByMac) {
-	var lease = leasesByMac[mac];
-	if (lease && lease.hostname) return lease.hostname;
+	var lease  = leasesByMac[mac];
 	var vendor = OUI_HINTS[mac.substr(0, 8)];
-	if (vendor) return vendor + ' device';
-	// Show last 5 chars of MAC for visual identity
-	return mac.slice(-5);
+	var title  = vendor ? (vendor + ' · ' + mac) : mac;
+
+	if (lease && lease.hostname) {
+		return { primary: lease.hostname, secondary: null, title: title };
+	}
+
+	// Locally-administered bit in first MAC byte (RFC 5342 §2.1).
+	// 0x02 mask: e.g. B2:xx → 0xB2 & 0x02 = truthy → randomised.
+	var firstByte = parseInt(mac.split(':')[0], 16);
+	var isPrivate = !isNaN(firstByte) && (firstByte & 0x02);
+
+	return {
+		primary:   isPrivate ? _('Private device') : _('Unknown device'),
+		secondary: mac,
+		title:     title
+	};
 }
 
 // ── ubus / fetch ──────────────────────────────────────────────────────────────
@@ -386,9 +421,22 @@ return baseclass.extend({
 		top.forEach(function (c) {
 			var total = c.rx + c.tx;
 			var pct = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
-			var label = deviceLabel(c.mac, leasesByMac);
+			var lbl = deviceLabel(c.mac, leasesByMac);
+
+			// Step 180: name cell now wraps primary label + optional
+			// secondary MAC subtitle. CSS at features.css §traffic
+			// styles `.traffic-consumer-secondary` as mono small-grey.
+			var nameChildren = [
+				E('div', { 'class': 'traffic-consumer-primary' }, lbl.primary)
+			];
+			if (lbl.secondary) {
+				nameChildren.push(
+					E('div', { 'class': 'traffic-consumer-secondary' }, lbl.secondary)
+				);
+			}
+
 			container.appendChild(E('div', { 'class': 'traffic-consumer' }, [
-				E('div', { 'class': 'traffic-consumer-name', 'title': c.mac }, label),
+				E('div', { 'class': 'traffic-consumer-name', 'title': lbl.title }, nameChildren),
 				E('div', { 'class': 'traffic-consumer-bar-wrap' },
 					E('div', {
 						'class': 'traffic-consumer-bar',
