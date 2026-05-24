@@ -1,7 +1,7 @@
 'use strict';
 'require baseclass';
 'require ui';
-'require wan-stats';
+'require design-x.wan-stats';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sparkline / Live Metrics — upgrade.md §1.S3
@@ -504,13 +504,13 @@ return baseclass.extend({
 			if (!zones) self.tileTemp.style.display = 'none';
 		});
 
-		// Step 43: subscribe to the wan-stats singleton (Step 42). It polls
+		// Step 43: subscribe to the design-x.wan-stats singleton (Step 42). It polls
 		// every 2 s on its own cadence — independent of our 5 s sysInfo poll —
 		// so the Net tile updates twice as fast as CPU/Mem and feels "live".
-		L.require('wan-stats').then(function (ws) {
+		L.require('design-x.wan-stats').then(function (ws) {
 			ws.subscribe(L.bind(self.onWanStats, self));
 		}).catch(function () {
-			// If wan-stats can't load, hide the Net tile — better than a dead "—"
+			// If design-x.wan-stats can't load, hide the Net tile — better than a dead "—"
 			if (self.tileNet) self.tileNet.style.display = 'none';
 		});
 
@@ -518,7 +518,7 @@ return baseclass.extend({
 		this._timer = setInterval(L.bind(this.tick, this), SAMPLE_INTERVAL_MS);
 	},
 
-	// Step 43 + 89 + 139:callback for wan-stats.subscribe.
+	// Step 43 + 89 + 139:callback for design-x.wan-stats.subscribe.
 	//
 	// Step 139 (Round 37) redesign:WAN tile is now a dual-value tile.
 	// Download (rx) shows in the primary 30px num slot, Upload (tx) in

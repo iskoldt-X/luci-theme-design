@@ -271,7 +271,7 @@ return baseclass.extend({
 
 	detect: function () {
 		var self = this;
-		L.require('capability').then(function (cap) {
+		L.require('design-x.capability').then(function (cap) {
 			cap.nlbw().then(function (installed) {
 				if (installed) self.renderInstalled();
 				else self.renderPlaceholder();

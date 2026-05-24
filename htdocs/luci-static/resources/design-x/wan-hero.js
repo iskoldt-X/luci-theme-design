@@ -3,7 +3,7 @@
 'require ui';
 'require rpc';
 'require network';
-'require wan-stats';
+'require design-x.wan-stats';
 
 // Step 92 (Round 16): SVG namespace helpers + #i-globe icon reference
 // removed. Pixel-parity rewrite drops the inline globe SVG in favour of a
@@ -231,7 +231,7 @@ return baseclass.extend({
 				])
 			]),
 
-			// ── Live throughput strip (fed by wan-stats every 2 s)
+			// ── Live throughput strip (fed by design-x.wan-stats every 2 s)
 			//    Preview puts ↑ (upload) first, ↓ (download) second.
 			E('div', { 'class': 'wan-hero-throughput', 'id': 'wan-hero-throughput' }, [
 				E('div', {}, [
@@ -250,20 +250,20 @@ return baseclass.extend({
 		var view = document.getElementById('view');
 		view.insertBefore(card, view.firstChild);
 
-		// Step 43: subscribe to wan-stats for live throughput. Same singleton
+		// Step 43: subscribe to design-x.wan-stats for live throughput. Same singleton
 		// the Net tile uses — one RPC stream, two consumers.
 		var self = this;
-		L.require('wan-stats').then(function (ws) {
+		L.require('design-x.wan-stats').then(function (ws) {
 			ws.subscribe(L.bind(self.onWanStats, self));
 		}).catch(function () {
-			// wan-stats unavailable — hide the throughput strip rather than
+			// design-x.wan-stats unavailable — hide the throughput strip rather than
 			// show forever-"—" telemetry.
 			var strip = document.getElementById('wan-hero-throughput');
 			if (strip) strip.style.display = 'none';
 		});
 	},
 
-	// Step 43: render live ↑/↓ throughput from the wan-stats singleton.
+	// Step 43: render live ↑/↓ throughput from the design-x.wan-stats singleton.
 	onWanStats: function (data) {
 		var d = fmtBpsSplit(data.rxBitsPerSec);
 		var u = fmtBpsSplit(data.txBitsPerSec);

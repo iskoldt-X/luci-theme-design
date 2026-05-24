@@ -10,7 +10,7 @@
 // for the page lifetime (one probe per browser tab).
 //
 // Usage from another LuCI module:
-//   var cap = await L.require('capability');
+//   var cap = await L.require('design-x.capability');
 //   if (await cap.thermal()) renderTempCard(); else hideTempCard();
 //
 // All probes have a hard timeout so a slow / hung backend doesn't block
