@@ -209,18 +209,53 @@ function fetchWifiStations() {
 // MAC → { iface, info, station } map for O(1) lookup by buildRow().
 // info carries per-interface fields (channel, frequency, mode);
 // station carries per-client fields (signal, noise, rx.rate, tx.rate, mhz).
+//
+// Round 44 Step 198 — Bug #5 audit (Chrome-Claude). Reported symptom:
+// "all 13 LAN clients show Wired" on user's box (QEMU, no wifi → expected).
+// Front-end + backend audit found logic is sound (MAC normalised
+// uppercase both sides, available/interfaces null-checks correct,
+// graceful empty-map fallback). However, two latent issues that
+// could mask wifi clients on real hardware:
+//
+//   1. `assoclist.results` field name — older iwinfo (mt7615 vendor
+//      driver, ath10k-non-ct) sometimes emits `clients` instead.
+//      Add `assoclist.results || assoclist.clients || []` fallback.
+//
+//   2. Some chipsets emit empty `results: []` even when STAs are
+//      actually associated (kernel STA tracker disagrees with hostapd
+//      STA list — known issue on some MT76 builds). Without real
+//      hardware we can't reproduce; gate diagnostic logging behind
+//      window.designDebug so a future hardware report has data.
+//
+// If a user reports "all Wired on real wifi-active router", enable
+// `window.designDebug = true` in DevTools console + refresh, then
+// look for "[wifi-stations]" lines to triage where the chain breaks.
 function buildStationMap(wifiData) {
 	var map = {};
-	if (!wifiData || !wifiData.available || !wifiData.interfaces) return map;
+	if (!wifiData || !wifiData.available || !wifiData.interfaces) {
+		if (window.designDebug && window.console && console.debug) {
+			console.debug('[wifi-stations] unavailable',
+				wifiData && wifiData.reason ? '(reason=' + wifiData.reason + ')' : '');
+		}
+		return map;
+	}
+	var totalStations = 0;
 	Object.keys(wifiData.interfaces).forEach(function (iface) {
 		var data = wifiData.interfaces[iface] || {};
 		var info = data.info || {};
-		var list = (data.assoclist && data.assoclist.results) || [];
+		// Defensive: tolerate `clients` as alternate field name (older
+		// iwinfo builds on some MT76 / ath10k-non-ct variants).
+		var list = (data.assoclist && (data.assoclist.results || data.assoclist.clients)) || [];
 		list.forEach(function (s) {
 			var mac = (s.mac || '').toUpperCase();
-			if (mac) map[mac] = { iface: iface, info: info, station: s };
+			if (mac) { map[mac] = { iface: iface, info: info, station: s }; totalStations++; }
 		});
 	});
+	if (window.designDebug && window.console && console.debug) {
+		console.debug('[wifi-stations]',
+			Object.keys(wifiData.interfaces).length + ' iface(s),',
+			totalStations + ' station(s)');
+	}
 	return map;
 }
 
