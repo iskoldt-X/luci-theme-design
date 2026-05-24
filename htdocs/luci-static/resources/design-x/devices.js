@@ -54,22 +54,30 @@ var STORAGE_KEY = 'design-device-names-v1';
 
 // ── Type inference by hostname keyword ────────────────────────────────────────
 // First match wins. Patterns are case-insensitive regex source strings.
-// Step 93 (Round 17): tightened icon mappings — iphone/ipad/android now map
-// to i-phone (was i-info), printer / nas / windows-pc added. Icons drawn
-// from the sprite at htdocs/luci-static/design-x/icons.svg.
+// Step 93 (Round 17): tightened icon mappings.
+// Step 191 (Round 43, Chrome-Claude Bug #4): proper per-form icons —
+//   iPad → i-tablet (was i-phone, distinct silhouette now)
+//   iPhone/Android → i-smartphone (Lucide phone-with-screen, not handset)
+//   Apple Watch / Galaxy Watch / Fitbit → i-watch (was i-info fallback)
+//   Bose / Sonos / HomePod / Echo → i-speaker (was i-info fallback)
+// New SVG symbols added to icons.svg same Step.
 var DEVICE_TYPES = [
 	{ re: /macbook|imac|mac-?mini/i,                          icon: 'i-monitor',     label: 'Computer' },
 	{ re: /printer|laserjet|brother|epson|canon|hp-laserjet/i, icon: 'i-server',      label: 'Printer' },
 	{ re: /windows|thinkpad|surface|dell-|win[-_]?dk/i,       icon: 'i-monitor',     label: 'Computer' },
 	{ re: /truenas|synology|qnap|nas$|nas[-_]/i,              icon: 'i-hard-drive',  label: 'NAS' },
-	{ re: /iphone/i,                                          icon: 'i-phone',       label: 'Phone' },
-	{ re: /ipad/i,                                            icon: 'i-phone',       label: 'Tablet' },
-	{ re: /android|pixel|samsung[-_]?galaxy|oneplus/i,        icon: 'i-phone',       label: 'Android device' },
+	// Watch BEFORE iphone/ipad — "applewatch" must not be eaten by /iphone/i.
+	{ re: /watch|gear-|fitbit|garmin|wear[-_]?os/i,           icon: 'i-watch',       label: 'Watch' },
+	{ re: /ipad/i,                                            icon: 'i-tablet',      label: 'Tablet' },
+	{ re: /iphone/i,                                          icon: 'i-smartphone',  label: 'Phone' },
+	{ re: /android|pixel|samsung[-_]?galaxy|oneplus/i,        icon: 'i-smartphone',  label: 'Android device' },
 	{ re: /tv|bravia|webos|chromecast|firetv|appletv|lg-tv/i, icon: 'i-monitor',     label: 'TV / streamer' },
 	{ re: /switch|nintendo|playstation|ps5|ps4|xbox/i,        icon: 'i-zap',         label: 'Game console' },
-	{ re: /thermostat|nest|hue|aqara|tuya|sonoff|qingping/i,  icon: 'i-thermometer', label: 'IoT' },
+	{ re: /thermostat|nest-?thermostat|hue|aqara|tuya|sonoff|qingping/i, icon: 'i-thermometer', label: 'IoT' },
 	{ re: /camera|cam$|cam-|doorbell|ring|hikvision/i,        icon: 'i-eye',         label: 'Camera' },
-	{ re: /echo|alexa|homepod|nest-?audio/i,                  icon: 'i-info',        label: 'Smart speaker' },
+	// Speaker MUST come after 'watch' so "nest-audio" doesn't catch /nest/.
+	// W120/W121 = Bose model numbers (Chrome-Claude saw a W120 in LAN list).
+	{ re: /echo|alexa|homepod|nest-?audio|sonos|bose|w1[0-9]{2}/i, icon: 'i-speaker', label: 'Smart speaker' },
 	{ re: /node$|gemma|raspberry|rpi|pi-/i,                   icon: 'i-cpu',         label: 'Server' }
 ];
 
