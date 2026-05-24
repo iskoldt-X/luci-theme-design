@@ -1108,6 +1108,25 @@
     display: none !important;
 }
 
+/* Round 43 Step 188 — Bug #1 (Chrome-Claude overview bug catalog).
+ *
+ * The :has()/ID selectors above only hide the DHCP table + heading
+ * pair. But devices.js also stamps `data-design-hidden="1"` on any
+ * ancestor .cbi-section / .cbi-map / FIELDSET that wraps a DHCP
+ * heading. When LuCI 24.10+ rerenders the wrapper, the JS reaches
+ * that ancestor but our inline `style.display='none'` gets clobbered
+ * — and the wrapper renders as an empty 50px shell because nothing
+ * matches `:has(>#status_leases)` anymore (LuCI added nesting).
+ *
+ * Fix: trust our own data attribute. Whatever the wrapper structure,
+ * if JS decided it should be hidden, hide it. This is the simplest,
+ * most rerender-resistant hook — and lets us drop the fragile
+ * structural :has() selectors as JS-set attributes always win. */
+.cbi-section[data-design-hidden="1"],
+[data-design-hidden="1"] {
+    display: none !important;
+}
+
 /* Step 145 (Round 39):scale indicator below the gauge value. Tells user
  * what 100% of the gauge represents (auto-adjusts: "max 250 Mbps" /
  * "max 2.5 Gbps" etc). Small + muted so it's available reference but

@@ -417,8 +417,16 @@ return baseclass.extend({
 				matched++;
 			}
 		}
-		if (matched && window.console && console.debug) {
+		// Round 43 Step 188 — Bug #7 (Chrome-Claude). The log was firing
+		// on every MutationObserver poll, spamming the console with the
+		// same message 12+ times. The hide-logic itself is already
+		// idempotent (we `continue` if data-design-hidden is set), so
+		// `matched` settles to 0 after the first sweep — but a quiet
+		// console is non-negotiable polish. Gate behind window.designDebug
+		// and a one-shot flag so even on first run we log at most once.
+		if (matched && !this._dhcpHideLogged && window.designDebug && window.console && console.debug) {
 			console.debug('[design] hid ' + matched + ' upstream DHCP section(s)');
+			this._dhcpHideLogged = true;
 		}
 	},
 
