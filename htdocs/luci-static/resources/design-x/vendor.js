@@ -51,17 +51,91 @@ function bitsToCategory(mac) {
 	return 'uaa';
 }
 
+// Round 44 Step 208 — load over XHR + raw Streams API, NOT fetch + new Response.
+//
+// Reason: ImmortalWrt 24.10 ships LuCI 26.x (luci-base v26.136.30825+),
+// which monkey-patches window.Response into a LuCI.Class subclass — `new
+// Response(stream)` no longer constructs a fetch.Response, it constructs
+// a LuCI Response Class instance whose __init__ tries to call
+// xhr.getAllResponseHeaders() on the argument (expecting an XHR). With
+// a ReadableStream argument that method doesn't exist → TypeError →
+// .catch returns {} → all UAA lookups fall through to "Unknown vendor".
+// (Symptom verified on user's box 2026-05-24; raw fetch + Response from
+// the DevTools console works because that scope resolves Response to
+// native, but L.require'd modules see LuCI's overridden global.)
+//
+// Fix: drive DecompressionStream directly via its writable/readable
+// halves — no Response wrapper needed. Fetching via XHR with
+// responseType='arraybuffer' is a parallel hedge (LuCI may also be
+// wrapping fetch in some 26.x builds; XHR is older and not wrapped).
+// Both Response and fetch are dodged.
+//
+// Stream assembly: TextDecoder with stream:true is used so the decoder
+// can correctly handle multi-byte UTF-8 codepoints that span chunk
+// boundaries (relevant for vendor names with non-ASCII).
+function _decompressArrayBuffer(buf) {
+	return new Promise(function (resolve, reject) {
+		try {
+			var ds = new DecompressionStream('gzip');
+			var writer = ds.writable.getWriter();
+			writer.write(new Uint8Array(buf));
+			writer.close();
+
+			var reader = ds.readable.getReader();
+			var decoder = new TextDecoder('utf-8');
+			var text = '';
+			function pump() {
+				reader.read().then(function (chunk) {
+					if (chunk.done) {
+						text += decoder.decode();   // flush any pending bytes
+						resolve(text);
+						return;
+					}
+					text += decoder.decode(chunk.value, { stream: true });
+					pump();
+				}).catch(reject);
+			}
+			pump();
+		} catch (e) {
+			reject(e);
+		}
+	});
+}
+
+function _fetchArrayBuffer(url) {
+	return new Promise(function (resolve, reject) {
+		var xhr = new XMLHttpRequest();
+		xhr.open('GET', url, true);
+		xhr.responseType = 'arraybuffer';
+		xhr.timeout = 30000;
+		xhr.onload = function () {
+			if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response);
+			else reject(new Error('HTTP ' + xhr.status));
+		};
+		xhr.onerror = function () { reject(new Error('network error')); };
+		xhr.ontimeout = function () { reject(new Error('timeout')); };
+		xhr.send();
+	});
+}
+
 // Internal: load + decompress + parse the OUI map, with sessionStorage
 // cache to skip decompression on repeat page loads in the same session.
 function loadMap() {
 	if (_mapPromise) return _mapPromise;
 
 	// Hot path — sessionStorage hit (parsed JSON cached as text).
+	// Round 44 Step 208: sanity-floor the cache. An earlier broken vendor.js
+	// might have setItem('{}') (or any short stub); if we trust that blindly
+	// we're stuck on empty map forever until tab close. Reject anything
+	// implausibly small (real cache is ~853 KB; 1 KB is generous).
 	try {
 		var cached = sessionStorage.getItem(SESSION_KEY);
-		if (cached) {
+		if (cached && cached.length > 1024) {
 			_mapPromise = Promise.resolve(JSON.parse(cached));
 			return _mapPromise;
+		} else if (cached) {
+			// Stale stub — drop it.
+			try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
 		}
 	} catch (e) {
 		// QuotaExceeded, disabled storage, private mode etc — fall through
@@ -82,23 +156,21 @@ function loadMap() {
 		return _mapPromise;
 	}
 
-	_mapPromise = fetch(VENDOR_DATA_URL).then(function (res) {
-		if (!res.ok) throw new Error('vendor DB fetch failed: HTTP ' + res.status);
-		var ds = new DecompressionStream('gzip');
-		return new Response(res.body.pipeThrough(ds)).text();
-	}).then(function (text) {
-		var map = JSON.parse(text);
-		// Cache parsed text (not the gzipped bytes) so the next page in
-		// this session skips the decompress step entirely.
-		try { sessionStorage.setItem(SESSION_KEY, text); } catch (e) { /* quota */ }
-		return map;
-	}).catch(function (e) {
-		if (window.console && console.warn) console.warn('vendor: load failed', e);
-		// Don't sticky-fail — null out the singleton so a later retry
-		// can recover (e.g. network blip during initial Overview mount).
-		_mapPromise = null;
-		return {};
-	});
+	_mapPromise = _fetchArrayBuffer(VENDOR_DATA_URL)
+		.then(_decompressArrayBuffer)
+		.then(function (text) {
+			var map = JSON.parse(text);
+			// Cache parsed text (not the gzipped bytes) so the next page in
+			// this session skips the decompress step entirely.
+			try { sessionStorage.setItem(SESSION_KEY, text); } catch (e) { /* quota */ }
+			return map;
+		}).catch(function (e) {
+			if (window.console && console.warn) console.warn('vendor: load failed', e);
+			// Don't sticky-fail — null out the singleton so a later retry
+			// can recover (e.g. network blip during initial Overview mount).
+			_mapPromise = null;
+			return {};
+		});
 
 	return _mapPromise;
 }
