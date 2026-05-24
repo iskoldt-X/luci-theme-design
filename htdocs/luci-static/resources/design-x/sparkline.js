@@ -263,20 +263,25 @@ function renderTileSpark(tileEl, ring, ringSecondary, minRange) {
 	var fillEl = tileEl.querySelector('.design-tile-spark-fill');
 	var lineSecondaryEl = tileEl.querySelector('.design-tile-spark-line-secondary');
 
-	// Step 139 (Round 37):compute shared Y-axis upper bound if a secondary
-	// ring is present. Without this, each ring's path() auto-scales to its
-	// own data range — rx peaks visible but tx (typically 10× smaller in
-	// download-heavy households) would be drawn at the same visual height,
-	// destroying the "upload is 1/10 of download" signal users care about.
-	var sharedHi = null;
-	if (ringSecondary) {
-		var rxHi = 0, txHi = 0;
-		for (var i = 0; i < ring.data.length; i++) if (ring.data[i] > rxHi) rxHi = ring.data[i];
-		for (var k = 0; k < ringSecondary.data.length; k++) if (ringSecondary.data[k] > txHi) txHi = ringSecondary.data[k];
-		sharedHi = Math.max(rxHi, txHi);
-	}
-
-	var linePath = ring.path(SPARK_W, SPARK_H, sharedHi, minRange);
+	// Round 44 Step 205 — Bug P0 (doc/wan_traffic.md §三). Step 139 (Round 37)
+	// originally computed a shared Y-axis upper bound from max(rxHi, txHi)
+	// across both rings so download magnitude appeared larger than upload
+	// (~10× ratio for typical homes). In practice this caused a quantum
+	// compression bug: any historical peak in EITHER direction (in the 2-min
+	// sliding window) compressed the OTHER direction's curve into the
+	// bottom ~10% of viewBox. User reported "during upload the number was
+	// high but the dashed line was invisible; shortly after upload finished
+	// the line suddenly appeared" — that's exactly the moment when rx's
+	// historic peak rolled out of the window, releasing the y-axis quantum.
+	//
+	// Fix: each ring's path() auto-scales to its OWN data range. The
+	// "upload is 1/10 of download" magnitude relationship is restored via
+	// the meta line's `Peak ↓X ↑Y` dual readout (Step 206), which gives
+	// the numeric magnitude without forcing the visual quantum. minRange
+	// (Step 197) is preserved — it's a separate parameter slot and only
+	// applies on stable single-line metrics like Memory (WAN tile leaves
+	// it undefined so no interference).
+	var linePath = ring.path(SPARK_W, SPARK_H, null, minRange);
 
 	// Step 57: when fewer than 2 samples have arrived (1st poll cycle),
 	// ring.path() returns ''. Instead of leaving the SVG empty (looks
@@ -310,13 +315,12 @@ function renderTileSpark(tileEl, ring, ringSecondary, minRange) {
 	lineEl.removeAttribute('opacity');
 	fillEl.setAttribute('d', linePath + ' L' + SPARK_W + ',' + SPARK_H + ' L0,' + SPARK_H + ' Z');
 
-	// Step 139 (Round 37):draw secondary line (e.g. tx for WAN tile) on
-	// the shared Y-axis so its magnitude reads correctly relative to the
-	// primary line. path() returns '' if ring has <2 samples — in that
-	// case clear the line attribute so a stale path from a prior render
-	// doesn't linger.
+	// Round 44 Step 205: secondary line also auto-scales independently
+	// (sharedHi removed — see comment block above). path() returns '' if
+	// the ring has <2 samples — in that case clear the line attribute so
+	// a stale path from a prior render doesn't linger.
 	if (lineSecondaryEl) {
-		var secPath = ringSecondary ? ringSecondary.path(SPARK_W, SPARK_H, sharedHi, minRange) : '';
+		var secPath = ringSecondary ? ringSecondary.path(SPARK_W, SPARK_H, null, minRange) : '';
 		lineSecondaryEl.setAttribute('d', secPath || '');
 	}
 }
