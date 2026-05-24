@@ -131,6 +131,9 @@ function loadMap() {
 	try {
 		var cached = sessionStorage.getItem(SESSION_KEY);
 		if (cached && cached.length > 1024) {
+			if (window.designDebug && window.console && console.debug) {
+				console.debug('[vendor] sessionStorage hit, ' + cached.length + ' chars');
+			}
 			_mapPromise = Promise.resolve(JSON.parse(cached));
 			return _mapPromise;
 		} else if (cached) {
@@ -156,6 +159,18 @@ function loadMap() {
 		return _mapPromise;
 	}
 
+	// Round 44 Step 220: optional debug logging gated by window.designDebug.
+	// Chrome-Claude observed `oui.json.gz` fetched 10× in pre-Step-208 runs
+	// where the Response hijack made every fetch fail → .catch null'd
+	// _mapPromise → next detail panel render re-triggered loadMap. Step 208
+	// fixed the underlying fetch, but the null-on-failure logic could still
+	// thunder-herd in transient network blips. Soften it: instead of
+	// immediately releasing the singleton, suppress re-entry for 30 s after
+	// a failure. This bounds the worst-case re-fetch rate at 2/minute even
+	// under pathological repeated failure, while still allowing recovery.
+	if (window.designDebug && window.console && console.debug) {
+		console.debug('[vendor] loadMap fetch initiated (no sessionStorage cache)');
+	}
 	_mapPromise = _fetchArrayBuffer(VENDOR_DATA_URL)
 		.then(_decompressArrayBuffer)
 		.then(function (text) {
@@ -163,12 +178,19 @@ function loadMap() {
 			// Cache parsed text (not the gzipped bytes) so the next page in
 			// this session skips the decompress step entirely.
 			try { sessionStorage.setItem(SESSION_KEY, text); } catch (e) { /* quota */ }
+			if (window.designDebug && window.console && console.debug) {
+				console.debug('[vendor] loadMap resolved with ' + Object.keys(map).length + ' entries');
+			}
 			return map;
 		}).catch(function (e) {
 			if (window.console && console.warn) console.warn('vendor: load failed', e);
-			// Don't sticky-fail — null out the singleton so a later retry
-			// can recover (e.g. network blip during initial Overview mount).
-			_mapPromise = null;
+			// Schedule a delayed singleton release. While the timeout is
+			// pending, _mapPromise stays = the already-resolved-to-{}
+			// rejected-chain — subsequent loadMap() calls return that
+			// (no new XHR). After 30 s elapses, _mapPromise = null and
+			// the next call retries. This bounds re-fetch rate at 2/min
+			// in the worst case (page render burst + immediate failure).
+			setTimeout(function () { _mapPromise = null; }, 30000);
 			return {};
 		});
 
