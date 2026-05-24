@@ -250,6 +250,36 @@ function formatRateKbps(kbps) {
 // Best-effort: lost on browser clear, doesn't sync across browsers / devices.
 // UCI persistence is a follow-up (would need a new UCI section + reload-safe
 // schema). The toast on save makes the boundary explicit.
+// Step 153 (Round 40 patch 3):sanitize a candidate hostname so dnsmasq
+// will accept it. dnsmasq enforces RFC 952/1123: only [a-zA-Z0-9-], must
+// not start with hyphen, ≤ 63 chars. ANY other character → "bad DHCP host
+// name" → dnsmasq crash loop → procd gives up → entire LAN loses DHCP+DNS.
+//
+// Step 152 omitted this validation; user typed "MacBook Pro A" (with
+// spaces), Step 152 wrote it raw to /etc/config/dhcp, dnsmasq crashed 6
+// times at 03:38:54 and never came back up. 7 hours of LAN outage (iPhone
+// couldn't get DHCP on reconnect, devices with valid leases lost name
+// resolution). Definitive incident; this Step closes the hole.
+//
+// Transform pipeline:
+//   "MacBook Pro A"        → "MacBook-Pro-A"
+//   "iPad (Adam's)"        → "iPad-Adams"
+//   "我的手机"             → ""  (caller rejects empty when input wasn't)
+//   "--leading-trailing--" → "leading-trailing"
+//   "many   spaces   here" → "many-spaces-here"
+//   63-char-overflowed-... → truncated at 63 chars
+function sanitizeHostname(input) {
+	if (!input) return '';
+	return input
+		.trim()
+		.replace(/[\s_]+/g, '-')           // whitespace/underscore → hyphen
+		.replace(/[^a-zA-Z0-9-]/g, '')     // strip non-alphanumeric-hyphen
+		.replace(/-+/g, '-')               // collapse consecutive hyphens
+		.replace(/^-+|-+$/g, '')           // strip leading/trailing hyphens
+		.substring(0, 63)                  // RFC 1035 label limit
+		.replace(/-+$/, '');               // re-strip trailing if truncation left one
+}
+
 function loadCustomNames() {
 	try {
 		var raw = localStorage.getItem(STORAGE_KEY);
@@ -684,10 +714,37 @@ return baseclass.extend({
 	// not just ours. Overview users typically have none, but worth knowing.
 	actionRename: function (mac, currentName) {
 		var self = this;
-		var next = window.prompt(_('Rename this device') + ' (' + mac + ')', currentName);
-		if (next === null) return;             // cancelled
-		next = next.trim();
-		if (next === currentName) return;      // no-op
+		// Step 153 (Round 40 patch 3):the prompt label includes hostname
+		// rules so users can choose a valid name from the start. Step 152's
+		// silent acceptance of "MacBook Pro A" crashed dnsmasq for 7 hours;
+		// the explicit hint here pairs with sanitizeHostname() below.
+		var raw = window.prompt(
+			_('Rename device') + ' — ' + _('letters, digits, hyphens only') +
+			'\n(' + _('e.g.') + ' MacBook-Pro-A) — ' + mac,
+			currentName
+		);
+		if (raw === null) return;              // cancelled
+		raw = raw.trim();
+
+		// Step 153:sanitize. Caller may have typed spaces / unicode / etc.;
+		// sanitizeHostname strips to dnsmasq-acceptable form. Empty input is
+		// preserved (means "clear the override") but raw-non-empty that
+		// sanitizes to empty is rejected with toast (e.g. all-emoji input).
+		var next = raw === '' ? '' : sanitizeHostname(raw);
+
+		if (raw !== '' && next === '') {
+			toastSafe('error',
+				_('Invalid hostname — use letters, digits, and hyphens only'));
+			return;
+		}
+		if (next === currentName) return;      // no-op (also catches "trimmed = same")
+
+		if (next !== raw && next !== '') {
+			// Inform user that we changed the input. They see the new name
+			// in the prompt's success toast below; this preview tells them
+			// the rule was applied.
+			toastSafe('info', _('Saving as') + ' "' + next + '"');
+		}
 
 		// ── 1. Optimistic UI: instant DOM + localStorage update ─────────────
 		var prevCustom = this.customNames[mac];   // capture for rollback
