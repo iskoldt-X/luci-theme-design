@@ -3815,6 +3815,191 @@ Chrome-Claude(浏览器侧的另一个 Claude 实例,跑在真实 Chrome 里)在
 
 ---
 
+## 🔱 第四十二轮(Step 156-178):另立门户 — luci-theme-design-x + ubus 全迁移 + 4 次部署崩溃
+
+> 触发:用户拍板"换 IPK 名 + 加 Conflicts,保留 Design 显示名 + design-x/ 路径"。Round 42 实际跨度比设想大得多 —— **3 个 sub-rounds(A/B/C)+ 一个未预期的 sub-D 部署 hotfix 串**。Step 156-167 是计划中的工作,Step 168-170 是文档收尾,Step 171-178 是装包后连续 4 次崩溃的 hotfix 串(本质是 Round 42 sub-D)。
+
+### sub-A:fork off 改名(Steps 156-160)
+
+把包名 `luci-theme-design` → `luci-theme-design-x`,与上游 `luci-theme-design` 不再覆盖关系而是 conflict 关系。涉及:
+
+- **Step 156** — install paths rewrite。htdocs/luci-static/design/ → design-x/、Makefile package name、luasrc namespacing
+- **Step 157** — 9 个会与 LuCI / 其他主题命名冲突的 SVG icon 搬到 design-x/icons/ 子目录,CSS substitute 路径全改
+- **Step 158** — JS 模块 namespace 到 resources/design-x/(`L.require('design-x.devices')` 不再撞 `luci.devices`)
+- **Step 159** — Makefile fork PKG_CONFLICTS=luci-theme-design + post-install/pre-remove hook 调整顺序
+- **Step 160** — lint.yml luci-base path-collision gate(防止 fork 后又意外跟 luci-base 共用文件)+ stale-path repairs
+
+**lesson 1**:**改包名是个连锁反应工程。3 个 sub-A 子 Step 都是"如果在 Step 156 那一刻就一锅炖,差不多 70% 概率漏一个东西"** —— 实际上 Step 160 lint gate 跑出来还是查到 2 处 stale path 没改干净。**有 CI lint 的好处**:Step 160 跑了一遍 lint,把 Step 156-159 没改全的地方暴露了出来。
+
+### sub-B:ucode 模板 + ubus 全迁移(Steps 161-167)
+
+把所有 CGI 端点(`/cgi-bin/design/{temp,cpustat,host-traffic,wifi-stations,nlbw,devstats}`)迁移到 rpcd ubus(`luci-theme-design-x.{temp,cpustat,...}`),并改用 ucode 模板渲染 header。
+
+- **Step 161** — ucode template dual-track(`/usr/share/ucode/luci/template/themes/design-x/header.ut` + 保留 Lua header.htm 作为 fallback for older LuCI)
+- **Step 162** — lint.yml ucode syntax-balance check(`{{...}}` 平衡 + `{% ... %}` 平衡)
+- **Step 163** — rpcd ubus skeleton + ACL(`/usr/share/rpcd/acl.d/luci-theme-design-x.json` 限制只能 read 6 个 metric)
+- **Step 164** — `devstats` 迁出 CGI(canonical pattern 模板)
+- **Step 165** — `cpustat` + `temp` + `host-traffic` + `wifi-stations` + `nlbw` 全部迁出
+- **Step 166** — `download` + `upload` + `ping` 迁到 LuCI Lua controller(不走 ubus,因为这 3 个是 user-triggered measurement,不是 read-only metric)
+- **Step 167** — apply-modal + toast monkey-patches 加 luciversion whitelist(只对 LuCI 18-25 patch,26+ 跳过 — 这条 Step 174 反转了)
+
+**lesson 2**:**rpcd vs Lua controller 是两个独立的 capability**。ubus rpcd 适合"read-only metric + auth-gated + 高频 poll"(thermal/cpustat),Lua controller 适合"user-triggered + 长连接 + 流式响应"(download/upload/ping)。**两种都不要混用**,试图在一个机制里包打所有场景会扯出复杂度。
+
+### sub-C:doc 收尾(Steps 168-170)
+
+- **Step 168** — `doc/luci-compat.md` Round 42 compat matrix 更新 — 哪些 LuCI 版本 ubus 路径变化、哪些 ucode template 全局变量改名、哪些 CSS class 在 24.10 vs 26.x 不一样
+- **Step 169** — `build-matrix.yml` weekly cross-branch ipk pack matrix(每周 build 一次 OpenWrt / ImmortalWrt × 24.10 / 23.05 / SNAPSHOT 的 6 个组合,看哪些目标 build 失败)
+- **Step 170** — INDEX + development + backlog 三份 doc 整合到 design-x 名字空间
+
+### sub-D(未预期):部署崩溃 hotfix 串(Steps 171-178)
+
+**首次装包(Step 163 build)之后,4 次重装,4 次浏览器崩 / 路由器面板崩**。每次 hotfix 都是"以为修好了→重装→新的崩"的轮回。完整顺序:
+
+| Step | 部署后症状 | 根因 |
+|---|---|---|
+| 171 | ubus method 全部 silent skip | rpcd 脚本 `git mode 100644`(无 +x bit)— rpcd silently 拒绝执行 |
+| 172 | byte counter overflow → 显示负数 | BusyBox awk `%d` 是 32-bit signed,unsigned bytes ≥2 GiB 翻车 → `%.0f` |
+| 173 | release upload 全部静默失败 | `softprops/action-gh-release@v2` 默认 no-overwrite,fork 包名跟旧 release 撞 → `gh release delete --cleanup-tag` 前置 |
+| 174 | LuCI 26 上 apply-modal 关闭 | Step 167 写了 luciversion whitelist `if (v >= 18 && v <= 25)`,26 不在范围 → 跳过 patch → 用户 click Apply 走 LuCI native modal → 我们的 diff/Undo 失效。**反转为 known-incompatible list**: trust unknown versions, only bail when version is KNOWN-bad |
+| 175 | 整张 overview 503: `runtime.uc:133 left-hand side expression is null` | header.ut 用了不存在的 ucode 全局(`fs.access`、`dispatcher.lookup` 假设 auto-import)。**用户 cat 出 bootstrap header.ut 的真实 API**:`ubus.call('system','board')` / `dispatcher.lang/build_url/lookup` / `_()` / `getuid/getspnam` from `'luci.core'` / `striptags()` / `entityencode()` / `boardinfo` 需要 ubus call 而不是 auto-global → **照 bootstrap 完全重写** |
+| 176 | logged-in 用户的 chrome 全消失 | Step 175 把 body class 错挂成 `node-main-login`(本来只 for 登录页),CSS `.node-main-login header { display: none }` 把已登录用户的整个 nav 全藏了 |
+| 177 | login 完了 Overview 卡全 bail | Step 176 fix 完,empty path 的 body 没有 node-* class → 6 张 Overview 卡的 JS 都 `body.classList.contains('node-admin-status-overview')` 检查 → 全部 bail |
+| 178 | session 过期回 login 页样式丢 | LuCI 在 session 过期时 ctx.request_path 还保留,所以 path 非空 → Step 177 fix 会给登录页挂 `node-admin-status-overview` → login 表单丢专属样式。**正确逻辑**:`blank_page \|\| !authed` 优先(覆盖 path) |
+
+**lesson 3**:**ucode template 全局变量不是 well-documented**。Step 175 之前我猜了 3 次,3 次都错。**正确做法是 cat bootstrap header.ut 当 ground truth** —— bootstrap 是 LuCI 自带的 reference theme,它能跑就是 API 存在的证明。用户在 Step 175 那一轮 cat 出来给我之后,5 分钟内重写完。**bootstrap 是 LuCI 主题化的 reference impl,以后任何 ucode template / dispatcher / ACL 不确定,先看 bootstrap**。
+
+**lesson 4**:**body class 是 6 张 Overview 卡的隐式契约**。`node-admin-status-overview` 这个 class 在 sparkline.js / devices.js / traffic.js / wan-hero.js / speedtest.js / quick-actions.js 6 个 JS 模块里都被 `body.classList.contains(...)` 检查。Step 176→177→178 三连修就是因为 body class 的语义在 Round 42 之前一直由 LuCI 自动生成,我们改 header.ut 后需要自己生成,而生成逻辑的 3 个分支(logged-in 空 path / login form / 任意 path)互相冲突。**最终 4 行 ucode**:
+
+```ucode
+if (blank_page || !authed) {
+    node_class = 'node-main-login';
+} else if (length(reqpath) > 0) {
+    node_class = `node-${join('-', reqpath)}`;
+} else {
+    node_class = 'node-admin-status-overview';
+}
+```
+
+**这 4 行是 Round 42 用 7 小时(分散在 Steps 175-178)写出来的**。
+
+**lesson 5**:**sub-D 之所以连续 4 次崩,是因为在用户实机 vs build container 之间无 visual regression test**。Round 7 的 Step 21 教训重现 ——「lint 全过 + node --check 全过 + 部署到实机才崩」。Round 42 的特殊之处是**整个 ucode template runtime 是 build 上跑不到的 path**,只有在 LuCI runtime(/cgi-bin/luci 上下文)里才会暴露。**T21 visual regression test 在 Round 42 仍是无解**,因为我们没有 Mac 本地的 LuCI 24.10 沙箱 — backlog 里挂着,目前依赖用户实机反复装包。
+
+### Round 42 累计
+
+| 指标 | sub-A 前 | sub-A 后 | sub-B 后 | sub-D 后 |
+|---|---|---|---|---|
+| 包名 | luci-theme-design | luci-theme-design-x | 同 | 同 |
+| CGI 端点数 | 8 | 8 | **0**(全迁 ubus/Lua) | 0 |
+| rpcd ubus 对象 | 0 | 0 | **1**(`luci-theme-design-x`, 6 methods) | 同 |
+| LuCI 兼容范围(`luciversion`) | 18-25(whitelist) | 同 | 18-25 | **18+**(反转为 known-bad blacklist) |
+| ucode template 运行时崩溃 next-install | n/a | 0 | 0 | **测过 4 次崩 4 次 → 修到 0** |
+| 部署崩 → 用户报错 → hotfix 的循环数 | 0 | 0 | 1 | **4** |
+| body class scheme | LuCI 自动 | LuCI 自动 | 部分我们生成(只 login) | **全部我们生成**(login / logged-empty-path / authed-with-path) |
+
+## 🎯 Round 42 横向观察
+
+**改名是真正的 fork 不是 rename**。Round 42 sub-A 的工作量比预想大 70% —— 因为「luci-theme-design-x」不只是 `s/design/design-x/g`。**每个 namespace 边界**(install path / JS module name / SVG icon id / CSS class prefix / ubus object / ACL / Makefile package / hooks / icons.svg sprite ids)都要独立 audit。Step 156-160 走完 5 个 sub-step + Step 160 的 CI lint 兜底,才把 stale-path bug 彻底清干。**fork 包的 grep audit 不能只 grep 源代码,要 grep build artifact + ACL JSON + Makefile rule**。
+
+**部署事故 Round 7→40→42 的规律**。Round 7(Step 21 minifier)、Round 40(Step 152 dnsmasq grammar)、Round 42 sub-D(4 次连环 ucode 崩)有共同形态:**「lint + node --check + grep audit 全过,但 LuCI runtime 实际语义跟我们以为的不一样」**。Round 40 把这条放进 memory(`uci-write-needs-service-validation.md`),Round 41 又写进 toolbox + briefing,**Round 42 sub-D 等于在用户实机 stress-test 这条规则的工具链 — 测出还差一个 "ucode template runtime ≠ Mac node 12 runtime"**。下次该补的:把 bootstrap header.ut 的 ucode 全局清单列入 toolbox §X,后续 ucode template 修改前先 cross-check。
+
+**用户 cat 出 bootstrap 这件事**。Step 175 之前 3 次尝试都靠"我以为的 ucode API"。用户那一次说"非常好,我非常喜欢你找我要信息。未来如果有需求,一定不要手软!"+ 直接 cat 出 bootstrap header.ut。**lesson**:**遇到 LuCI runtime 黑盒不要在脑内 simulate,直接要 ground truth**。这条之前在 toolbox §5 写过(uci-write 那条),但 sub-D 之前没自动套到 ucode template 上。**「找 ground truth」是一个跨场景元规则,Round 41 toolbox 应该升一档:不只列具体技巧,要写一段「黑盒诊断三板斧:cat ground truth / dispatch a real request / read upstream reference impl」**。Backlog 备一笔。
+
+**Round 42 是项目从「主题工程」过渡到「LuCI 生态参与者」的分水岭**。Round 0-41 都是「在 LuCI 上面贴一层皮」,Round 42 sub-B 把 8 个 CGI 端点迁成 6 个 ubus method,意味着**我们从 LuCI 角度看不再是 cosmetic 主题,而是注册了 1 个 rpcd 对象 + 8 个 acl rule + 1 个 ucode template namespace 的 first-class component**。**好处**:auth-gated read,符合 LuCI 26+ 的 trend;**代价**:跟 LuCI runtime 的耦合面变大,Round 42 sub-D 4 个崩都是这个耦合面暴露出来的。
+
+**push 政策**:Round 42 sub-A + sub-B + sub-C 16 个 commit 都在本地 js 分支等用户批准。sub-D 的 8 个 hotfix 因为是用户实机一次次回来报的,**每个 hotfix 都立即 ship 了(scp 到 router 验证)**,但 git push 仍未做 —— 等用户下次显式说 push 时一起带走。
+
+---
+
+## 🎨 第四十三轮(Step 179-193):设计打磨 + Chrome-Claude 双线 review
+
+> 触发:Round 42 sub-D 终于稳定(Step 178 测过 OK),用户:"Step 178 测了, OK". 开动..."。**Round 43 是项目第一次「纯设计打磨」轮 — 没有 backend 改动,没有新 ubus method,全是 CSS + 小 JS + 设计文档**。
+
+### Phase 1 — design philosophy 落盘(Step 179)
+
+`doc/claude_style.md` 增加 Principle 9 + Principle 10。
+
+- **Principle 9**(形态适配信息 / 节奏感):同一个 overview 上有「表格」「KV 列表」「带进度条的 KV」「卡片」等多种信息形态,**每种形态都有它最佳表达,不强求统一**。Round 43 Chrome-Claude 提出,用户拍板永久原则。
+- **Principle 10**(header 对齐跟列内容走):**「所有列表头居中」不是 industry default**。Vercel / Linear / Stripe / Notion 全部用「header 对齐方向 follow 列内容方向」(左对齐内容→左对齐 header,右对齐数字→右对齐 header)。这条 Round 43 中段(Step 181-184)是用户跟 Chrome-Claude 拉锯出来的 — 见 Phase 2。
+
+### Phase 2 — LAN Clients 表对齐拉锯战(Steps 181-184)
+
+Step 179 第一版用「所有 header 居中」尝试统一对齐。**LAN Clients 表 6 列里 3 列(IP / MAC / Lease)的内容是 monospace 等宽 + 左对齐**,header 居中导致视觉抖动。
+
+- **Step 181** — auto-size 列,试图让 header 自然居中在列宽中心 → **内容堆到一起了**(`auto` cols 不在多个独立 grid 容器间共享宽度,LAN Clients 的 thead 和 row 是两个独立 grid)
+- **Step 182** — 改 fixed-width + 1fr filler → 列宽对齐,但右侧出现大块空白
+- **Step 183** — `justify-content: space-between` 平铺 → Chrome-Claude 拍照测量:**Lease 列 header 偏 −28px,可见**
+- **Step 184** — **Chrome-Claude 反转前提**:**「所有 header 居中」是错的设计 default**。改为「header alignment follows content alignment」(Vercel / Linear convention)。`text-align: left` for name/ip/mac/sig,`text-align: right` for seen。Principle 10 改写为永久原则。
+
+**lesson 1**:**「统一」不是 design default,「内容驱动」才是**。Step 179 假设统一居中漂亮,Step 181-183 都试图在统一前提下补救。Step 184 由 Chrome-Claude 反转前提才走通。**用户在 Step 184 之后说「我不懂。不如让 Claude chrome 检查检查」** — **当一个设计方向迭代到第 3-4 次没收敛,说明前提错了,不是策略错了**。下次类似情况要主动 reframe 而不是再加一层 CSS workaround。
+
+### Phase 3 — Traffic Analysis 设备标签 + System 字体打磨(Steps 180, 186)
+
+- **Step 180** — Traffic Analysis 里出现「8B:35」这种半 MAC 残段,Chrome-Claude 抓到 root cause:`deviceLabel()` 在没有 hostname 时返回 mac 的某个 substring 而不是友好 label。**重写为 primary + secondary 双行**:hostname 优先做主标,MAC 做副标;没 hostname 时主标 = 「Private device」/「Unknown device」(MAC 首 byte LSB 区分),副标 = 完整 MAC。
+- **Step 186** — System 卡 5 行(Firmware/Kernel/Local Time/Load Avg/CPU)改 mono 字体。**按行选择器**(`tr:nth-child(5/6/7/9/10) > td:nth-child(2)`)定位 — fragile 但当前 LuCI 24.10 行顺序稳定,upstream 如果重排再改 JS 类名注入。
+
+### Phase 4 — universal table.table 升级(Step 185)
+
+按 Chrome-Claude Part 2 audit 推荐,把 LAN Clients 的视觉语言泛化到所有 `<table class="table">` / `.table > .tr` LuCI 表面:
+
+- Status > Routes(IPv4/IPv6 Neighbours / Active Routes / Rules)
+- Status > Software(opkg 已装清单)
+- Status > Startup(initscripts 列表)
+- Services > UPnP(端口映射表)
+
+实现:`table.table:not(.cbi-section-table)` 选择器(form-table 排除 — 那是 Step 188 议题),uppercase + tracking 表头、hairline 行分隔、subtle hover、tech 列(data-title 含 IP/MAC/Hash/Network/Address/Hostname)auto-mono。**119 行 CSS 覆盖 6+ LuCI 页面,没动一行 LuCI 上游 HTML**。
+
+**lesson 2**:**`:not(.cbi-section-table)` 是关键 escape hatch**。form-style 表格(Interfaces / Firewall Zones)行内嵌 dropdown/input/switch,read-only 表格 CSS 一套上去就崩。**Step 185 一开始尝试一锅炖,发现 Network/Interfaces 行内 widget 破样后,加 `:not(.cbi-section-table)` 排除掉 form-tables**。LuCI 已经给我们这条线了(`.cbi-section-table` 这个 class 是 LuCI 自己的语义标签),**关键技巧:写 site-wide CSS 时,先看 LuCI 已有什么 class 帮你做语义分类**。
+
+### Phase 5 — Principle 9 落实:KV+bar 形态(Step 187)
+
+把 Principle 9 从原则变 CSS:`tr:has(.cbi-progressbar)` 选择带进度条的表格行,给予不同的 padding / label 字重 / 视觉聚类。`:has()` 父级选择器,Chrome 105+ / Safari 15.4+ / FF 121+ 全支持。
+
+### Phase 6 — Chrome-Claude bug catalog 8 个清单(Steps 188-193)
+
+Chrome-Claude 在 Overview 上做了一次系统性 light/dark/mobile 扫描,产出 **14 个真 bug + 几个观察**。按严重度分档:
+
+| Bug | 严重度 | Step | 修法 |
+|---|---|---|---|
+| #1 空白 DHCP 卡 50px shell | 🔴 | 188 | `[data-design-hidden="1"] { display:none !important }` 取代 fragile `:has(>#status_leases)` |
+| #7 `[design] hid N DHCP section(s)` log 刷屏 | 🟠 | 188 | gate 在 `window.designDebug` + one-shot 标志 |
+| #2 + #14 进度条文字 fill<50% 在 light mode 不可读 | 🔴 | 189 | color 用 `--color-text` + halo 用 `--color-bg` + `paint-order: stroke fill` + 6 向 text-shadow,自动跟 theme 翻转 |
+| #3 Storage 卡 docker overlay 行污染 | 🔴 | 190 | devices.js 加 `startHideStorageDockerOverlay` 扫描 + 打 `data-design-hidden`,CSS 接管 |
+| #4 iPad / Watch / Bose 图标错 | 🟠 | 191 | icons.svg 加 4 个 Lucide symbol(smartphone / tablet / watch / speaker),DEVICE_TYPES regex 重排 + 新 pattern |
+| #6 QEMU Temperature tile 永显 "—" | 🟠 | 192 | fetchTempZones 加 sanity 滤(1°C ≤ temp ≤ 200°C),空集 → 隐藏,叠 `data-design-hidden` 防 unhide |
+| #8 page-load 5 ping 突发(误报) | 🟠 | 193 | 调查发现是 wan-hero `PING_SAMPLES=5` 中位数采样,**by design 不是 bug**,加注释防下次误判 |
+| #5 全员 Wired(需真硬件)| 🟠 | — | 留 Round 44(QEMU 无 wifi assoclist) |
+| #9-#13 polish 项 | 🟡 | — | 留 Round 44 |
+
+**lesson 3 — `data-design-hidden` 作为统一 hide 钩子**。Step 188 之后,`data-design-hidden="1"` 成为「JS 决定要藏的 → CSS 一句话兜底」的统一约定。Step 190(Docker overlay rows)、Step 192(Temperature tile)都复用同一钩子。**这种「一处 CSS + 多处 JS 打 attribute」的 pattern 比「每处 JS inline style」robust 得多** —— LuCI 任何 rerender 都不会 clobber CSS rule,inline style 经常被擦掉。
+
+**lesson 4 — Chrome-Claude review 的 ROI 极高**。Round 43 phase 6 — Chrome-Claude 一次扫到 8 个独立 bug,我们 5 个 commit 修掉(plus 1 个误报的调查注释)。**没有 Chrome-Claude,这些 bug 至少要分 5 次用户报告才能集齐**。**lesson 4 推论**:future Rounds 应该 routine 引入 Chrome-Claude full sweep,而不是被动等用户碰到 bug 才报。**Round 43 末尾的 push 时刻是个 Chrome-Claude full sweep 触发点**。
+
+### Round 43 累计
+
+| 指标 | Round 42 后 | Round 43 后 |
+|---|---|---|
+| Design 原则数(claude_style.md) | 8 | **10**(+ Principle 9 形态适配 + Principle 10 header 跟内容) |
+| LuCI 表格升级覆盖数 | 1(LAN Clients 自定义) | **6+**(LAN Clients + Routes + Software + Startup + UPnP + 任何 `table.table`) |
+| 不同 device icon 类型 | 12(笼统 5 类共用 i-phone/i-info) | **16**(Tablet/Watch/Speaker 独立 sprite) |
+| `data-design-hidden` 适用范围 | DHCP sections(JS 仍靠 inline style) | **任意元素**(CSS 统一钩) |
+| 进度条文字可读性(light mode + fill<50%)| ~1.5:1 几乎不可读 | **>4.5:1**(text 跟 theme 翻转 + halo) |
+| Chrome-Claude bug 一次性扫到并修 | 0 | **7 个 bug + 1 个误报澄清** |
+| 已修 bug 中 CSS-only / JS-only / 双修 | n/a | CSS-only 3(185/187/189),JS-only 3(190/191/192),双修 1(188)|
+
+## 🎯 Round 43 横向观察
+
+**「设计打磨轮」的价值跟「文档轮」一样**。Round 41 是文档整理轮,Round 43 是设计打磨轮 —— 都属于「不加 feature,只让 surface 更对」。**Round 43 之前 LAN Clients / Traffic / System 三张卡都"work",但有 8-14 个 polish 级 bug 长期挂着**。一次性扫掉之后,**整张 overview 从 "能用" 升级到 "看起来用心"**。**lesson**:**Rounds 30+ 之后,polish 轮 = high ROI**。
+
+**Chrome-Claude 反转前提的能力**。Round 43 phase 2 LAN Clients 表对齐拉锯战(Step 179→181→182→183→184),前 4 个 Step 都在「统一居中」前提下迭代。Step 184 由 Chrome-Claude 给出 measurement + Vercel/Linear convention 才反转前提。**这件事印证了 Round 41 学过的「写文档强制 verification」**:**Chrome-Claude 不是被动 review tool,是个独立 second opinion source**。**当一个方向卡 3-4 个 Step 没收敛,Chrome-Claude 的反转价值 ≥ 我自己加一层 CSS workaround 的价值**。
+
+**`:has()` 选择器从「特技」变「basic move」**。Round 30 Step 113-114 第一次用 `:has()`,当时还要在 commit message 解释支持矩阵。**Round 43 phase 4-5 一口气写了 6 个 `:has()` 规则**(table.table 升级 + KV+bar 行分类),不再需要解释 —— Chrome 105+ / Safari 15.4+ / FF 121+ 全 evergreen,LuCI 24.10 实机直接用。**「`:has()` 是新 default」这个 transition 在 Round 43 完成**。下次写 CSS 默认假设 `:has()` 可用,不再做 fallback。
+
+**Principle 9 是反「unify-everything」default 的设计哲学**。早期 design 倾向把「所有 X 都用同一种 Y」当成正向 — 一致性是好东西。**Principle 9 反过来**:**信息形态多样的时候,各自的最佳 representation 才是正确 default,强行统一反而损失信息**。Round 43 把这条做成代码层面落地:`tr:has(.cbi-progressbar)` 给 KV+bar 行专属节奏,不强求跟普通 KV 同 padding 同字重。**这是这个项目第一条「明确反 unify」的 principle**,Round 44+ 写新 surface 时主动 audit 是否在不必要的统一。
+
+**lesson 4(repeat)** — **Chrome-Claude routine 引入**。Round 43 phase 6 一次性扫到 14 个独立 bug。**Round 44 应该 routine 一次** — 不等用户报 bug,Round 44 末尾主动让 Chrome-Claude 再扫一遍 Overview / config / status 各页面,把 Round 44 的 8-10 个新 bug 集齐 → 集中修。这跟 Round 41 「文档轮 every 5-7 rounds」一个套路,只不过是「Chrome-Claude 全扫 every 2-3 rounds」。
+
+---
+
 ## 📊 第三轮（Step 21 + 22）累计变化（更新）
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
