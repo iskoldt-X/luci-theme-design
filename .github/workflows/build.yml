@@ -7,7 +7,7 @@ name: Build
 #   Actions-OpenWrt/build-immortalwrt-SSR-x86.yml
 # but skips kernel + rootfs compile — typical run time 3-6 minutes vs 1.5-2 hours.
 #
-# luci-theme-design is a noarch package (PKG_ARCH:=all), so the same .ipk
+# luci-theme-design-x is a noarch package (PKG_ARCH:=all), so the same .ipk
 # installs on any target — AX6000 (aarch64) and x86_64 alike. No matrix needed.
 
 on:
@@ -107,15 +107,15 @@ jobs:
       - name: Configure SDK feeds
         working-directory: sdk
         run: |
-          # Install ALL feeds (-a), not just luci. Even though luci-theme-design
+          # Install ALL feeds (-a), not just luci. Even though luci-theme-design-x
           # is noarch, OpenWrt's `make package/<x>/compile` will first build the
           # staging of every transitive dependency. The chain here is:
           #
-          #   luci-theme-design  → luci-base  → lucihttp  → needs lua.h
+          #   luci-theme-design-x  → luci-base  → lucihttp  → needs lua.h
           #
           # `lua` lives in the `packages` feed, so installing only `luci` makes
           # lucihttp fail with "lua.h: No such file or directory" (caught in
-          # https://github.com/iskoldt-X/luci-theme-design/actions/runs/26312436633).
+          # https://github.com/iskoldt-X/luci-theme-design-x/actions/runs/26312436633).
           #
           # Same pattern as Actions-OpenWrt/build-immortalwrt-SSR-*.yml.
           ./scripts/feeds update -a
@@ -123,7 +123,7 @@ jobs:
 
       - name: Stage theme into SDK
         run: |
-          mkdir -p sdk/package/luci-theme-design
+          mkdir -p sdk/package/luci-theme-design-x
           rsync -a \
             --exclude='.git/' \
             --exclude='.github/' \
@@ -132,9 +132,9 @@ jobs:
             --exclude='.claude/' \
             --exclude='sdk/' \
             --exclude='*.tar' \
-            ./ sdk/package/luci-theme-design/
+            ./ sdk/package/luci-theme-design-x/
           echo "Staged tree:"
-          find sdk/package/luci-theme-design -maxdepth 3 -type f | head -30
+          find sdk/package/luci-theme-design-x -maxdepth 3 -type f | head -30
 
       - name: Stamp PKG_RELEASE
         working-directory: sdk
@@ -142,19 +142,19 @@ jobs:
           DATE=$(date -u +%Y%m%d)
           SHORT=$(git -C "${GITHUB_WORKSPACE}" rev-parse --short HEAD)
           REL="${DATE}~${SHORT}"
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=${REL}/" package/luci-theme-design/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=${REL}/" package/luci-theme-design-x/Makefile
           echo "PKG_RELEASE=${REL}" >> "${GITHUB_ENV}"
           echo "---- Stamped Makefile ----"
-          grep '^PKG_' package/luci-theme-design/Makefile
+          grep '^PKG_' package/luci-theme-design-x/Makefile
 
       - name: Build
         working-directory: sdk
         run: |
-          echo 'CONFIG_PACKAGE_luci-theme-design=y' >> .config
+          echo 'CONFIG_PACKAGE_luci-theme-design-x=y' >> .config
           make defconfig
 
-          # Build luci-theme-design and its transitive dependency staging:
-          #   lua → lucihttp → luci-base → luci-theme-design
+          # Build luci-theme-design-x and its transitive dependency staging:
+          #   lua → lucihttp → luci-base → luci-theme-design-x
           #
           # We deliberately do NOT run top-level `make download` first.
           # Actions-OpenWrt/build-immortalwrt-SSR-*.yml uses that pattern because
@@ -169,14 +169,14 @@ jobs:
           # streaming output live to the action log.
           #
           # Single-thread + verbose fallback on failure for readable logs.
-          make package/luci-theme-design/compile V=s -j"$(nproc)" \
-            || make package/luci-theme-design/compile V=s -j1
+          make package/luci-theme-design-x/compile V=s -j"$(nproc)" \
+            || make package/luci-theme-design-x/compile V=s -j1
 
       - name: Collect IPK
         id: collect
         working-directory: sdk
         run: |
-          IPK=$(find bin/ -type f -name 'luci-theme-design*.ipk' | head -1)
+          IPK=$(find bin/ -type f -name 'luci-theme-design-x*.ipk' | head -1)
           if [ -z "${IPK}" ]; then
               echo "::error::No ipk produced — check the make logs above"
               echo "bin/ tree:"
@@ -186,13 +186,13 @@ jobs:
           NAME=$(basename "${IPK}")
           cp "${IPK}" "${GITHUB_WORKSPACE}/${NAME}"
           # Also publish a fixed-name copy so the nightly pre-release has a
-          # stable URL — users can `wget .../luci-theme-design.ipk` without
+          # stable URL — users can `wget .../luci-theme-design-x.ipk` without
           # knowing the current PKG_RELEASE stamp.
-          cp "${IPK}" "${GITHUB_WORKSPACE}/luci-theme-design.ipk"
+          cp "${IPK}" "${GITHUB_WORKSPACE}/luci-theme-design-x.ipk"
           {
             echo "ipk_name=${NAME}"
             echo "ipk_path=${GITHUB_WORKSPACE}/${NAME}"
-            echo "ipk_fixed=${GITHUB_WORKSPACE}/luci-theme-design.ipk"
+            echo "ipk_fixed=${GITHUB_WORKSPACE}/luci-theme-design-x.ipk"
           } >> "${GITHUB_OUTPUT}"
           ls -la "${GITHUB_WORKSPACE}/${NAME}"
           SIZE=$(stat -c%s "${GITHUB_WORKSPACE}/${NAME}")
@@ -219,15 +219,41 @@ jobs:
         # pre-release instead (next step) which serves the ipk verbatim.
         uses: actions/upload-artifact@v5
         with:
-          name: luci-theme-design-${{ env.PKG_RELEASE }}
+          name: luci-theme-design-x-${{ env.PKG_RELEASE }}
           path: ${{ steps.collect.outputs.ipk_path }}
           retention-days: 30
           if-no-files-found: error
 
+      - name: Force-delete previous nightly release + tag
+        # Round 42 Step 173: softprops/action-gh-release@v2 has a known
+        # silent-skip bug when uploading an asset whose name already
+        # exists in the target release (multiple GitHub issues open).
+        # Symptom we hit: every push triggered the workflow, the build
+        # succeeded, but the release assets stayed pinned to the FIRST
+        # commit's binaries — subsequent pushes didn't replace them.
+        # Manual "delete release + tag, then re-push" was the only way
+        # to get fresh assets up.
+        #
+        # Fix: delete the release + tag BEFORE upload, every time.
+        # This forces softprops to create the release fresh, guaranteed
+        # to upload current assets. `--cleanup-tag` also drops the tag
+        # so softprops can re-point it at the current commit cleanly.
+        # The `|| true` makes the step idempotent (first push on a new
+        # branch has nothing to delete — that's fine, not a failure).
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        run: |
+          gh release delete "nightly-${{ github.ref_name }}" \
+            --yes --cleanup-tag --repo "${{ github.repository }}" 2>/dev/null \
+            || echo "No previous release/tag to delete (first push or cleaned manually) — proceeding."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload to rolling pre-release (branch push)
-        # Every push to a default branch overwrites a tag like `nightly-js`
-        # with the latest ipk. Release assets are served as-is (no .zip
-        # wrapper), so users can wget + opkg install directly.
+        # Every push to a default branch creates a fresh `nightly-{branch}`
+        # tag + release (preceded by the force-delete step above so we
+        # never hit asset-already-exists silent skips). Release assets
+        # are served as-is (no .zip wrapper), so users can wget + opkg
+        # install directly via the stable URL.
         if: github.event_name == 'push' && github.ref_type == 'branch'
         uses: softprops/action-gh-release@v2
         with:
@@ -248,8 +274,8 @@ jobs:
 
             ```sh
             cd /tmp
-            wget https://github.com/${{ github.repository }}/releases/download/nightly-${{ github.ref_name }}/luci-theme-design.ipk
-            opkg install luci-theme-design.ipk
+            wget https://github.com/${{ github.repository }}/releases/download/nightly-${{ github.ref_name }}/luci-theme-design-x.ipk
+            opkg install luci-theme-design-x.ipk
             ```
 
             Or grab the timestamped build below if you want to pin a specific commit.
