@@ -22,7 +22,7 @@ case "$1" in
 	list)
 		# Method declarations: name → expected args (type hint only).
 		# Empty {} = method takes no args.
-		echo '{ "devstats": {"dev":"string"}, "cpustat": {}, "temp": {}, "host-traffic": {}, "wifi-stations": {}, "nlbw": {} }'
+		echo '{ "devstats": {"dev":"string"}, "cpustat": {}, "temp": {}, "host-traffic": {}, "host-traffic-acct": {}, "wifi-stations": {}, "nlbw": {} }'
 		;;
 
 	call)
@@ -145,6 +145,40 @@ case "$1" in
 							}
 						'
 					fi
+				fi
+				;;
+			host-traffic-acct)
+				# Round 44 Step 212 — bandwidth Hybrid Tier 2 frontend
+				# endpoint (doc/bandwith.md §8 step 197).
+				#
+				# Reads /tmp/design-host-traffic.json verbatim — the
+				# atomic-rename output of the design-host-acct-uc ucode
+				# daemon (Step 210 + 211). Daemon writes the file every
+				# 5 s with shape:
+				#   {"version":1, "phase":2, "generated_at":<epoch>,
+				#    "stats":{...counters...},
+				#    "hosts":{"<MAC>":{"rx":N,"tx":N,"last_seen":N}, ...}}
+				#
+				# Wraps in {"available":<bool>} so the frontend
+				# (traffic.js fetchHostTrafficAcct) can distinguish:
+				#   available=false → daemon not running yet, fall
+				#                     back to legacy host-traffic / nlbw
+				#   available=true  → consume hosts map
+				#
+				# Conservative cat (no parsing — daemon owns the JSON
+				# schema). If file missing or unreadable, emit a
+				# well-formed unavailable response so jsonfilter doesn't
+				# break on a stale read.
+				ACCT_FILE="/tmp/design-host-traffic.json"
+				if [ -r "$ACCT_FILE" ]; then
+					# File exists and readable. Wrap in available:true.
+					# The daemon's payload is a JSON OBJECT, so we splice
+					# it into the wrapper.
+					printf '{"available":true,"data":'
+					cat "$ACCT_FILE"
+					printf '}\n'
+				else
+					echo '{"available":false,"reason":"daemon-not-running"}'
 				fi
 				;;
 			wifi-stations)

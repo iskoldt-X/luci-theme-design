@@ -206,8 +206,17 @@ var getDHCPLeases = L.rpc.declare({
 // dual-shape tolerance ([{...}] OR {columns,data}) and host-traffic's
 // three-branch contract (no-acct-table / empty-output / hosts populated)
 // are intact. See /usr/libexec/rpcd/luci-theme-design-x.
-var callNlbw         = rpc.declare({ object: 'luci-theme-design-x', method: 'nlbw',         expect: { '': {} } });
-var callHostTraffic  = rpc.declare({ object: 'luci-theme-design-x', method: 'host-traffic', expect: { '': {} } });
+var callNlbw            = rpc.declare({ object: 'luci-theme-design-x', method: 'nlbw',              expect: { '': {} } });
+var callHostTraffic     = rpc.declare({ object: 'luci-theme-design-x', method: 'host-traffic',      expect: { '': {} } });
+// Round 44 Step 212 — bandwidth Hybrid Tier 2 frontend endpoint.
+// host-traffic-acct exposes /tmp/design-host-traffic.json (written by
+// the design-host-acct-uc ucode daemon, Steps 210+211). When the
+// daemon is running, this is per-MAC totals direct from netlink
+// conntrack (DESTROY events + 5 s CT_GET dump) — no NPU offload blind
+// spot like Round 31 nft had. When the daemon isn't running yet
+// (older install, or service crash), available:false → fall back to
+// the Round 31 host-traffic method. nlbw remains deepest fallback.
+var callHostTrafficAcct = rpc.declare({ object: 'luci-theme-design-x', method: 'host-traffic-acct', expect: { '': {} } });
 
 function fetchNlbwData() {
 	return callNlbw()
@@ -226,6 +235,41 @@ function fetchNlbwData() {
 function fetchHostTraffic() {
 	return callHostTraffic()
 		.catch(function () { return null; });
+}
+
+// Round 44 Step 212: bandwidth Hybrid Tier 2 fetch. The daemon writes
+// /tmp/design-host-traffic.json (atomic-rename every 5 s); the rpcd
+// host-traffic-acct method serves it wrapped in
+//   { available: true,  data: <daemon json> }
+// or
+//   { available: false, reason: "daemon-not-running" }
+// when the file is missing.
+function fetchHostTrafficAcct() {
+	return callHostTrafficAcct()
+		.catch(function () { return null; });
+}
+
+// Round 44 Step 212: convert Hybrid Tier 2 daemon shape →
+// consumers [{mac, rx, tx}, ...] (the format renderConsumers wants).
+// The daemon already maps IP→MAC via /proc/net/arp internally, so no
+// lease-table join needed here (unlike hostTrafficToConsumers which
+// joins nft per-IP counters against leases). Pure shape-translation.
+function acctToConsumers(acctData) {
+	if (!acctData || !acctData.available || !acctData.data || !acctData.data.hosts) {
+		return [];
+	}
+	var out = [];
+	var hosts = acctData.data.hosts;
+	for (var mac in hosts) {
+		if (!hosts.hasOwnProperty(mac)) continue;
+		var h = hosts[mac];
+		out.push({
+			mac: mac.toUpperCase(),
+			rx: +h.rx || 0,
+			tx: +h.tx || 0
+		});
+	}
+	return out;
 }
 
 // Convert host-traffic CGI output to nlbwmon's consumer shape
@@ -353,18 +397,30 @@ return baseclass.extend({
 
 	refreshData: function () {
 		var self = this;
-		// Step 115 (Round 31): try host-traffic CGI first (nftables ingress
-		// counters — offload-proof). Fall back to nlbwmon if host-traffic
-		// has no data (acct service not yet installed / no traffic counted).
-		// Both fetches + lease lookup run in parallel for snappy refresh.
+		// Round 44 Step 212: bandwidth Hybrid Tier 2 swap. Three-tier
+		// fallback chain (best → fallback):
+		//   1. host-traffic-acct  — Hybrid Tier 2 ucode daemon
+		//                           (Steps 210/211), per-MAC, offload-proof,
+		//                           5s in-flight + 100% finalized
+		//   2. host-traffic       — Round 31 nft-bridge counters, per-IP,
+		//                           offload-proof in stock kernels but
+		//                           breaks on HW offload (mtk_ppe et al.)
+		//   3. nlbw               — nlbwmon, per-MAC, definitively broken
+		//                           under SW flow offload, kept as deepest
+		//                           fallback for routers with neither of
+		//                           the above installed
+		// All four data sources fetched in parallel — chooser logic picks
+		// whichever resolves with non-empty consumers, preferring tier 1.
 		Promise.all([
+			fetchHostTrafficAcct(),
 			fetchHostTraffic(),
 			fetchNlbwData(),
 			fetchLeasesRaw()
 		]).then(function (results) {
-			var hostData     = results[0];
-			var nlbwConsumers = results[1];
-			var leasesRaw    = results[2];
+			var acctData      = results[0];
+			var hostData      = results[1];
+			var nlbwConsumers = results[2];
+			var leasesRaw     = results[3];
 
 			// Build byMac map for renderConsumers (existing API)
 			var byMac = {};
@@ -373,12 +429,20 @@ return baseclass.extend({
 				if (m && !byMac[m]) byMac[m] = l;
 			});
 
-			// Prefer host-traffic if it yielded actual per-host data.
-			// Otherwise fall through to nlbw (which may also be empty —
-			// renderConsumers handles the empty state with the existing
-			// Step 99 hint).
-			var nftConsumers = hostTrafficToConsumers(hostData, leasesRaw);
-			var consumers = nftConsumers.length ? nftConsumers : nlbwConsumers;
+			// Tier 1: acct daemon (Hybrid Tier 2)
+			var acctConsumers = acctToConsumers(acctData);
+			// Tier 2: Round 31 nft
+			var nftConsumers  = hostTrafficToConsumers(hostData, leasesRaw);
+			// Tier 3: nlbwmon (already aggregated)
+
+			var consumers;
+			if (acctConsumers.length) {
+				consumers = acctConsumers;
+			} else if (nftConsumers.length) {
+				consumers = nftConsumers;
+			} else {
+				consumers = nlbwConsumers;
+			}
 
 			self.renderConsumers(consumers, byMac);
 		});

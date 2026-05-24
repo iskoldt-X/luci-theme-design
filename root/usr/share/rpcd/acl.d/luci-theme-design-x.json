@@ -8,6 +8,7 @@
 					"cpustat",
 					"temp",
 					"host-traffic",
+					"host-traffic-acct",
 					"wifi-stations",
 					"nlbw"
 				]
