@@ -3087,6 +3087,162 @@ LuCI 控制 indicator span 的 inner HTML,我们**不能注入 `<svg><use href="
 
 ---
 
+## 🐛 第三十六轮(Step 137-138):WAN throughput **8× 显示偏差** 修复
+
+> 触发:Chrome-Claude 给 WAN tile 做了 5 次连续采样对比,实测显示值与"真实 bps"始终差 **8 倍**。这是个**功能性 bug**,不是美观问题 —— 用户开 speedtest.net 量 5 Mbps,我们 tile 显示 "625 Kbps"。
+>
+> Round 36 是 Round 14 起第一个**纯数据正确性**的 round —— 之前 35 轮基本都是视觉/UX/布局类。这次 bug 已经在生产里 ~半年没被发现,因为用户对 "WAN tile 数字" 的注意力一般不会跟 speedtest 直接对比。
+
+### 实测的 8× 偏差(5-sample audit)
+
+| `rxBps` 字段值 | tile 显示 | 真实下载 |
+|---|---|---|
+| 153,065 | ↓ 153.1 Kbps | **1224.5 Kbps** |
+| 104,585 | ↓ 104.6 Kbps | **836.7 Kbps** |
+| 839,780 | ↓ 839.8 Kbps | **6.7 Mbps**(本该 Mbps,显示 Kbps) |
+| 13,929  | ↓ 13.9 Kbps  | **111.4 Kbps** |
+| 371,247 | ↓ 371.2 Kbps | **3.0 Mbps**(同上) |
+
+恒定 8×。**这就是 bits-vs-bytes 经典坑**。
+
+### Step 137 — bits/bytes 单位修正,根本性 fix at source
+
+`wan-stats.js` 自 Step 42 起就 emit `rxBps` / `txBps`:
+```js
+emit({ rxBps: drx / dt, txBps: dtx / dt, … });
+```
+
+变量名 **capital B = Bytes per second**(网络惯例,`Bps` 大写 B 是 Bytes,`bps` 小写 b 是 bits)。`drx` 是 byte delta,`dt` 是秒,结果是 Bytes/sec —— 这个数学是对的,语义也对。
+
+但是 consumer 的格式化函数:
+```js
+function fmtBpsSplit(bps) {                  // 参数名 'bps' = bits/sec
+    if (bps < 1e6) return { num: (bps/1000).toFixed(1), unit: 'Kbps' };
+    if (bps < 1e9) return { num: (bps/1e6).toFixed(1),  unit: 'Mbps' };
+    ...
+}
+```
+
+函数名 `fmtBpsSplit` + 参数 `bps` + label `Kbps/Mbps/Gbps` —— **全部小写 bps,期望 bits/sec 输入**。consumer 把 Bytes/sec 当 bits/sec 传进来,结果数学链全错位:
+- 真实 6.7 Mbps = 6,700,000 bits/s = 837,500 Bytes/s
+- 传入 `bps=837,500` → `if (bps < 1e6)` 命中 → 输出 "Kbps" 单位
+- 数字 `(837500/1000).toFixed(1)` = "837.5",label "Kbps"
+- 显示 "837.5 Kbps" —— **应该是 "6.7 Mbps"**
+
+修法 — **at source,不在 consumer 端 patch**:
+
+```js
+// wan-stats.js 重命名 + × 8 at emit
+emit({
+    rxBitsPerSec: (drx * 8) / dt,    // 显式名字,Bytes/sec → bits/sec
+    txBitsPerSec: (dtx * 8) / dt,
+    deviceName, online: true
+});
+```
+
+为什么不在 consumer 改:`fmtBpsSplit` 函数名 + label 全是 lowercase bps,语义清晰 = "格式化 bits/sec",**不应让函数 know about bytes**。改 consumer 等于在 function name 上撒谎。改 source 让 emit 的字段名跟内容匹配,consumer 不需要做任何转换 —— 这是**单 source of truth** 原则。
+
+13 处 reference 跨 3 个文件全改(wan-stats 7、sparkline 4、wan-hero 2),atomic 一个 commit。
+
+修完后 `fmtBpsSplit` 的 auto-promote(`if (bps < 1e6) → Kbps; <1e9 → Mbps; else Gbps`)**自动开始正常工作** —— 之前 1e6 阈值因为 bytes 输入,需要 8e6 bytes 才升档,实际等于 64 Mbps 才显示 Mbps。修后 1 Mbps 就升档。
+
+### Step 138 — trend pill ↑↓ → ▲▼ 消除箭头同形异义
+
+`setTile()` L256 渲染 trend pill 用 `↑ ` / `↓ `。WAN tile 的 value row 同时有 `↓ <download>` / `↑ <upload>` 方向箭头。**3 个 ↑↓ 在同一卡里有三种语义**:
+
+```
+↓ 6.7 Mbps    [▲ +50 Kbps]    ← 方向 / 数字 / trend
+↑ 224 Kbps · eth1             ← 方向
+```
+
+Chrome-Claude 自己看 5 秒才理清"trend pill 不是 upload"。
+
+修法:`↑↓` → `▲ +` / `▼ -`。filled triangle 三角形 + explicit sign 让 trend 跟方向视觉上明显区分。CPU/Memory/Temperature 三个 tile 也受益。
+
+### 📊 第三十六轮(Step 137-138)累计
+
+| 指标 | 第三十五轮后 | 第三十六轮后 |
+|---|---|---|
+| WAN tile 下载显示精度 | ❌ 恒定 8× 低 | ✅ 跟 speedtest ±20-30% 内一致 |
+| Kbps→Mbps→Gbps auto-promote | ❌ 阈值因单位错位失效 | ✅ 正常升档 |
+| trend pill 视觉混淆 | ↑↓ 跟方向箭头 ↑↓ 同形 | ▲ +X / ▼ -X 不同形 |
+| 字段命名 `rxBps` | Bytes/sec(易误读) | `rxBitsPerSec`(显式) |
+
+---
+
+## 🎨 第三十七轮(Step 139):WAN tile **dual-value template** 重设计
+
+> 触发:Step 137 修了数字本身,Chrome-Claude 又仔细审 WAN tile **3 个布局问题**:trend pill 红绿语义跟 throughput 反义、meta 行比 CPU/Memory 高 18px、上传只能 12px 灰字塞 meta 行。
+>
+> 根因:**单值 tile 模板被强行套到双值 metric 上**。
+
+### 三个问题的统一根因
+
+CPU / Memory / Temperature 是**单值 scalar**。WAN Traffic 是**双值 vector**(↓ rx + ↑ tx)。共享的 `makeTile()` 模板烧死了"single num + unit + prefix + trend"4-span 结构,WAN 只能委屈:
+
+1. **大字** = download(牺牲 upload 可见度)
+2. **trend pill** = "rx 涨跌"(red 表示涨,green 表示落 —— **throughput 反义**:涨 = 网速好 = 应该是好事!)
+3. **meta 行** = upload + device name(把 upload 降级为 metadata,12px 灰字混在 "eth1" 旁边)
+4. **没 progress 条**(throughput 无上限 —— 对的)→ 但 CPU/Memory 的 progress 在 layout 里占了 ~10px → WAN 的 meta 飘高 18px
+
+### Step 139 — Option B 双值模板
+
+Chrome-Claude 提了 4 个方案(A 双列等大、B 主副布局、C stacked mini-tile、D 仅修语义错配)。**选 B**:
+
+- ↓ 下载 30px primary(跟 CPU/Memory 同字号,顶线对齐)
+- ↑ 上传 20px secondary(介于 primary 30 和 meta 12 之间)
+- **去 trend pill**(throughput 没"好坏"轴,red/green 失效)
+- sparkline 画**两条线**:rx solid 2px / tx dashed 1.5px opacity 0.55,**共享 Y 轴**(让 tx 在 rx 高峰下小一截,准确表达"上行 = 下行的 1/10"的不对称)
+- meta 加 `· Peak X Mbps` 给 sparkline 一个数字锚
+- `#design-tile-net { display: flex; flex-direction: column }` + meta `margin-top: auto` 把 meta 推到底,自动对齐 CPU/Memory 的 meta 基线
+
+### 实现要点
+
+`makeTile(id, ..., hasProgress, dualValue)` 加 6 个 positional 参数。`dualValue:true` 时 value row 是两个 `.design-tile-num-group` siblings,sparkline svg 多挂一个 `.design-tile-spark-line-secondary` path。
+
+`setTile()` 加 `opts.secondary = {prefix, num, unit}` 处理副数字组。
+
+`renderTileSpark(tileEl, ring, ringSecondary)` 接受可选第二 ring,计算 `sharedHi = Math.max(rxHi, txHi)`,两条线都用这个 Y 上限。`MetricRing.prototype.path(w, h, sharedHi)` 加可选参数。
+
+`onWanStats()` 重写:push 到 `netRx` + `netTx` 两个 ring,扫 5min peak 加入 meta。
+
+CSS ~70 行新增:`.design-tile-value-dual` 布局、`.design-tile-num-secondary` 字号、`#design-tile-net .design-tile-trend { display: none !important }`(明确 kill trend pill)、`flex-column + meta margin-top:auto`。
+
+### 📊 第三十七轮(Step 139)累计
+
+| 指标 | 第三十六轮后 | 第三十七轮后 |
+|---|---|---|
+| WAN tile value-row 字段数 | 单数字 (rx) + trend pill | 双数字 (rx + tx),无 trend |
+| 上传可见性 | 12px 灰字塞 meta 行 | 20px semi-bold 半独立字段 |
+| trend pill 红绿语义 | CPU/Memory 套到 throughput 反义 | 隐藏(语义本来就错) |
+| sparkline 线数 | 1(rx 单线) | 2(rx 实 + tx 虚) |
+| meta 行对齐 | 比 CPU/Memory 高 18px | flex-column auto-margin,顶到底,对齐 |
+| meta 内容 | `↑ X Kbps · eth1` | `eth1 · Peak X Mbps` |
+
+### 关键设计扩展
+
+Step 139 实质上是给 design-tile 组件加了 **"dual-value variant"** —— 未来任何"双值 metric"(actual vs target、current vs previous、in vs out 等)都可以直接 opt-in `dualValue: true`,不用从头改 layout。makeTile 现在支持 **single-value(默认)** 和 **dual-value(opt-in)** 两种模板。
+
+---
+
+## 🎯 Round 36-37 横向观察
+
+**"单位/语义混淆"是反复出现的 bug 类**:Step 120 mix-blend math 在 dark mode 崩、Step 134 right-anchor 在 trigger 位置变化时崩、Step 137 Bytes-vs-bits 永远崩 8 倍。模式都是 **"assumption 隐式编码在代码或命名里,不写明就忘"**。对策已经在 Step 137 用了:**字段名显式承担单位语义** (`rxBps` → `rxBitsPerSec`)。未来添加任何"单位有歧义"的字段都应该走这个 pattern。
+
+**Color semantic 不能跨 metric 复用**:`.design-tile-trend-up { color: var(--color-danger) }` 对 CPU/Memory(低 = 好)是对的,对 throughput(高 = 好)是错的。这是 **category error** —— 一个 color rule 不能跨"语义方向相反"的指标。对策:tile 应该**显式声明 metric 方向**(e.g. `data-metric-direction="higher-better"` 或 `lower-better`),或者**对反向语义指标直接不用 trend pill**(Step 139 走这条路)。
+
+**Template 不该烧死 metric 数量**:`makeTile()` 单值模板烧死 4-span value row。WAN Traffic 是双值,只能委屈 upload → meta 灰字。修法不是"WAN tile 专属 patch",而是让 template **支持 1-or-2 value 双形态**(Step 139 加 `dualValue` 参数)。这种 "template extension" 比 "tile-specific override" 干净得多。
+
+**"过度聪明的 hack"模式**第三次记录:Step 120 mix-blend 崩 / Step 134 right-anchor 崩 / Step 137 bytes-as-bits 崩。三次都是 "code looked clever, depends on implicit assumption,assumption shifts → silently 错"。对策更明确了:**显式注释 assumption,或换 boring 但 robust 的 alternative**(Step 134 left-anchor 1 行代码读懂,远胜 right-anchor + reverse 计算)。
+
+**"function name is right, but input is wrong" 是难捕获的 bug**:Step 137 的 `fmtBpsSplit(bps)` 函数本身 100% 正确(参数 `bps` 小写 = bits/sec,逻辑符合 SI 阈值)。bug 在 6 个 consumer 调用点全部传 Bytes/sec 值进去。代码 review 时如果只看函数定义不会发现问题,只看调用点也容易漏(变量名 `rxBps` 大写 B 看起来跟 `bps` 像)。对策:**类型/单位上提到字段名级别**,让 consumer 不可能 spec 错(field name `rxBitsPerSec` 永远不会被误传给 `fmtBytesPerSec`)。
+
+**Round 36 是 22 轮以来第一个"纯功能 bug"**:之前 35 轮基本都是视觉/UX/layout。Round 36 修的是"显示数字本身错了 8 倍",是数据正确性问题,跟设计无关。**说明项目的"功能层成熟度"还不到 100%**,即使视觉看起来都好,数字背后单位/语义/逻辑还可能有未发现的错。**审视项目时不能只看截图,要看具体数字跟外部 ground truth 是否吻合**(speedtest 是个好的 ground truth)。
+
+**Component template extension 模式**:Step 139 的 `dualValue: true` 加在现有 makeTile() 上,不破坏现有 3 个单值 tile,opt-in 一行启用。这是 component evolution 的标准路径 —— "**新需求扩展现有 API,不是另写一个 makeNetTile()**"。如果以后还有"tri-value"(in/out/total)或"actual-vs-target",可以继续在同一个 makeTile() 加 `triValue` / `targetValue` opt,保持 API 一致。
+
+---
+
 ## 📊 第三轮（Step 21 + 22）累计变化（更新）
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
