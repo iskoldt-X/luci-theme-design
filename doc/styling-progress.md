@@ -4000,6 +4000,124 @@ Chrome-Claude 在 Overview 上做了一次系统性 light/dark/mobile 扫描,产
 
 ---
 
+## 🧭 第四十四轮(Step 195+):Overview 第一行布局重构 — 2/3 hero + 1/3 speedtest
+
+> 触发:用户提议把 Wi-Fi/LAN Link Test 卡从底部 1/2 + 1/2 行提到第一行右上角 1/3,hero 占 2/3。**「我也不懂该如何让它俩高度相等」** —— 让 Chrome-Claude 出方案。Chrome-Claude 给了 4 个对齐策略 + 工作量估算,推荐 A+C 组合(half day to a full day),但**自己也补了一句「建议从最便宜的开始,先做 grid 重排 + stretch」**(20 分钟见效)。Step 195 走的就是这条最便宜的路径。
+
+### Step 195 — Phase 1:layout 重排(20 分钟,纯 CSS,可见即决策)
+
+#### 现状架构(Chrome-Claude 摸出来的关键发现)
+
+`#view` 容器本身就是一个 grid:
+
+```css
+.node-admin-status-overview #view {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+    gap: var(--space-4);
+    align-items: start;
+}
+```
+
+所有「全宽」的卡(hero / tiles / system / LAN clients / etc.)都通过 `grid-column: 1 / -1` 跨满 2 列实现。**speedtest + traffic 是仅有的两张「不强制全宽」的卡**,所以在最底部并排显示 644+644。意味着把 speedtest 提到第一行右侧是「布局上的小手术,不是结构重构」—— 不动 HTML、不动 JS、不动任何子组件,只改 grid 父定义 + 2 个 grid-column 覆盖。
+
+#### 当前各卡测量值(1288 viewport,Chrome-Claude 实测)
+
+| 卡 | 当前位置 | 当前尺寸 | 跨列 |
+|---|---|---|---|
+| WAN Hero | 第 1 行 | 1304 × **239 px** | 2/2(全宽) |
+| Tile Grid(CPU/Mem/WAN) | 第 2 行 | 1304 × 192 px | 2/2 |
+| Speedtest Card | 底部偏左 | 644 × **472 px** | 1/2 |
+| Traffic Card | 底部偏右 | 644 × 392 px | 1/2 |
+
+Hero 239 px,Speedtest 当前 472 px —— **高度差近一倍**。这是「让它俩对齐」的核心难题。
+
+#### 实施(实际写的 CSS)
+
+包在 `@media (min-width: 1280px)` 里(narrow viewport 保留原 auto-fit 行为):
+
+```css
+@media (min-width: 1280px) {
+    .node-admin-status-overview #view {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .node-admin-status-overview #view > .wan-hero {
+        grid-column: 1 / 3;        /* 2/3 width */
+        grid-row: 1;
+        align-self: stretch;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;   /* 把 hero 内容上下撑开 */
+    }
+
+    .node-admin-status-overview #view > .speedtest-card {
+        grid-column: 3 / 4;        /* 1/3 width */
+        grid-row: 1;
+        align-self: stretch;
+    }
+
+    .node-admin-status-overview #view > .traffic-card {
+        grid-column: 1 / -1;       /* 失去 speedtest 陪伴 → 改全宽 */
+    }
+}
+```
+
+#### 高度对齐策略选择(为什么走 stretch 不走 A+C)
+
+Chrome-Claude 给了 4 个方案:
+
+- **方案 A**:Hero 加内容长高(sparkline + 状态徽章 + 微指标行)+ Speedtest 压缩 gauge → 都向 ~340 px 收敛。**推荐路径,但要 half day**
+- **方案 B**:`align-items: stretch`,矮的拉到高的高度(Hero → 472 px,内部 233 px 空白)。**5 秒搞定但 Hero 会有大块空白**
+- **方案 C**:Speedtest 加 compact mode(idle 时 240 px,跑测试时展开)。**优雅但要 JS state machine**
+- **方案 D**:Masonry layout,不强行对齐。**违反用户「想办法对齐」的诉求**
+
+**实际选择**:方案 B 的核 + 一点 A 的方向感。`align-self: stretch` 让两张卡等高(speedtest 472 px 决定行高,hero 拉到 472 px),hero 用 `display: flex; justify-content: space-between` 把内容上下撑开 —— 不是「居中留白」也不是「顶对齐底部空一大块」,而是「头尾各贴一边,中间是 gap」。**这样在 hero 真正添内容之前已经看起来不像漏的**,只是「中间稀疏」。
+
+如果用户看完觉得稀疏不能接受,**Phase 2 = 方案 A**(给 hero 加 sparkline / status badge / 微指标行) + **Phase 3 = 方案 C**(speedtest compact mode)。两个 Phase 都是独立可上的,Step 195 commit 不阻塞它们。
+
+#### 视觉假设(部署后预期)
+
+- 第一行:hero 2/3 width × 472 px height + speedtest 1/3 width × 472 px height,**底沿对齐**
+- Hero 内部:头部状态徽章 / 中部 IP+Connection+Latency / 底部上下行速度 —— 中间 gap 会比之前大
+- 第二行:tile grid 全宽,跟 Round 43 一样
+- 第三行起:cbi-section + devices-card + traffic-card 都是全宽
+
+#### Trade-off & 风险
+
+- **风险 1 — hero 内部 flex 改 layout 可能破坏现有子组件 alignment**。`.wan-hero` 本来是 block,改 flex column 后子元素从 block flow 变 flex item。子元素都没用 margin auto,主要影响是间距 —— `justify-content: space-between` 把头尾撑开,中间 sub-row 之间的 spacing 由 sub-row 自己的 margin-bottom 决定。**部署后第一眼就能看出,如果布局崩立即 revert**。
+- **风险 2 — 1280px 断点选得对不对**。3 列 × 400 px = 1200 px 内容 + gap + padding ≈ 1280-1320 px viewport 起步。低于 1280 退回 auto-fit 2 列布局。**用户实机分辨率没问过 —— 如果他用 1366×768 笔记本,会落在 3 列模式;如果 1024×768 平板,落在 2 列旧布局**。两个落点都已 covered。
+- **风险 3 — traffic 失去 speedtest 陪伴后改成全宽**。视觉上 traffic 在第一行下方独占一行,可能跟 devices-card 看起来重复(都是全宽数据卡)。**部署后看一眼,如果重感太重,改回 1/2 + 留 1/2 空 或者改 1/2 + UPnP / 其他卡**。
+
+#### 验证
+
+```bash
+$ python3 brace-balance.py style.css   # ✓ 681/681
+$ scp htdocs/luci-static/design-x/css/style.css luci-router:/www/luci-static/design-x/css/style.css
+```
+
+刷新 Overview,看:
+1. Speedtest 卡是否在 hero 右侧而不是底部
+2. Hero 和 speedtest 的底沿是否对齐
+3. Hero 内部内容是否被 flex 撑开(没崩)
+4. Traffic 是否变全宽
+
+### 为什么 Phase 2/3 不立即做
+
+**Chrome-Claude 自己的话**:「建议从最便宜的开始 …… 每一步都能 ship,不用一口气做完才看到结果」。Phase 1 视觉 ship 之后,有 3 种可能结果:
+
+- **「这样就够了,不用改 hero/speedtest」** → Phase 2/3 不做,Step 195 单独 commit 收工
+- **「hero 太空」** → 触发 Phase 2(给 hero 加 sparkline + status badge + 微指标行,2 hour,接 wan-stats 数据)
+- **「speedtest 太高」** → 触发 Phase 3(speedtest gauge 缩到 120 px / idle compact mode,2-3 hour,要改内部 state machine)
+
+**一锅炖 Phase 1+2+3 的风险**:speedtest gauge 改完发现用户不喜欢 → 浪费 2-3 小时。这条教训 Round 38 Step 141(rebalance LAN Clients columns)+ Round 43 Step 181-184(LAN header alignment 拉锯战)都吃过:**「方向不确定时,不要预提交多步」**。
+
+## 🎯 Round 44 横向观察(Step 195 ship 后再补)
+
+Round 44 处于「布局重构 ship 等用户视觉反馈」阶段。横向观察 + 累计表等用户测过 Phase 1 之后再写。
+
+---
+
 ## 📊 第三轮（Step 21 + 22）累计变化（更新）
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |

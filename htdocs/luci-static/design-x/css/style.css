@@ -5223,6 +5223,68 @@ td.cbi-button, .cbi-button-apply,
 .node-admin-status-overview #view > .speedtest-card   { order: 11; }
 .node-admin-status-overview #view > .traffic-card     { order: 12; }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * Round 44 Step 195 — first-row "2/3 hero + 1/3 speedtest" layout
+ *
+ * Chrome-Claude Round 43 audit found the speedtest card was orphaned at
+ * the bottom (auto-fit dropped it next to traffic in a 644+644 row),
+ * which wastes the wide viewport's right-side real estate. User wants
+ * speedtest at top-right of fold 1, hero spanning the rest.
+ *
+ * Architecture is already friendly to this:
+ *   #view is a grid; every full-width card uses grid-column: 1/-1.
+ *   Switching to an explicit 3-track grid + grid-column overrides on
+ *   hero (1-2) and speedtest (3) places them on row 1 without touching
+ *   any HTML or JS.
+ *
+ * Heights match via align-self: stretch — the taller card (speedtest at
+ * ~470 px with gauges) decides the row height, hero stretches to match.
+ * Hero currently renders ~239 px of content; expect ~230 px whitespace
+ * below the throughput row on first deploy. Two follow-up routes if
+ * that whitespace looks bad:
+ *   Phase 2 — enrich hero (sparkline + status badge + microrow)
+ *   Phase 3 — compact speedtest gauges (200 px → ~120 px each)
+ * Both deferred until user has seen Phase 1 visual.
+ *
+ * Triggered only at min-width: 1280 px (where 3 cols × 400 px is
+ * comfortable). Below that, the original auto-fit (1 or 2 tracks)
+ * layout applies — speedtest falls back to its old position.
+ *
+ * Traffic-card promoted to full-width inside this media query — without
+ * speedtest's company at the bottom row, traffic alone in a 1-col slot
+ * would look orphaned, and it benefits from the extra horizontal room
+ * anyway (more consumers per row).
+ * ═══════════════════════════════════════════════════════════════════════ */
+@media (min-width: 1280px) {
+    .node-admin-status-overview #view {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .node-admin-status-overview #view > .wan-hero {
+        grid-column: 1 / 3;
+        grid-row: 1;
+        align-self: stretch;
+        /* Spread hero internals vertically when stretched. The card's
+           direct children are: status badge row, IP/connection grid,
+           throughput row. justify-content: space-between pushes the
+           status badge to top, throughput row to bottom — looks
+           intentional even before hero gets enriched in Phase 2. */
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+
+    .node-admin-status-overview #view > .speedtest-card {
+        grid-column: 3 / 4;
+        grid-row: 1;
+        align-self: stretch;
+    }
+
+    .node-admin-status-overview #view > .traffic-card {
+        grid-column: 1 / -1;
+    }
+}
+
 /* Step 147 (Round 40):LAN Clients was put into auto-fit 3-up in Round 30
    Step 114 with Wi-Fi test + Traffic Analysis. But once Round 40 promotes
    it to "the canonical device list" (subsuming the upstream Active DHCP
