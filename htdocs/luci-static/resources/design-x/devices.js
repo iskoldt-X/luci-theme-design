@@ -3,6 +3,7 @@
 'require ui';
 'require rpc';
 'require uci';
+'require design-x.vendor';
 
 // Step 83 (Round 13): SVG namespace helpers. LuCI's E('svg',...) creates
 // HTMLUnknownElement — the browser doesn't paint that as SVG so all
@@ -364,6 +365,12 @@ return baseclass.extend({
 		this.expanded     = {};                   // mac → bool
 		this.customNames  = loadCustomNames();    // mac → string
 		this.stations     = {};                   // mac → { iface, info, station } (Step 94)
+		// Round 44 Step 204: kick off Wireshark manuf OUI DB load + decompress
+		// as early as possible. ~332 KB gzip fetch + DecompressionStream
+		// runs in parallel with the rest of Overview rendering; by the
+		// time the user expands a LAN Clients row to see the Vendor field,
+		// the lookup is cached.
+		L.require('design-x.vendor').then(function (v) { v.preload(); });
 		this.tryInject();
 	},
 
@@ -704,7 +711,7 @@ return baseclass.extend({
 			// click.
 			E('div', { 'class': 'devices-row-detail' }, [
 				E('div', { 'class': 'devices-detail-grid' },
-					self.detailCellsFor(l, mac, vendor, type, wifi)
+					self.detailCellsFor(l, mac, type, wifi)
 				),
 				E('div', { 'class': 'devices-actions' }, [
 					// Step 142 (Round 38) + Step 148 (Round 40):5-level stake
@@ -740,13 +747,37 @@ return baseclass.extend({
 	// detail grid. Wired clients get 6 cells; Wi-Fi clients get 7 (extra
 	// Rate row showing rx/tx Mbps). Lease-expires always last so the
 	// grid's auto-fit wraps the optional Rate cell into the natural slot.
-	detailCellsFor: function (lease, mac, vendor, type, wifi) {
+	//
+	// Round 44 Step 204: Vendor cell now uses vendor.js's async lookup
+	// against the Wireshark manuf DB (~39K MA-L entries) instead of
+	// devices.js's hardcoded 35-entry OUI table. Renders a placeholder
+	// initially, swaps in the real vendor name once vendor.lookup()
+	// resolves (usually < 5ms after preload completes — cached singleton
+	// + sessionStorage hit on repeat page views).
+	//
+	// Bit detection (Multicast / LAA / UAA) is fully delegated to
+	// vendor.js per doc/macvendor.md §七 #10 — devices.js NEVER does
+	// `octet1 & 0x02` etc. The lookup() return string is what the cell
+	// shows verbatim.
+	detailCellsFor: function (lease, mac, type, wifi) {
+		var vendorDd = E('dd', {}, '…');  // hook for async update
+		var vendorCell = E('div', { 'class': 'devices-detail-cell' }, [
+			E('dt', {}, _('Vendor')),
+			vendorDd
+		]);
+		L.require('design-x.vendor').then(function (v) {
+			// hostHintVendor is null today (ImmortalWrt 24.10 doesn't expose
+			// it). Future-proofing per doc/macvendor.md §一.五: if upstream
+			// ever surfaces lease.vendor via getHostHints, pass it here as
+			// 2nd arg. Zero re-architecture needed.
+			v.lookup(mac, null).then(function (name) {
+				vendorDd.textContent = name + ' (' + mac.substr(0, 8) + ')';
+			});
+		});
 		var cells = [
 			this.detailCell(_('Full IP'),    lease.ipaddr || '—', /*mono*/ true),
 			this.detailCell(_('MAC'),        mac || '—',          /*mono*/ true),
-			this.detailCell(_('Vendor'),     vendor
-				? (vendor + ' (' + mac.substr(0, 8) + ')')
-				: _('Unknown')),
+			vendorCell,
 			this.detailCell(_('Type'),       type.label)
 		];
 
