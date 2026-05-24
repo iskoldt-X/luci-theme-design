@@ -1276,7 +1276,7 @@
 /* Column header strip — same grid as .devices-summary so labels align */
 .devices-thead {
     display: grid;
-    grid-template-columns: 32px 1fr 60px 130px 80px 24px;
+    grid-template-columns: 32px minmax(0, 1.4fr) minmax(90px, 1fr) 80px 70px 24px;
     gap: var(--space-3);
     padding: var(--space-2) var(--space-4);
     background: var(--color-surface-1);
@@ -1317,7 +1317,7 @@
 /* Summary row — 6-col grid matching the header */
 .devices-summary {
     display: grid;
-    grid-template-columns: 32px 1fr 60px 130px 80px 24px;
+    grid-template-columns: 32px minmax(0, 1.4fr) minmax(90px, 1fr) 80px 70px 24px;
     gap: var(--space-3);
     align-items: center;
     padding: var(--space-2) var(--space-4);

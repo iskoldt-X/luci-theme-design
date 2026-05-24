@@ -379,7 +379,11 @@ return baseclass.extend({
 		var mac     = (l.macaddr || l.mac || '').toUpperCase();
 		var type    = inferType(l.hostname);
 		var vendor  = ouiVendor(mac);
-		var ipShort = (l.ipaddr || '').split('.').pop();
+		// Step 141 (Round 38):show full IP not just .last_octet. After
+		// the grid rebalance below, IP column has enough space for the full
+		// dotted quad. Last-octet alone (".100") couldn't disambiguate on
+		// networks with multiple LAN segments (double NAT, /16 LAN, etc.)
+		var ipFull = l.ipaddr || '';
 		var isOpen  = self.expanded[mac] === true;
 		var seen    = formatLastSeen(l);
 
@@ -434,7 +438,7 @@ return baseclass.extend({
 						svgUse(self.iconBase + '#' + type.icon))
 				]),
 				E('span', { 'class': 'devices-row-name', 'data-mac': mac }, displayName),
-				E('span', { 'class': 'devices-row-ip' }, ipShort ? '.' + ipShort : '—'),
+				E('span', { 'class': 'devices-row-ip' }, ipFull || '—'),
 				sigCell,
 				seenCell,
 				svgEl('svg', { 'class': 'svg-icon devices-row-chev', 'aria-hidden': 'true' },
