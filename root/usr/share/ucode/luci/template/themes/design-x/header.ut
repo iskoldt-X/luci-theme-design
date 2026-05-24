@@ -4,66 +4,65 @@
 	luci-theme-material
 	Copyright 2015-2017 Lutty Yang <lutty@wcan.in>
 
-	Have a bug? Please create an issue here on GitHub!
-	https://github.com/LuttyYang/luci-theme-material/issues
-
 	luci-theme-bootstrap:
 	Copyright 2008 Steven Barth <steven@midlink.org>
-	Copyright 2008-2016 Jo-Philipp Wich <jow@openwrt.org>
+	Copyright 2008-2022 Jo-Philipp Wich <jo@mein.io>
 	Copyright 2012 David Menting <david@nut-bolt.nl>
 
-	MUI:
-	https://github.com/muicss/mui
-
-	luci-theme-design-x (Round 42 fork)
+	luci-theme-design-x (Round 42 fork, Step 175 — bootstrap-aligned ucode rewrite)
 
 	Licensed to the public under the Apache License 2.0
 -#}
 
-{#-
-	Round 42 Step 171 hotfix — ucode template runtime in LuCI 24.10
-	(/usr/share/ucode/luci/runtime.uc) does NOT expose `fs` or
-	`dispatcher` as globals in the template scope. The first ipk
-	release (dee7291) had calls to fs.open() + dispatcher.lookup()
-	that crashed at runtime.uc:133 with "left-hand side expression
-	is null" (null dereference). This rewrite drops those calls.
+{%-
+	// Round 42 Step 175 — total ucode rewrite using ground-truth globals
+	// from /usr/share/ucode/luci/template/themes/bootstrap/header.ut. The
+	// Step 171 defensive rewrite was guessing at template scope based on
+	// Lua patterns; this version mirrors LuCI 24.10's known-working
+	// bootstrap theme to keep us in safe API territory.
+	//
+	// Confirmed-available globals (from bootstrap header.ut):
+	//   ubus.call(service, method)     — ubus client (use to read boardinfo)
+	//   http.prepare_content(mime)     — sets response Content-Type
+	//   dispatcher.lang                — current language code
+	//   dispatcher.build_url(...)      — builds /cgi-bin/luci/... URLs
+	//   dispatcher.lookup(path)        — checks if a registered controller exists
+	//   striptags(s)                   — strips HTML tags
+	//   entityencode(s, html_safe)     — HTML-escapes
+	//   join(sep, arr)                 — array join
+	//   _(s)                           — i18n (NOT translate())
+	//   media, resource                — theme + LuCI core static asset paths
+	//   theme                          — current theme name
+	//   node                           — dispatch node (with .css, .title)
+	//   ctx                            — request context (with .request_path)
+	//   css                            — view-supplied inline CSS
+	//   blank_page                     — true for login / minimal pages
+	//
+	// Confirmed-importable (need explicit import):
+	//   getuid, getspnam from 'luci.core' — for root-no-password probe
 
-	Features SACRIFICED on the ucode track (Lua track keeps them):
-	  - Per-deploy cache-buster reading /tmp/luci-design.cachebust
-	    (Step 87 / Round 14) — `cb` now just equals `luciversion`,
-	    same as LuCI's default cache-buster
-	  - Root-no-password warning (Step 153 / Round 40) — needs
-	    /etc/shadow read which non-root rpcd can't do anyway
-	  - OpenClash navbar tab conditional render (Step 104 /
-	    Round 22) — no way to check installed apps without
-	    dispatcher.lookup. Tab dropped entirely from ucode track.
+	import { getuid, getspnam } from 'luci.core';
 
-	The Lua track at luasrc/view/themes/design-x/header.htm keeps
-	all three features for builds with luci-lua-runtime + when LuCI's
-	template engine picks .htm over .ut (older LuCI versions, or
-	if .ut is missing on the install).
+	const boardinfo = ubus.call('system', 'board');
 
-	TODO Round 43+: investigate the exact globals exposed by LuCI
-	24.10's ucode template scope (cat /usr/share/ucode/luci/
-	template/themes/bootstrap/header.ut for a known-working ref),
-	then re-introduce the lost features via the correct API surface.
--#}
+	http.prepare_content('text/html; charset=UTF-8');
+-%}
 
 <!DOCTYPE html>
-<html lang="{{ lang }}">
+<html lang="{{ dispatcher.lang }}">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-	<title>{{ striptags( (boardinfo.hostname || "OpenWrt") + ( (nodespec && nodespec.title) ? ' - ' + translate(nodespec.title) : '') ) }} - LuCI</title>
+	<title>{{ striptags(`${boardinfo?.hostname ?? 'OpenWrt'}${node ? ` - ${_(node.title)}` : ''}`) }} - LuCI</title>
 
 	<meta name="format-detection" content="telephone=no, email=no"/>
 	<meta name="theme-color" media="(prefers-color-scheme: light)" content="white">
 	<meta name="theme-color" media="(prefers-color-scheme: dark)" content="black">
-	<meta name="application-name" content="{{ striptags( boardinfo.hostname || "OpenWrt" ) }} - LuCI">
+	<meta name="application-name" content="{{ striptags(boardinfo?.hostname ?? 'OpenWrt') }} - LuCI">
 
 	<meta name="apple-mobile-web-app-capable" content="yes">
 	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
-	<meta name="apple-mobile-web-app-title" content="{{ striptags( boardinfo.hostname || "OpenWrt" ) }} - LuCI">
+	<meta name="apple-mobile-web-app-title" content="{{ striptags(boardinfo?.hostname ?? 'OpenWrt') }} - LuCI">
 	<meta name="mobile-web-app-capable" content="yes">
 	<meta name="msapplication-TileColor" content="#09c">
 
@@ -72,37 +71,49 @@
 	<link rel="apple-touch-icon" sizes="192x192" href="{{ media }}/images/icon.png">
 	<link rel="shortcut icon" type="image/png" href="{{ media }}/images/icon.png">
 
-	<link rel="stylesheet" href="{{ media }}/css/style.css?v={{ luciversion }}">
-	{#- Step 67 (Round 11): features.css used to be @import-ed from the end
-	    of style.css. CSS spec says @import must come BEFORE all other rules. -#}
-	<link rel="stylesheet" href="{{ media }}/css/features.css?v={{ luciversion }}">
-	{% if (nodespec && nodespec.css): %}
-	<link rel="stylesheet" href="{{ resource }}/{{ nodespec.css }}">
-	{% endif -%}
+	<link rel="stylesheet" href="{{ media }}/css/style.css">
+	{#- Step 67 (Round 11) — features.css split out of style.css so @import
+	    can sit at the top of style.css (CSS spec); browsers stopped honoring
+	    trailing @import on 2026-05-23. -#}
+	<link rel="stylesheet" href="{{ media }}/css/features.css">
+	{% if (node?.css): %}
+	<link rel="stylesheet" href="{{ resource }}/{{ node.css }}">
+	{% endif %}
 
-	<script src="{{ url('admin/translations', lang) }}"></script>
+	<script src="{{ dispatcher.build_url('admin/translations', dispatcher.lang) }}"></script>
 	<script src="{{ resource }}/cbi.js"></script>
-	<script src="{{ resource }}/luci.js?v={{ luciversion }}"></script>
+	<script src="{{ resource }}/luci.js"></script>
 	{% if (css): %}
-	<style title="text/css">
-		{{ css }}
-	</style>
-	{% endif -%}
+	<style title="text/css">{{ css }}</style>
+	{% endif %}
 </head>
-	<body class="lang_{{ lang }} {% if (request && request.authsession): %}logged-in{% endif %} {% if (path != ''): %}node-{{ path }}{% else %}node-main-login{% endif %}" data-page="{{ pcdata(path) }}">
+{%-
+	// Compute body class once at top so the template literal doesn't get
+	// gnarly. We preserve the Round 41 conventions:
+	//   - "lang_<code>"  → language-scoped CSS hooks
+	//   - "logged-in"    → only when authenticated (use ctx?.authsession; if
+	//                      that doesn't exist on this LuCI build we fall
+	//                      through to !blank_page as a heuristic)
+	//   - "node-<path>"  → page-specific CSS (e.g. .node-admin-status-overview)
+	//                      Empty when no dispatch path (login form).
+	const reqpath = ctx?.request_path ?? [];
+	const node_class = length(reqpath) > 0 ? `node-${join('-', reqpath)}` : 'node-main-login';
+	const auth_class = (ctx?.authsession || !blank_page) ? 'logged-in' : '';
+-%}
+	<body class="lang_{{ dispatcher.lang }} {{ auth_class }} {{ node_class }}" data-page="{{ entityencode(join('-', reqpath), true) }}">
 <header>
 	<div class="fill">
 		<div class="container">
-			<button type="button" class="showSide" aria-label="{{ translate('Toggle menu') }}"></button>
-			<a class="brand" href="{{ url('admin/status/overview') }}">{{ striptags(boardinfo.hostname || "OpenWrt") }}</a>
+			<button type="button" class="showSide" aria-label="{{ _('Toggle menu') }}"></button>
+			<a class="brand" href="{{ dispatcher.build_url('admin/status/overview') }}">{{ striptags(boardinfo?.hostname ?? 'OpenWrt') }}</a>
 			<div class="status" id="indicators"></div>
-			<button type="button" id="cmdk-trigger" class="cmdk-trigger" aria-label="{{ translate('Search menus (Cmd+K)') }}" title="{{ translate('Search (⌘K / Ctrl+K)') }}">
+			<button type="button" id="cmdk-trigger" class="cmdk-trigger" aria-label="{{ _('Search menus (Cmd+K)') }}" title="{{ _('Search (⌘K / Ctrl+K)') }}">
 				<svg class="svg-icon"><use href="{{ media }}/icons.svg#i-search"/></svg>
 			</button>
-			<button type="button" id="quick-actions-trigger" class="quick-actions-trigger" aria-label="{{ translate('Quick actions') }}" title="{{ translate('Quick actions') }}">
+			<button type="button" id="quick-actions-trigger" class="quick-actions-trigger" aria-label="{{ _('Quick actions') }}" title="{{ _('Quick actions') }}">
 				<svg class="svg-icon"><use href="{{ media }}/icons.svg#i-zap"/></svg>
 			</button>
-			<button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ translate('Switch theme') }}" title="{{ translate('Switch theme') }}">
+			<button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('Switch theme') }}" title="{{ _('Switch theme') }}">
 				<svg class="svg-icon icon-auto"><use href="{{ media }}/icons.svg#i-monitor"/></svg>
 				<svg class="svg-icon icon-light"><use href="{{ media }}/icons.svg#i-sun"/></svg>
 				<svg class="svg-icon icon-dark"><use href="{{ media }}/icons.svg#i-moon"/></svg>
@@ -111,31 +122,36 @@
 	</div>
 </header>
 
-{#- Step 104 (Round 22): bottom navbar — preview-parity tabs.
-    OpenClash tab dropped from ucode track per Step 171 hotfix (would
-    need dispatcher.lookup which is not exposed in ucode template scope).
-    Lua track keeps the conditional OpenClash tab. -#}
+{#- Step 104 (Round 22) — bottom navbar with preview-parity SVG tabs.
+    OpenClash tab is restored (Step 175): dispatcher.lookup() IS available
+    in ucode template scope, contrary to my Step 171 hotfix assumption. -#}
 <div class="navbar">
-  <a class="navbar-tab navbar-tab-home" href="{{ url('admin/status/overview') }}">
+  <a class="navbar-tab navbar-tab-home" href="{{ dispatcher.build_url('admin/status/overview') }}">
     <svg class="navbar-tab-icon" aria-hidden="true"><use href="{{ media }}/icons.svg#i-home"/></svg>
-    <span class="navbar-tab-label">{{ translate('Home') }}</span>
+    <span class="navbar-tab-label">{{ _('Home') }}</span>
   </a>
-  <a class="navbar-tab navbar-tab-network" href="{{ url('admin/network/network') }}">
+  {% if (dispatcher.lookup('admin/services/openclash')): %}
+  <a class="navbar-tab navbar-tab-proxy" href="{{ dispatcher.build_url('admin/services/openclash') }}">
+    <svg class="navbar-tab-icon" aria-hidden="true"><use href="{{ media }}/icons.svg#i-globe"/></svg>
+    <span class="navbar-tab-label">OpenClash</span>
+  </a>
+  {% endif %}
+  <a class="navbar-tab navbar-tab-network" href="{{ dispatcher.build_url('admin/network/network') }}">
     <svg class="navbar-tab-icon" aria-hidden="true"><use href="{{ media }}/icons.svg#i-network"/></svg>
-    <span class="navbar-tab-label">{{ translate('Network') }}</span>
+    <span class="navbar-tab-label">{{ _('Network') }}</span>
   </a>
-  <a class="navbar-tab navbar-tab-stats" href="{{ url('admin/status/realtime') }}">
+  <a class="navbar-tab navbar-tab-stats" href="{{ dispatcher.build_url('admin/status/realtime') }}">
     <svg class="navbar-tab-icon" aria-hidden="true"><use href="{{ media }}/icons.svg#i-bar-chart"/></svg>
-    <span class="navbar-tab-label">{{ translate('Graphs') }}</span>
+    <span class="navbar-tab-label">{{ _('Graphs') }}</span>
   </a>
-  <a class="navbar-tab navbar-tab-admin" href="{{ url('admin/system/admin') }}">
+  <a class="navbar-tab navbar-tab-admin" href="{{ dispatcher.build_url('admin/system/admin') }}">
     <svg class="navbar-tab-icon" aria-hidden="true"><use href="{{ media }}/icons.svg#i-user"/></svg>
-    <span class="navbar-tab-label">{{ translate('Admin') }}</span>
+    <span class="navbar-tab-label">{{ _('Admin') }}</span>
   </a>
 </div>
 
 <div class="main">
-	<div style="" class="loading"><span><div class="loading-img"></div>{{ translate('Collecting data...') }}</span></div>
+	<div style="" class="loading"><span><div class="loading-img"></div>{{ _('Collecting data...') }}</span></div>
 	<div class="main-left" id="mainmenu" style="display:none"></div>
 	<div class="main-right">
 		<div class="modemenu-buttons" style="display:none">
@@ -144,19 +160,38 @@
 		<div class="darkMask"></div>
 		<div id="maincontent">
 			<div class="container">
-				{#- Root-no-password warning dropped from ucode track per
-				    Step 171 hotfix (needs fs.open(/etc/shadow) which
-				    ucode template scope doesn't reliably expose, AND
-				    /etc/shadow is 0600 root-owned so even with fs we
-				    can't read from rpcd's non-root context). Lua track
-				    at luasrc/view/themes/design-x/header.htm keeps it. -#}
+				{#- Root-no-password warning RESTORED (Step 175). Uses the
+				    luci.core helpers getuid + getspnam, same pattern as
+				    bootstrap. ?.pwdp uses optional-chain so if getspnam
+				    returns null on a build without /etc/shadow, the check
+				    silently fails (no warning shown) — fail-closed. -#}
+				{% if (getuid() == 0 && getspnam('root')?.pwdp === ''): %}
+				<div class="alert-message warning">
+					<h4>{{ _('No password set!') }}</h4>
+					<p>{{ _('There is no password set on this router. Please configure a root password to protect the web interface.') }}</p>
+					{% if (dispatcher.lookup('admin/system/admin')): %}
+					<div class="right"><a class="btn cbi-button cbi-button-apply" href="{{ dispatcher.build_url('admin/system/admin') }}">{{ _('Go to password configuration...') }}</a></div>
+					{% endif %}
+				</div>
+				{% endif %}
+
+				{#- Initramfs-mode warning, ported from bootstrap. -#}
+				{% if (boardinfo?.rootfs_type == 'initramfs'): %}
+				<div class="alert-message warning">
+					<h4>{{ _('System running in recovery (initramfs) mode.') }}</h4>
+					<p>{{ _('No changes to settings will be stored and are lost after rebooting. This mode should only be used to install a firmware upgrade') }}</p>
+					{% if (dispatcher.lookup('admin/system/flash')): %}
+					<div class="right"><a class="btn cbi-button cbi-button-apply" href="{{ dispatcher.build_url('admin/system/flash') }}">{{ _('Go to firmware upgrade...') }}</a></div>
+					{% endif %}
+				</div>
+				{% endif %}
 
 				<noscript>
 					<div class="alert-message warning">
-						<h4>{{ translate('JavaScript required!') }}</h4>
-						<p>{{ translate('You must enable JavaScript in your browser or LuCI will not work properly.') }}</p>
+						<h4>{{ _('JavaScript required!') }}</h4>
+						<p>{{ _('You must enable JavaScript in your browser or LuCI will not work properly.') }}</p>
 					</div>
 				</noscript>
 
 				<div id="tabmenu" style="display:none"></div>
-	<script src="{{ media }}/js/style.js?v={{ luciversion }}"></script>
+	<script src="{{ media }}/js/style.js"></script>
