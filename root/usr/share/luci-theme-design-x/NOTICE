@@ -1,0 +1,58 @@
+luci-theme-design-x — third-party data attribution
+===================================================
+
+This package ships a generated runtime asset at
+
+    /www/luci-static/design-x/data/oui.json.gz
+
+which is the gzipped JSON form of the Wireshark `manuf` community-curated
+MAC OUI database, restricted to 24-bit MA-L entries. The transformation is
+performed in this project's CI pipeline (.github/workflows/build.yml) at
+build time from the upstream URL
+
+    https://www.wireshark.org/download/automated/data/manuf
+
+The Wireshark `manuf` database is distributed under the GNU General Public
+License version 2 or later (GPL-2.0-or-later). See
+
+    https://www.wireshark.org/about.html#licensing
+
+The luci-theme-design-x theme code itself is licensed under the Apache
+License 2.0 (see LICENSE in the project root).
+
+License coexistence
+-------------------
+
+The GPL-2.0 data file and the Apache-2.0 theme code coexist within this
+IPK as a "mere aggregation" per FSF guidance:
+
+    https://www.gnu.org/licenses/gpl-faq.html#MereAggregation
+
+The data file is consumed as a static lookup table by the theme's JS at
+runtime. Neither the GPL data nor the Apache code is linked, statically
+or dynamically, into the other's runtime image; they are independent
+works distributed together for convenience.
+
+Each component retains its own license; the combination in this package
+does NOT relicense either side. Downstream redistribution must preserve
+both this NOTICE and the upstream Wireshark licensing terms for the data
+file.
+
+Refreshing the data
+-------------------
+
+The data file is regenerated fresh on every CI build, so each released
+IPK ships the latest OUI registrations available from Wireshark at build
+time. We deliberately do NOT run a cron-style refresher on the router
+itself; see doc/macvendor.md §七 #2 for the reasoning (flash wear,
+silent network failures, freshness vs cost trade-off for a residential
+router).
+
+Implementation notes
+--------------------
+
+Round 44 Step 202: build-CI fetch + awk MA-L filter + gzip-9.
+Round 44 Step 203: this NOTICE + vendor.js consumer module.
+Round 44 Step 204: devices.js LAN Clients integration.
+
+Full design rationale: doc/macvendor.md.
