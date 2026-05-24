@@ -3528,6 +3528,20 @@ td > .ifacebadge,
 	font-size: var(--text-xs);
 	font-weight: var(--weight-semibold);
 	border-bottom: 1px solid var(--color-border-subtle);
+	/* Round 44 Step 200 — Bug "Network 卡 ifacebox 升级" (Chrome-Claude
+	   Round 43 Part 2). Reported as "蓝色顶条 + 居中标题, 跟整张 overview
+	   设计语言断层". Audit found:
+	     - Step 121 already tokenised colour (surface-1 / muted text)
+	     - "blue top stripe" was LuCI bootstrap-era inherited
+	       text-transform + text-align: center on .ifacebox-head from
+	       resources/cascade.css that wasn't overridden
+	     - design-x cards use left-aligned uppercase tracked labels,
+	       not centered
+	   Force left-align + uppercase + tracking (matches LAN Clients
+	   thead via Principle 9 — table-header form factor). */
+	text-align: left;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
 }
 
 .ifacebox-head.active {
@@ -3543,6 +3557,20 @@ td > .ifacebadge,
 	inset: 0 auto 0 0;
 	width: 3px;
 	background: var(--color-success);
+}
+
+/* Round 44 Step 200 — additional Network 卡 polish.
+ * On Overview, the Network section emits multiple .ifacebox in a flex
+ * wrap. Give each ifacebox the same hover lift as our .cbi-section so
+ * the overview feels coherent (Principle 9: cards as a uniform form
+ * factor even if their internals vary). */
+.ifacebox {
+	transition: transform var(--motion-fast) var(--ease-out),
+	            box-shadow var(--motion-fast) var(--ease-out);
+}
+.ifacebox:hover {
+	transform: translateY(-1px);
+	box-shadow: var(--shadow-sm);
 }
 
 .ifacebox-body {
