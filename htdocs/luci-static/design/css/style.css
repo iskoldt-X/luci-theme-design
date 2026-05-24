@@ -5066,6 +5066,13 @@ td.cbi-button, .cbi-button-apply,
 .node-admin-status-overview #view > .speedtest-card   { order: 11; }
 .node-admin-status-overview #view > .traffic-card     { order: 12; }
 
+/* Step 147 (Round 40):LAN Clients was put into auto-fit 3-up in Round 30
+   Step 114 with Wi-Fi test + Traffic Analysis. But once Round 40 promotes
+   it to "the canonical device list" (subsuming the upstream Active DHCP
+   Leases table, see Step 149), it deserves the full row width. Speedtest
+   + Traffic remain in auto-fit since they're still 1/3-wide-friendly. */
+.node-admin-status-overview #view > .devices-card { grid-column: 1 / -1; }
+
 /* cbi-section 卡片本身（基础 token 已应用，这里仅微调） */
 .node-admin-status-overview #view > .cbi-section {
     margin: 0;
