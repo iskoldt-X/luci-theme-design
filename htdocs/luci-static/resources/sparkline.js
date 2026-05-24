@@ -76,13 +76,18 @@ MetricRing.prototype.avg = function () {
 	for (var i = 0; i < this.data.length; i++) sum += this.data[i];
 	return sum / this.data.length;
 };
-MetricRing.prototype.path = function (w, h) {
+MetricRing.prototype.path = function (w, h, sharedHi) {
 	if (this.data.length < 2) return '';
 	var lo = Infinity, hi = -Infinity;
 	for (var i = 0; i < this.data.length; i++) {
 		if (this.data[i] < lo) lo = this.data[i];
 		if (this.data[i] > hi) hi = this.data[i];
 	}
+	// Step 139 (Round 37):optional shared Y-axis. When two rings share a
+	// vertical scale (e.g. WAN rx + tx on the same sparkline canvas),
+	// passing sharedHi forces the upper bound to match across both lines
+	// so the secondary line's relative magnitude reads correctly.
+	if (sharedHi != null && sharedHi > hi) hi = sharedHi;
 	// Flat-data fix (e.g. CPU load 0.00 for several samples): without this
 	// guard the line plots at y=h (bottom of viewBox) and gets clipped /
 	// invisible. Center the line in the middle 60% of the box when range is
@@ -113,7 +118,7 @@ MetricRing.prototype.path = function (w, h) {
 //    — the browser doesn't paint that as SVG, so even perfectly-attributed
 //    <path> children render to nothing. Same fix the menu icons needed in
 //    Step 77; we missed it here.
-function makeTile(id, iconName, label, iconBase, hasProgress) {
+function makeTile(id, iconName, label, iconBase, hasProgress, dualValue) {
 	var baseY = (SPARK_H / 2).toFixed(1);
 	var initPath = 'M 0,' + baseY + ' L ' + SPARK_W + ',' + baseY;
 
@@ -150,6 +155,26 @@ function makeTile(id, iconName, label, iconBase, hasProgress) {
 		'stroke-linejoin':  'round',
 		'opacity':          '0.85'
 	});
+	// Step 139 (Round 37):secondary line for dual-value tiles (WAN tx).
+	// Dashed + half-opacity so it reads as "secondary trend over same
+	// time window" against the solid primary line. Same accent color
+	// because rx + tx are the same kind of metric.
+	var sparkChildren = [fillPath, linePath];
+	if (dualValue) {
+		var secondaryLinePath = svgEl('path', {
+			'class':            'design-tile-spark-line-secondary',
+			'd':                '',
+			'fill':             'none',
+			'stroke':           '#10b981',
+			'stroke-width':     '1.5',
+			'stroke-dasharray': '3 2',
+			'opacity':          '0.55',
+			'stroke-linecap':   'round',
+			'stroke-linejoin':  'round'
+		});
+		sparkChildren.push(secondaryLinePath);
+	}
+
 	var sparkSvg = svgEl('svg', {
 		'class':              'design-tile-spark',
 		'viewBox':            '0 0 ' + SPARK_W + ' ' + SPARK_H,
@@ -159,18 +184,41 @@ function makeTile(id, iconName, label, iconBase, hasProgress) {
 		'height':             '40',
 		'fill':               'none',
 		'stroke':             'currentColor'
-	}, [fillPath, linePath]);
+	}, sparkChildren);
 
-	// Step 89 (Round 15): value row is now 4 split inline spans — prefix
+	// Step 89 (Round 15):value row is 4 split inline spans — prefix
 	// (optional '↓'/'↑' for WAN), num (big), unit (e.g. '%'), trend (colored
-	// pill). setTile() below fills them. Empty trend is hidden by CSS
-	// (:empty rule) so makeTile bakes it in zero-state.
-	var valueRow = E('div', { 'class': 'design-tile-value' }, [
-		E('span', { 'class': 'design-tile-prefix' }, ''),
-		E('span', { 'class': 'design-tile-num' },    '—'),
-		E('span', { 'class': 'design-tile-unit' },   ''),
-		E('span', { 'class': 'design-tile-trend' },  '')
-	]);
+	// pill). setTile() below fills them. Empty trend hidden by CSS
+	// (:empty rule).
+	//
+	// Step 139 (Round 37):dual-value tiles get a different value-row
+	// structure with TWO num groups (primary 30px + secondary 20px),
+	// no trend pill. Used by WAN Traffic to show ↓ download + ↑ upload
+	// as first-class metrics rather than relegating upload to the meta
+	// line. Each group has its own prefix/num/unit triplet so setTile()
+	// can fill them independently.
+	var valueRow;
+	if (dualValue) {
+		valueRow = E('div', { 'class': 'design-tile-value design-tile-value-dual' }, [
+			E('span', { 'class': 'design-tile-num-group' }, [
+				E('span', { 'class': 'design-tile-prefix' }, ''),
+				E('span', { 'class': 'design-tile-num' },    '—'),
+				E('span', { 'class': 'design-tile-unit' },   '')
+			]),
+			E('span', { 'class': 'design-tile-num-group design-tile-num-group-secondary' }, [
+				E('span', { 'class': 'design-tile-prefix-secondary' }, ''),
+				E('span', { 'class': 'design-tile-num-secondary' },    '—'),
+				E('span', { 'class': 'design-tile-unit-secondary' },   '')
+			])
+		]);
+	} else {
+		valueRow = E('div', { 'class': 'design-tile-value' }, [
+			E('span', { 'class': 'design-tile-prefix' }, ''),
+			E('span', { 'class': 'design-tile-num' },    '—'),
+			E('span', { 'class': 'design-tile-unit' },   ''),
+			E('span', { 'class': 'design-tile-trend' },  '')
+		]);
+	}
 
 	// Step 89 (Round 15): reorder to match preview — head, value, spark,
 	// [progress for tiles that opt in], meta. Sparkline now sits ABOVE meta
@@ -196,10 +244,25 @@ function makeTile(id, iconName, label, iconBase, hasProgress) {
 	return E('div', { 'class': 'design-tile', 'id': id }, children);
 }
 
-function renderTileSpark(tileEl, ring) {
+function renderTileSpark(tileEl, ring, ringSecondary) {
 	var lineEl = tileEl.querySelector('.design-tile-spark-line');
 	var fillEl = tileEl.querySelector('.design-tile-spark-fill');
-	var linePath = ring.path(SPARK_W, SPARK_H);
+	var lineSecondaryEl = tileEl.querySelector('.design-tile-spark-line-secondary');
+
+	// Step 139 (Round 37):compute shared Y-axis upper bound if a secondary
+	// ring is present. Without this, each ring's path() auto-scales to its
+	// own data range — rx peaks visible but tx (typically 10× smaller in
+	// download-heavy households) would be drawn at the same visual height,
+	// destroying the "upload is 1/10 of download" signal users care about.
+	var sharedHi = null;
+	if (ringSecondary) {
+		var rxHi = 0, txHi = 0;
+		for (var i = 0; i < ring.data.length; i++) if (ring.data[i] > rxHi) rxHi = ring.data[i];
+		for (var k = 0; k < ringSecondary.data.length; k++) if (ringSecondary.data[k] > txHi) txHi = ringSecondary.data[k];
+		sharedHi = Math.max(rxHi, txHi);
+	}
+
+	var linePath = ring.path(SPARK_W, SPARK_H, sharedHi);
 
 	// Step 57: when fewer than 2 samples have arrived (1st poll cycle),
 	// ring.path() returns ''. Instead of leaving the SVG empty (looks
@@ -217,6 +280,8 @@ function renderTileSpark(tileEl, ring) {
 		lineEl.setAttribute('stroke-dasharray', '4 4');
 		lineEl.setAttribute('opacity', '0.85');
 		fillEl.setAttribute('d', '');
+		// Step 139 (Round 37):clear secondary line in empty state too
+		if (lineSecondaryEl) lineSecondaryEl.setAttribute('d', '');
 		return;
 	}
 
@@ -230,6 +295,16 @@ function renderTileSpark(tileEl, ring) {
 	lineEl.removeAttribute('stroke-dasharray');
 	lineEl.removeAttribute('opacity');
 	fillEl.setAttribute('d', linePath + ' L' + SPARK_W + ',' + SPARK_H + ' L0,' + SPARK_H + ' Z');
+
+	// Step 139 (Round 37):draw secondary line (e.g. tx for WAN tile) on
+	// the shared Y-axis so its magnitude reads correctly relative to the
+	// primary line. path() returns '' if ring has <2 samples — in that
+	// case clear the line attribute so a stale path from a prior render
+	// doesn't linger.
+	if (lineSecondaryEl) {
+		var secPath = ringSecondary ? ringSecondary.path(SPARK_W, SPARK_H, sharedHi) : '';
+		lineSecondaryEl.setAttribute('d', secPath || '');
+	}
 }
 
 // Step 89 (Round 15): richer setter — fills the split spans (prefix /
@@ -250,6 +325,19 @@ function setTile(tileEl, opts) {
 	if (numEl)    numEl.textContent    = (opts.num == null) ? '—' : String(opts.num);
 	if (unitEl)   unitEl.textContent   = opts.unit   || '';
 	if (prefixEl) prefixEl.textContent = opts.prefix || '';
+
+	// Step 139 (Round 37):dual-value secondary group (WAN tx). Optional;
+	// only set if .design-tile-num-secondary exists in this tile's DOM
+	// AND opts.secondary was provided. Mirror the primary num/unit/prefix
+	// fallback semantics.
+	if (opts.secondary) {
+		var sNumEl    = tileEl.querySelector('.design-tile-num-secondary');
+		var sUnitEl   = tileEl.querySelector('.design-tile-unit-secondary');
+		var sPrefixEl = tileEl.querySelector('.design-tile-prefix-secondary');
+		if (sNumEl)    sNumEl.textContent    = (opts.secondary.num == null) ? '—' : String(opts.secondary.num);
+		if (sUnitEl)   sUnitEl.textContent   = opts.secondary.unit   || '';
+		if (sPrefixEl) sPrefixEl.textContent = opts.secondary.prefix || '';
+	}
 
 	if (trendEl) {
 		if (opts.trend && opts.trend.dir !== 'flat') {
@@ -360,10 +448,14 @@ return baseclass.extend({
 
 		this.iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design') + '/icons.svg';
 		this.rings = {
-			cpu:  new MetricRing(RING_SIZE),
-			mem:  new MetricRing(RING_SIZE),
-			temp: new MetricRing(RING_SIZE),
-			net:  new MetricRing(RING_SIZE)    // Step 43: 4th tile, fed by wan-stats
+			cpu:   new MetricRing(RING_SIZE),
+			mem:   new MetricRing(RING_SIZE),
+			temp:  new MetricRing(RING_SIZE),
+			// Step 139 (Round 37):split single 'net' ring into rx + tx so
+			// the dual-value WAN tile can show both download and upload as
+			// first-class metrics + sparkline can plot both lines.
+			netRx: new MetricRing(RING_SIZE),
+			netTx: new MetricRing(RING_SIZE)
 		};
 
 		this.tryInject();
@@ -394,7 +486,7 @@ return baseclass.extend({
 		var grid = E('div', { 'class': 'design-tile-grid' }, [
 			makeTile('design-tile-cpu',  'i-cpu',         _('CPU Usage'),   this.iconBase, /*hasProgress*/ true),
 			makeTile('design-tile-mem',  'i-memory',      _('Memory'),      this.iconBase, /*hasProgress*/ true),
-			makeTile('design-tile-net',  'i-activity',    _('WAN Traffic'), this.iconBase),
+			makeTile('design-tile-net',  'i-activity',    _('WAN Traffic'), this.iconBase, /*hasProgress*/ false, /*dualValue*/ true),
 			makeTile('design-tile-temp', 'i-thermometer', _('Temperature'), this.iconBase)
 		]);
 		view.insertBefore(grid, view.firstChild);
@@ -426,9 +518,16 @@ return baseclass.extend({
 		this._timer = setInterval(L.bind(this.tick, this), SAMPLE_INTERVAL_MS);
 	},
 
-	// Step 43 + 89: callback for wan-stats.subscribe. Updates the Net tile's
-	// value (split prefix '↓' + num + unit), meta (upload + device name),
-	// trend pill (rx delta vs previous sample), and rx-rate sparkline.
+	// Step 43 + 89 + 139:callback for wan-stats.subscribe.
+	//
+	// Step 139 (Round 37) redesign:WAN tile is now a dual-value tile.
+	// Download (rx) shows in the primary 30px num slot, Upload (tx) in
+	// the secondary 20px slot. No trend pill — its red/green semantics
+	// were inverted for throughput (high = healthy, not concerning) and
+	// its ↑↓ arrows conflicted with the rx/tx direction arrows in the
+	// value row. Sparkline now draws BOTH rx (solid) + tx (dashed) on
+	// a shared Y-axis. Meta line shows device + 5-min rx peak (gives
+	// the sparkline a numeric anchor for "how big is that hill?").
 	onWanStats: function (data) {
 		if (!this.tileNet) return;
 		// If the WAN device is missing or fully offline, hide the tile instead
@@ -439,33 +538,36 @@ return baseclass.extend({
 		}
 		this.tileNet.style.display = '';
 
-		var prevRx = this.rings.net.last();
-		if (data.rxBitsPerSec !== null) this.rings.net.push(data.rxBitsPerSec);
+		if (data.rxBitsPerSec !== null) this.rings.netRx.push(data.rxBitsPerSec);
+		if (data.txBitsPerSec !== null) this.rings.netTx.push(data.txBitsPerSec);
 
 		var d = fmtBpsSplit(data.rxBitsPerSec);
 		var u = fmtBpsSplit(data.txBitsPerSec);
 
-		// Throughput trend pill: 50 Kbps threshold suppresses idle-link
-		// noise; format auto-picks Mbps/Kbps based on magnitude so the pill
-		// stays compact ("↓ 1.2 Mbps", not "↓ 1200000 bps").
-		var trend = deltaToTrend(data.rxBitsPerSec, prevRx, {
-			threshold: 50000,
-			format: function (abs) {
-				var f = fmtBpsSplit(abs);
-				return f.num + ' ' + f.unit;
-			}
-		});
+		// 5-min rx peak (sparkline numeric anchor). Inline scan since
+		// MetricRing doesn't expose a max() accessor yet.
+		var rxPeak = 0;
+		for (var i = 0; i < this.rings.netRx.data.length; i++) {
+			if (this.rings.netRx.data[i] > rxPeak) rxPeak = this.rings.netRx.data[i];
+		}
+		var peakStr = '';
+		if (rxPeak > 0) {
+			var pf = fmtBpsSplit(rxPeak);
+			peakStr = ' · Peak ' + pf.num + ' ' + pf.unit;
+		}
 
 		setTile(this.tileNet, {
-			prefix: (d.num === '—') ? '' : '↓',
-			num:    d.num,
-			unit:   d.unit,
-			trend:  trend,
-			meta:   (u.num === '—')
-				? (data.deviceName || '')
-				: ('↑ ' + u.num + ' ' + u.unit + (data.deviceName ? ' · ' + data.deviceName : ''))
+			prefix:    (d.num === '—') ? '' : '↓',
+			num:       d.num,
+			unit:      d.unit,
+			secondary: {
+				prefix: (u.num === '—') ? '' : '↑',
+				num:    u.num,
+				unit:   u.unit
+			},
+			meta: (data.deviceName || '') + peakStr
 		});
-		renderTileSpark(this.tileNet, this.rings.net);
+		renderTileSpark(this.tileNet, this.rings.netRx, this.rings.netTx);
 	},
 
 	tick: function () {

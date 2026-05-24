@@ -467,6 +467,95 @@
 .design-tile-trend-down { color: var(--color-success); background: var(--color-success-bg); }
 .design-tile-trend-flat { color: var(--color-text-muted); background: var(--color-surface-1); }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Round 37 / Step 139 — WAN tile dual-value layout
+ *
+ * WAN Traffic is the only dual-metric tile (download + upload), so it gets
+ * its own value-row structure: two .design-tile-num-group siblings, primary
+ * 30px (rx) + secondary 20px (tx). No trend pill — its red/green semantics
+ * inverted for throughput, and its ↑↓ arrows collided with the rx/tx direction
+ * arrows in the value row.
+ *
+ * The single shared sparkline canvas now plots both rx (solid 2px line) and
+ * tx (dashed 1.5px line, 0.55 opacity) at the same Y-axis scale so users can
+ * see the relative magnitude of upload vs download at a glance.
+ *
+ * Net tile uses flex-column + meta:margin-top:auto to align its meta baseline
+ * with CPU/Memory tiles (which have a progress bar pushing meta down ~10px).
+ * Without this, WAN tile's meta floated 10-18px higher than the others.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.design-tile-value-dual {
+    /* Override .design-tile-value's flex gap — dual mode wants more
+       space between the two num groups to read as 'two distinct numbers'. */
+    gap: var(--space-4);
+    align-items: baseline;
+}
+
+.design-tile-num-group {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    font-variant-numeric: tabular-nums;
+}
+
+.design-tile-num-group-secondary {
+    /* Slightly de-emphasized via opacity; the smaller font size already
+       creates hierarchy, opacity just softens the secondary group enough
+       that the eye knows where to land first. */
+    opacity: 0.85;
+}
+
+.design-tile-num-secondary {
+    font-size: var(--text-xl);           /* 20px — between primary 30 and meta 12 */
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+    line-height: 1;
+}
+
+.design-tile-unit-secondary {
+    font-size: var(--text-xs);           /* 12px — half the secondary num */
+    color: var(--color-text-muted);
+    font-weight: var(--weight-medium);
+}
+
+.design-tile-prefix-secondary {
+    font-size: var(--text-sm);           /* 14px — slightly bigger than unit */
+    color: var(--color-text-muted);
+    font-weight: var(--weight-medium);
+}
+
+/* Net tile: suppress trend pill entirely. Throughput has no inherent
+   "good/bad" axis the red/green color signal could honor. */
+#design-tile-net .design-tile-trend { display: none !important; }
+
+/* Net tile: align meta baseline with CPU/Memory by pushing meta to the
+   tile's bottom. CPU/Memory have a 6px progress + 4px margin pushing
+   their meta down ~10px from the sparkline; WAN has no progress so its
+   meta was floating ~10-18px higher than the others. flex-column +
+   margin-top:auto on the last child solves this without hardcoding
+   a magic margin number. */
+#design-tile-net {
+    display: flex;
+    flex-direction: column;
+}
+#design-tile-net .design-tile-meta {
+    margin-top: auto;
+}
+
+/* Net tile secondary sparkline line (tx). Same accent color as primary
+   line (same kind of metric, just different direction) but dashed +
+   half-opacity so visual hierarchy reads 'rx is primary, tx is its
+   partner trace'. */
+.design-tile-spark-line-secondary {
+    stroke: var(--color-accent-500);
+    stroke-width: 1.5;
+    stroke-dasharray: 3 2;
+    opacity: 0.55;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
 /* Step 89 originally dropped the Net tile's .design-tile-num one notch
    (text-2xl 24px) to keep "↓ 45.2 Mbps ↑ 1.2 Mbps" on one line in
    narrow ≥220px tiles. Step 91 (Round 16) revokes that override per
