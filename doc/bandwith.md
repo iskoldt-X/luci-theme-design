@@ -306,7 +306,7 @@ Reconciliation rules:
 
 | Tier | Approach | Extra disk | Extra deps | Code | Note |
 |---|---|---|---|---|---|
-| **3** | **+ `conntrack-tools` (~50 KB)** | tiny | one binary | ~80 LOC shell | same Hybrid architecture, `conntrack -E -e destroy` + `conntrack -L` replace 300 LOC of binary TLV parsing in ucode. Maintenance much easier. |
+| **3** | **+ `conntrack` (~50 KB)** | tiny | one binary | ~80 LOC shell | same Hybrid architecture, `conntrack -E -e destroy` + `conntrack -L` replace 300 LOC of binary TLV parsing in ucode. Maintenance much easier. **Real opkg name is `conntrack`, NOT `conntrack-tools`** (legacy OpenWrt meta-pkg name removed in ImmortalWrt 24.10 feed split; `conntrackd` is the separate replication daemon, NOT the CLI). Verified Round 44 Step 222. |
 | 4 | + `nlbwmon` (~200 KB) | small | one package, optional `luci-app-nlbwmon` | 0 LOC | mature, has its own historical DB, but it's a **separate LuCI app, not our theme widget**. Either we consume its API (small integration) or duplicate logic (waste). |
 | 5 | + `ntopng` (~5 MB) or `pmacct` (~400 KB) | large | multi | n/a | professional traffic analysis with NetFlow / sFlow export, DPI, per-port-per-host historical graphs. **Massive overkill** for a router theme widget. |
 | 6 | + custom kernel module via `kmod-` | varies | kernel rebuild | n/a | would mean forking ImmortalWrt firmware. **Out of scope.** |
