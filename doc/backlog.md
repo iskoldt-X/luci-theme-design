@@ -2,7 +2,7 @@
 
 > Living document. Updated at major decision points to capture: what's locked in next, what's deferred, what's explicitly opted out, and what needs deep redesign.
 >
-> Last updated: 2026-05-24, after Round 42 completion (cross-branch fork to luci-theme-design-x). MTK build verification at Actions-OpenWrt is in flight; Sub-B/C runtime verification deferred to next session.
+> Last updated: 2026-05-24, end of Round 43 — added per-host bandwidth discovery (see `doc/bandwith.md`, Round 44 candidate). Round 43 itself shipped Steps 179-193 (LAN Clients / Status table polish + Chrome-Claude overview bug catalog). Round 42 MTK fork verified and post-deployment hotfixes (Steps 171-178) shipped.
 
 ---
 
@@ -68,7 +68,7 @@ Two work items, the first BLOCKED on user verification of MTK build:
 
 Sorted by user-visible value:
 
-- **OUI vendor database** — LAN Clients detail panel currently shows "Vendor: Unknown" for every device. Embed a compact OUI prefix → vendor name table (~5KB JSON for top 1000 OUIs) keyed by first 3 MAC octets. Falls back to "Unknown" for unrecognized; optionally show a link to macvendors.com for manual lookup. **~1h work**.
+- **MAC vendor lookup** — Discovery DONE + Phase 1 verification DONE 2026-05-24 → see dedicated section below + `doc/macvendor.md`. **Phase 2B confirmed** (Phase 2A unreachable: ufp package not in ImmortalWrt 24.10 feeds). Embed Wireshark `manuf` 24-bit MA-L as `oui.json.gz` (~150 KB) in theme, build-time fetch, no git commit. LAA/Multicast bit detection done unconditionally (covers ~44% of user's actual devices for free). User explicitly rejected report-recommended "independent data package" approach (effectiveness > decoupling). **Scheduled: Round 45 main work, ~4-5h.**
 - **ARP-based real Last Seen** — Step 140 renamed the column to "Lease" to be honest about data source (DHCP lease validity ≠ device activity). Real last-seen needs `/proc/net/arp` REACHABLE/STALE/DELAY/FAILED state + `iwinfo.assoclist[].inactive` for Wi-Fi. Now should go through the new `luci-theme-design-x` rpcd ubus object (Round 42 architecture) as a new method, NOT a raw CGI. **~1-2h work**.
 - **IPv6 addresses in expand detail** — `getHostHints.ip6addrs` returns array; render a line per address in the detail panel. **~10 min work**.
 - **Column header click-to-sort** — Name / IP / Lease columns become sortable on click. Round 38 Chrome-Claude P1 suggestion. **~30 min work**.
@@ -95,31 +95,212 @@ These all involve persistent service config and **MUST follow Step 153's input-v
 
 ---
 
-## 🚧 Tier "deep research / redesign" (no timeline)
+## 🎯 Round 44 candidate — Per-host bandwidth accounting redesign (discovery DONE)
 
-### Per-host bandwidth accounting (Round 31, Steps 115-119) — user assessment: "一坨垃圾,不可用状态"
+### Status (updated 2026-05-24, end of Round 43)
 
-The Round 31 implementation:
-- nftables bridge family table `design_acct` with `lan_in` (prerouting) + `lan_out` (postrouting) chains
-- Per-host counters `host_tx_<ip>` / `host_rx_<ip>` keyed by IP
-- `/etc/init.d/design-host-acct` service manages counter creation on DHCP lease changes
-- `/cgi-bin/design/host-traffic` CGI returns JSON
-- `traffic.js` polls every 5s
+Round 31 (Steps 115-119) was previously parked here as "deep research /
+redesign, Round 50+ territory". After commissioning an external deep-research
+report and cross-checking its kernel-source citations, **the unknowns have
+collapsed into a well-defined ~7-step implementation plan**. No longer
+research; now a scheduling decision.
 
-**Known/suspected issues** (user hasn't elaborated specifically — needs interview):
-- Counters by IP, not MAC: IP changes break continuity, lease churn loses history
-- Cron-based refresh every 5 min misses fast-cycling DHCP renewals
-- No persistence: counter values reset on router reboot (kernel-level nft state)
-- Display in UI may not match user's intuition for "what consumed bandwidth"
-- ?: data accuracy / lag / completeness vs reality
+### Root cause (settled)
 
-**Action**: when user has appetite to redesign, **first collect specifics of what's "garbage"**. Then evaluate alternative stacks:
-- option 1: keep nft bridge family but key by MAC, persist counter state to /etc/config
-- option 2: use eBPF (kernel 5.10+ on ImmortalWrt 24.10) for higher-quality per-host metering
-- option 3: native LuCI integration with `nlbwmon` (broken by flow offload — Round 25 noted) — would need to also fix nlbwmon
-- option 4: outsource to OpenWrt `bandwidthd` package + parse its output
+The nftables `bridge` family hooks live *above* the MT7986 NPU's hardware
+flow offload fastpath. Once `mtk_ppe` accelerates a flow into silicon, the
+software bridge code is never invoked → our counters never increment for
+the bulk of LAN-side traffic. On QEMU x86_64 (no NPU) it appeared to work;
+on real hardware (SSR-AX6000) it's structurally blind. Other defects
+(IP-keyed identity, IPv4-only, 5-min cron lag, no persistence, rule-per-IP
+non-scaling) are real but secondary to the offload-bypass.
 
-This is **Round 50+ territory or its own multi-Round track**, not next week's work.
+### What to read for full context
+
+- **`doc/bandwith.md`** — complete discovery doc: kernel reality, 5-tier
+  options matrix (zero-deps → ntopng), recommended Hybrid architecture
+  (DESTROY event stream + 5s `NFNL_MSG_CT_GET` dump), known risks, soft
+  Round 44 step plan
+- **`doc/OpenWrtFlowOffloadAccounting Challenge.md`** — external AI deep
+  research report with kernel-source citations (verified)
+
+### Path forward (recommended)
+
+| Tier | Approach | Status |
+|---|---|---|
+| **2** ⭐ | Hybrid (DESTROY listener + 5s CT_GET dump) in pure ucode, **zero new deps**, ~400 LOC, 95-99% accuracy | **recommended default** |
+| 3 | Same architecture, `+ conntrack-tools` (50 KB), shrinks to ~80 LOC shell + awk | strictly better engineering if 50 KB extra is acceptable |
+| 4 | `+ nlbwmon` (200 KB) — gives up theme ownership of the widget | only if user already has it installed for other reasons |
+
+Round 44 step plan (decomposed in `doc/bandwith.md` §8): sysctl bootstrap →
+ucode daemon Phase 1 (DESTROY only, parallel-run for observability) →
+Phase 2 (hybrid complete) → rpcd ubus method + traffic.js endpoint swap →
+soak test + user go/no-go → delete Round 31 artifacts → journal +
+postmortem. Net code change ≈ +70 lines, accuracy "garbage" → "production".
+
+### One mandatory deployment step (any tier)
+
+`net.netfilter.nf_conntrack_acct=1` sysctl is OFF by default at runtime
+and only attaches to NEW connections. Must ship via
+`/etc/sysctl.d/11-design-conntrack-acct.conf` applied before WAN comes up.
+**If forgotten, every architecture reads zero bytes.** Recorded as memory
+`[[netlink-conntrack-acct-sysctl-default-off]]` (to be filed when Round 44
+ships).
+
+---
+
+## 🎯 Round 45 candidate — MAC vendor lookup (Phase 2B confirmed, ready to ship)
+
+### Status (updated 2026-05-24, end of Round 43)
+
+LAN Clients expand-row "Vendor: Unknown" placeholder (in place since Step 148
+Round 40) gets resolved. After commissioning a deep-research report
+(`doc/OpenWrtMACVendorLookupArchitecture.md`) and running Phase 1 verification
+on the user's actual router, **the path is locked to Phase 2B (theme-embedded
+Wireshark manuf)**. Full plan in **`doc/macvendor.md`**.
+
+### Phase 1 verification outcome (2026-05-24, on user's router)
+
+Phase 2A (consume upstream `host_hints.vendor`) ruled out:
+- `ubus call luci-rpc getHostHints` returns no `vendor` field
+- `ps w | grep ufp` empty — no ufp-neigh daemon running
+- `opkg list-installed | grep ufp` empty — package not installed
+- **LuCI Software search "ufp" → "No packages matching"** — package is not
+  even available in ImmortalWrt 24.10 feeds. Structurally unreachable.
+
+The report's PR #7931 / commit 70b7176fc2 mechanism, even if it exists upstream,
+has not been backported to ImmortalWrt 24.10 with its required `ufp` package.
+
+### Root cause (settled)
+
+Vendor identification from MAC needs a OUI prefix → name table. ImmortalWrt
+24.10 does not provide one through upstream APIs. We ship our own as a static
+data file embedded in the theme IPK. LAA bit (`0x02`) and Multicast bit (`0x01`)
+detection of the first MAC octet is done in JS unconditionally — covers ~44%
+of the user's actual devices (verified against live `getHostHints` sample
+of 9 devices, see `doc/macvendor.md` §一.五) without needing the DB.
+
+### What to read for full context
+
+- **`doc/macvendor.md`** — complete plan: verification outcome (§一.五),
+  Phase 2B implementation (§四), LAA UX nuances (§五), what-not-to-do list
+  (§七), risk table (§八), license compliance for GPL data + Apache code
+- **`doc/OpenWrtMACVendorLookupArchitecture.md`** — external AI deep research
+  report. Verified flaws: ufp-availability claim was wrong for ImmortalWrt
+  24.10. Solid contributions: gzip+DecompressionStream API support cutoff,
+  "Mere Aggregation" license analysis, refute of cron-update + git-commit
+  anti-patterns. Base64-embedded math symbols can be ignored.
+
+### Implementation summary (Phase 2B)
+
+| Component | Where | Size | LOC |
+|---|---|---|---|
+| Build CI fetch + transform | `.github/workflows/*.yml` (new step) | 0 (CI only) | ~30 lines YAML/awk |
+| Generated artifact | `htdocs/luci-static/design-x/data/oui.json.gz` (gitignored) | ~150 KB in IPK | n/a |
+| JS module | `htdocs/luci-static/resources/design-x/vendor.js` (new) | 0 (~5 KB) | ~80 |
+| Integration | `htdocs/luci-static/resources/design-x/devices.js` | 0 | ~10 |
+| License NOTICE | `root/usr/share/luci-theme-design-x/NOTICE` (new) | trivial | n/a |
+| Total IPK growth | | **~150 KB** | **~120 LOC** |
+
+### User decision (2026-05-24)
+
+**Rejected** report-recommended "independent `luci-app-mac-vendor-data` package"
+route. Reasoning: residential theme, single maintainer, single-IPK deployment
+is strictly better UX than double-package. **Effectiveness > MVC purity.**
+
+### Scheduling
+
+**Round 45 main work** (~4-5h, primary Round body). Touches Build CI + theme
+JS + new module + NOTICE file. Round 44 stays focused on bandwidth (conntrack)
++ WAN tile sparkline polish (both also discovery-DONE). Round 45 lands MAC
+vendor as its own coherent ship.
+
+### Future-proofing already designed in
+
+`vendor.js` `lookup(mac, hostHintVendor)` signature accepts an optional
+`hostHintVendor` parameter. If ImmortalWrt eventually backports `ufp` and
+exposes `host_hints.vendor`, switching to hybrid mode (upstream first,
+local fallback) is **a single-line caller change** in `devices.js`, not a
+re-architecture. See `doc/macvendor.md` §一.五 last paragraph.
+
+---
+
+## 🎯 Round 44 candidate — WAN Traffic tile sparkline fixes (discovery DONE)
+
+### Status (updated 2026-05-24, end of Round 43)
+
+User reported "during upload, the number was high but the dashed line was
+invisible; shortly after upload finished, the line suddenly appeared and
+looked correct". Chrome-Claude live-DOM measurements + source review on
+`sparkline.js` / `wan-stats.js` / `features.css` settled the diagnosis to
+**~33-line fix across 3 files**. Full plan in **`doc/wan_traffic.md`**.
+
+### Root cause (settled)
+
+Two-layer stacking:
+1. **P0 — `sharedHi` cross-ring quantum compression** (Step 139 Round 37):
+   `renderTileSpark` computes a shared Y-axis upper bound from
+   `max(rxHi, txHi)` across both rings. Any historical peak in either
+   direction (in the 2-min sliding window) compresses the other direction
+   into the bottom 10% of viewBox. Real bug. User's symptom matches exactly.
+2. **P1 — secondary line low visual contrast**: `opacity: 0.55` +
+   `dasharray: 3 2` + thin `stroke-width: 1.5` on a near-white tile
+   background → WCAG contrast ~1.5:1, far below readable. When the line is
+   drawn at viewBox top (no fill backdrop), it's nearly invisible. The
+   "appears after upload" perception comes from the line descending through
+   the green fill area where contrast suddenly improves.
+
+Chrome-Claude's other reported bugs (Bug #2 "only one path" and Bug #3
+"DOM not updating") are **false alarms** — selector mismatch + MutationObserver
+config issue, debunked in `doc/wan_traffic.md` §三.
+
+### What to read for full context
+
+- **`doc/wan_traffic.md`** — full audit: data flow, P0+P1+latent bugs,
+  refuted alternatives (mirror layout, `mode: 'bounded' | 'rate' | 'bipolar'`
+  abstraction, etc.), specific fix code with diff-level guidance,
+  verification protocol with DevTools console snippets, risk register
+
+### Path forward (recommended)
+
+3 atomic Steps, ~33 LOC net change, ~2.5h including verify:
+1. **Fix-1** (P0): remove `sharedHi` argument from primary+secondary
+   `path()` calls in `renderTileSpark` → each line auto-scales to its own
+   ring max. CPU/Mem/Temp single-line tiles unaffected (backward compat
+   preserved via path()'s undefined sharedHi)
+2. **Fix-2** (P1): CSS contrast bump — `opacity` 0.55 → 0.85,
+   `stroke-width` 1.5 → 2, `dasharray` "3 2" → "5 3"
+3. **Fix-3**: meta line shows both directions' peak — `Peak ↓X ↑Y` — to
+   compensate the visual magnitude relationship lost in Fix-1
+
+### Scheduling
+
+Fits cleanly in **Round 44** alongside the per-host bandwidth main work
+(those are unrelated files, no merge conflict). The 2.5h budget is small
+enough to be a Round 44 sub-track, not its own Round.
+
+### Verification gate before shipping
+
+Per `doc/wan_traffic.md` §六, must run two ground-truth checks on the live
+router first (5 min):
+```js
+// 1. Confirm secondary path actually exists (debunks Chrome-Claude Bug #2)
+document.querySelectorAll('#design-tile-net path').length      // expect 3
+// 2. Confirm renderTileSpark is firing (debunks Chrome-Claude Bug #3)
+new MutationObserver(m=>console.log(m))
+    .observe(document.querySelector('.design-tile-spark-line-secondary'),
+             { attributes: true, attributeFilter: ['d'] })
+// expect ~5 mutations over 10 seconds
+```
+If either check fails the entire `doc/wan_traffic.md` diagnosis needs
+re-examination — but predicted false positives < 5%.
+
+### Decision points awaiting user
+
+1. Schedule: ship Round 44 next, or defer for other rounds first?
+2. Tier 2 (zero deps) vs Tier 3 (+ 50 KB conntrack-tools)?
+3. Reboot persistence: yes / no / opt-in?
+4. nlbwmon coexistence probe in `traffic.js`?
 
 ---
 
