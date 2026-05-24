@@ -144,6 +144,46 @@ jobs:
           sys.exit(0 if ok else 1)
           PY
 
+      - name: Validate ucode template parses
+        # Round 42 Step 162: parallel to the Lua check above. ucode template
+        # syntax has three balanced delimiter pairs:
+        #   {% ... %}   statement blocks
+        #   {{ ... }}   expression substitutions
+        #   {# ... #}   comments (silent, stripped before counting)
+        # All three must be balanced (comments excluded from the count).
+        # We don't try to parse the ucode body (that's the ucode runtime's
+        # job) but unbalanced delimiters guarantee a 500 at render time,
+        # so catch them at PR time.
+        #
+        # LuCI 24.10+ prefers .ut over .htm. The Lua check above and this
+        # ucode check together cover both tracks of our dual-track templates
+        # (Round 42 Step 161).
+        run: |
+          python3 <<'PY'
+          import re, sys, glob
+          ok = True
+          paths = glob.glob('root/usr/share/ucode/**/*.ut', recursive=True)
+          if not paths:
+              print('No .ut files under root/usr/share/ucode/ — skipping')
+              sys.exit(0)
+          for path in paths:
+              src = open(path).read()
+              # Strip comments first so braces inside {# ... #} don't count.
+              no_comments = re.sub(r'\{#.*?#\}', '', src, flags=re.DOTALL)
+              block_open  = no_comments.count('{%')
+              block_close = no_comments.count('%}')
+              expr_open   = no_comments.count('{{')
+              expr_close  = no_comments.count('}}')
+              if block_open != block_close or expr_open != expr_close:
+                  print(f'FAIL {path}:')
+                  print(f'   {{% blocks: {block_open} open vs {block_close} close')
+                  print(f'   {{{{ exprs:  {expr_open} open vs {expr_close} close')
+                  ok = False
+              else:
+                  print(f'OK   {path}: {block_open} blocks, {expr_open} exprs')
+          sys.exit(0 if ok else 1)
+          PY
+
       - name: Forbid raw CJK in source files
         # See doc/upgrade.md §0.6 — all user-visible strings must be wrapped
         # in _() (JS) or <%:%> (Lua templates) with English text. Raw CJK
