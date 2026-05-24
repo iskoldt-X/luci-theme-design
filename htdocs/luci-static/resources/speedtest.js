@@ -404,6 +404,17 @@ return baseclass.extend({
 
 		btn.textContent = _('Testing latency (%d samples)…').replace('%d', PING_COUNT);
 
+		// Step 146 (Round 39):shared progress-text helper. Builds the live
+		// button label "Downloading… 23.4 / 50 MB (47%)" from received/total.
+		// Verb is i18n'd; numerals are not (no translation needed). Called
+		// at 10fps from testDownload/testUpload via the onProgress callback.
+		function progressText(verb, received, total) {
+			var receivedMB = (received / 1024 / 1024).toFixed(1);
+			var totalMB    = (total    / 1024 / 1024).toFixed(0);
+			var pct        = total > 0 ? Math.round((received / total) * 100) : 0;
+			return verb + ' ' + receivedMB + ' / ' + totalMB + ' MB (' + pct + '%)';
+		}
+
 		this.testLatency()
 			.then(function (l) {
 				if (l.median !== null) {
@@ -416,18 +427,33 @@ return baseclass.extend({
 				self.setStat('loss', l.loss.toFixed(0));
 				result.loss = l.loss;
 
-				btn.textContent = _('Testing download (%d MB)…').replace('%d', downloadBytes / 1024 / 1024);
-				return self.testDownload(downloadBytes);
+				// Step 146:live progress text + onProgress callback.
+				var verbDL = _('Downloading…');
+				btn.textContent = verbDL + ' 0 / ' + (downloadBytes / 1024 / 1024).toFixed(0) + ' MB (0%)';
+				return self.testDownload(downloadBytes, function (received, total) {
+					btn.textContent = progressText(verbDL, received, total);
+				});
 			})
 			.then(function (mbps) {
 				self.setGauge('download', mbps);
 				if (mbps !== null) result.download = mbps;
-				btn.textContent = _('Testing upload (%d MB)…').replace('%d', uploadBytes / 1024 / 1024);
-				return self.testUpload(uploadBytes);
+				// Step 146:save peak captured during the live test
+				if (self._lastTestPeak && isFinite(self._lastTestPeak.download)) {
+					result.peakDownload = self._lastTestPeak.download;
+				}
+				var verbUL = _('Uploading…');
+				btn.textContent = verbUL + ' 0 / ' + (uploadBytes / 1024 / 1024).toFixed(0) + ' MB (0%)';
+				return self.testUpload(uploadBytes, function (received, total) {
+					btn.textContent = progressText(verbUL, received, total);
+				});
 			})
 			.then(function (mbps) {
 				self.setGauge('upload', mbps);
 				if (mbps !== null) result.upload = mbps;
+				// Step 146:same for upload peak
+				if (self._lastTestPeak && isFinite(self._lastTestPeak.upload)) {
+					result.peakUpload = self._lastTestPeak.upload;
+				}
 
 				// Step 46: persist + refresh history.
 				if (result.latency !== null || result.download !== null || result.upload !== null) {
@@ -474,13 +500,26 @@ return baseclass.extend({
 
 		var list = E('ul', { 'class': 'speedtest-history-list' }, []);
 		history.forEach(function (entry) {
+			// Step 146 (Round 39):peak captured during live test (from
+			// 500ms window max). Show in tooltip so the history row stays
+			// compact but the info is preserved for hover inspection.
+			var dlTip = (entry.peakDownload && isFinite(entry.peakDownload))
+				? _('Avg') + ' ' + (entry.download || 0).toFixed(1) + ' Mbps · ' + _('Peak') + ' ' + entry.peakDownload.toFixed(1) + ' Mbps'
+				: '';
+			var ulTip = (entry.peakUpload && isFinite(entry.peakUpload))
+				? _('Avg') + ' ' + (entry.upload || 0).toFixed(1) + ' Mbps · ' + _('Peak') + ' ' + entry.peakUpload.toFixed(1) + ' Mbps'
+				: '';
 			list.appendChild(E('li', { 'class': 'speedtest-history-item' }, [
 				E('span', { 'class': 'speedtest-history-label' }, entry.label),
 				E('span', { 'class': 'speedtest-history-when' }, fmtAgo(entry.t)),
-				E('span', { 'class': 'speedtest-history-metric speedtest-history-metric-d' },
-					entry.download !== null ? '↓ ' + entry.download.toFixed(0) + ' Mbps' : '↓ —'),
-				E('span', { 'class': 'speedtest-history-metric speedtest-history-metric-u' },
-					entry.upload   !== null ? '↑ ' + entry.upload.toFixed(0)   + ' Mbps' : '↑ —'),
+				E('span', {
+					'class': 'speedtest-history-metric speedtest-history-metric-d',
+					'title': dlTip
+				}, entry.download !== null ? '↓ ' + entry.download.toFixed(0) + ' Mbps' : '↓ —'),
+				E('span', {
+					'class': 'speedtest-history-metric speedtest-history-metric-u',
+					'title': ulTip
+				}, entry.upload   !== null ? '↑ ' + entry.upload.toFixed(0)   + ' Mbps' : '↑ —'),
 				E('span', { 'class': 'speedtest-history-metric speedtest-history-metric-l' },
 					entry.latency  !== null ? entry.latency.toFixed(1)         + ' ms'   : '— ms')
 			]));
@@ -535,7 +574,7 @@ return baseclass.extend({
 	// Final mbps returned is the full-test average (more stable than
 	// last-window mbps for history records). Peak tracked separately in
 	// self._lastTestPeak for Step 146 history enrichment.
-	testDownload: function (bytes) {
+	testDownload: function (bytes, onProgress) {
 		bytes = bytes || DOWNLOAD_BYTES;
 		var self = this;
 		var t0 = performance.now();
@@ -561,7 +600,6 @@ return baseclass.extend({
 						clearTimeout(to);
 						var totalMs = performance.now() - t0;
 						var avgMbps = (received * 8) / (totalMs / 1000) / 1e6;
-						// Cache peak for runTest → history (Step 146)
 						self._lastTestPeak = self._lastTestPeak || {};
 						self._lastTestPeak.download = peakMbps;
 						return avgMbps;
@@ -579,6 +617,8 @@ return baseclass.extend({
 						var mbps     = winMs > 0 ? (winBytes * 8) / (winMs / 1000) / 1e6 : 0;
 						if (mbps > peakMbps) peakMbps = mbps;
 						self.setGauge('download', mbps);
+						// Step 146:button progress text. Same throttle as gauge.
+						if (onProgress) onProgress(received, bytes);
 					}
 					return pump();
 				});
@@ -596,7 +636,7 @@ return baseclass.extend({
 	// Same sliding-window + UI-throttle pattern as Step 143's testDownload,
 	// just driven by xhr.upload.onprogress (ev.loaded) instead of by
 	// reader.read() chunks. peakMbps tracked for Step 146.
-	testUpload: function (bytes) {
+	testUpload: function (bytes, onProgress) {
 		bytes = bytes || UPLOAD_BYTES;
 		var self    = this;
 		var payload = new Blob([new Uint8Array(bytes)]);
@@ -628,6 +668,8 @@ return baseclass.extend({
 					var mbps     = winMs > 0 ? (winBytes * 8) / (winMs / 1000) / 1e6 : 0;
 					if (mbps > peakMbps) peakMbps = mbps;
 					self.setGauge('upload', mbps);
+					// Step 146:button progress text. Same throttle as gauge.
+					if (onProgress) onProgress(ev.loaded, bytes);
 				}
 			};
 
