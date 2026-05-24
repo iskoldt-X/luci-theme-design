@@ -1337,15 +1337,28 @@
 }
 
 /* Column header strip — same grid as .devices-summary so labels align.
-   Round 43 Step 179: per Principle 10 (table header alignment) — ALL
-   column headers centered, regardless of how the data cell is
-   aligned. Data can stay left-aligned (DEVICE: icon + name) or
-   right-aligned (LEASE: "10h 4m ↓"); header sits centered above
-   its column. Linear / Vercel / Stripe dashboard convention. */
+   Round 43 Step 179 + 181: per Principle 10 (table header alignment) —
+   ALL column headers centered, but RELATIVE TO THE COLUMN'S ACTUAL
+   CONTENT WIDTH, not the full flex-column space.
+
+   Step 179 first try used `text-align: center` alone — but the
+   original `grid-template-columns: 1.4fr 0.9fr 0.9fr ...` stretches
+   each column to fill the row width, so "center" landed FAR to the
+   right of where the actual data sits at the column's left edge.
+   User screenshot showed DEVICE header floating in the middle of a
+   ~600px-wide column over data that ends at ~150px.
+
+   Step 181 fix: switch to `auto`-sized columns. Each column shrinks
+   to its widest content (data or header, whichever is larger).
+   Header centered within an auto column = centered over content
+   (since column width ≈ content width). Trailing whitespace on the
+   right of the card is fine — Linear/Stripe dashboards leave that
+   too when content is short. */
 .devices-thead {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1.4fr) minmax(120px, 0.9fr) minmax(140px, 0.9fr) 90px 90px 24px;
+    grid-template-columns: 32px auto auto auto auto auto 24px;
     gap: var(--space-3);
+    justify-content: start;
     padding: var(--space-2) var(--space-4);
     background: var(--color-surface-1);
     font-size: var(--text-xs);
@@ -1357,7 +1370,7 @@
     text-align: center;
 }
 /* First label spans icon + name cells (preview convention). DEVICE
-   header centers within the combined (icon + name) span. */
+   header centers within the combined (icon + name) auto span. */
 .devices-col-name { grid-column: 1 / 3; }
 
 .devices-rows {
@@ -1384,11 +1397,14 @@
    stays full opacity when expanded so the user can still read it. */
 .devices-row-offline .devices-summary { opacity: 0.55; }
 
-/* Summary row — 6-col grid matching the header */
+/* Summary row — must keep grid identical to .devices-thead so columns
+   line up vertically. Step 181: switched to `auto` widths to match
+   the thead change (see thead comment for rationale). */
 .devices-summary {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1.4fr) minmax(120px, 0.9fr) minmax(140px, 0.9fr) 90px 90px 24px;
+    grid-template-columns: 32px auto auto auto auto auto 24px;
     gap: var(--space-3);
+    justify-content: start;
     align-items: center;
     padding: var(--space-2) var(--space-4);
     min-height: 44px;
