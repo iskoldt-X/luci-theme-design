@@ -1758,6 +1758,125 @@ table > tr:last-child {
 	text-align: center !important;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * Round 43 Step 185 — Universal LuCI table upgrade
+ *
+ * Apply LAN Clients visual language to every read-only LuCI table.
+ * Chrome-Claude's Round 43 audit found that 80%+ of LuCI's "real table"
+ * surfaces render as either `<table class="table">` (real HTML table)
+ * or `<div class="table">` with nested `.tr`/`.th`/`.td` div-style
+ * (LuCI's flex-based fake-table). Both share the `.table` class hook,
+ * so a single CSS rule with both selector flavours covers:
+ *
+ *   - Status / Overview     UPnP port maps
+ *   - Status / Routes       IPv4 / IPv6 Neighbours, Active Routes, Rules
+ *   - Status / Software     opkg installed list
+ *   - Status / Startup      Initscripts (action buttons + service list)
+ *   - Services / UPnP page  (if luci-app-upnp installed)
+ *   - Any 3rd-party LuCI app that follows the `table.table` convention
+ *
+ * EXCLUDED via `:not(.cbi-section-table)`: form-style edit tables
+ * (Network/Interfaces, Network/Firewall Zones, etc). Those have inline
+ * dropdowns / inputs / toggle widgets that don't fit a read-only
+ * row layout. Handled separately in Step 188 if needed.
+ *
+ * Design language (mirrors LAN Clients via Principle 9):
+ *   - Header strip: muted small uppercase + tracking
+ *   - Hairline row separators (var(--color-border-subtle))
+ *   - Subtle hover highlight via surface-1
+ *   - LuCI's `.right` alignment hint on header cells is honored
+ *     (their convention — we don't fight it)
+ *   - Auto-mono on cells whose data-title matches common technical
+ *     column labels (IP / MAC / Network / Hash / Address); the
+ *     data-title attribute is LuCI's mobile-responsive label and
+ *     happens to be a perfect "column type" hook
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+/* Outer table — strip any decorative borders. Container `.cbi-section`
+   provides the card frame. */
+table.table:not(.cbi-section-table),
+.table:not(.cbi-section-table) {
+	border: 0;
+	background: transparent;
+}
+
+/* Header strip — small caps + tracking + muted, exactly matching LAN
+   Clients .devices-thead. Covers BOTH real <thead> and div-style
+   .thead / .tr.table-titles patterns. */
+table.table:not(.cbi-section-table) > thead > tr,
+table.table:not(.cbi-section-table) > thead > tr > th,
+.table:not(.cbi-section-table) > .thead > .tr,
+.table:not(.cbi-section-table) > .thead > .tr > .th,
+.table:not(.cbi-section-table) > .tr.table-titles,
+.table:not(.cbi-section-table) > .tr.table-titles > .th {
+	background: var(--color-surface-1);
+	font-size: var(--text-xs);
+	color: var(--color-text-muted);
+	font-weight: var(--weight-semibold);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	border-bottom: 1px solid var(--color-border-subtle);
+}
+
+/* Per-column header alignment follows LuCI's hint when present.
+   LuCI emits `class="th right"` on numeric / counter columns
+   (e.g. UPnP's "Expires" column, byte-count columns). Honor it. */
+table.table:not(.cbi-section-table) > thead > tr > th.right,
+.table:not(.cbi-section-table) > .thead > .tr > .th.right,
+.table:not(.cbi-section-table) > .tr.table-titles > .th.right {
+	text-align: right;
+}
+
+/* Data rows — hairline separator + subtle hover.
+   Excludes the title-row from being double-borderded. */
+table.table:not(.cbi-section-table) > tbody > tr,
+.table:not(.cbi-section-table) > .tbody > .tr,
+.table:not(.cbi-section-table) > .tr:not(.table-titles):not(.cbi-section-table-titles) {
+	border-bottom: 1px solid var(--color-border-subtle);
+	transition: background var(--motion-fast) var(--ease-out);
+}
+
+table.table:not(.cbi-section-table) > tbody > tr:hover,
+.table:not(.cbi-section-table) > .tbody > .tr:hover,
+.table:not(.cbi-section-table) > .tr:not(.table-titles):not(.cbi-section-table-titles):hover {
+	background: var(--color-surface-1);
+}
+
+table.table:not(.cbi-section-table) > tbody > tr:last-child,
+.table:not(.cbi-section-table) > .tbody > .tr:last-child,
+.table:not(.cbi-section-table) > .tr:last-child {
+	border-bottom: 0;
+}
+
+/* Auto-mono on cells whose data-title indicates a technical column.
+   LuCI emits data-title="<Label>" on cells for mobile responsive
+   stacking; we co-opt it as a column-type detector. Covers most
+   IP / MAC / hash / network address columns across the site. */
+table.table:not(.cbi-section-table) td[data-title*="Address" i],
+table.table:not(.cbi-section-table) td[data-title*="IP" i],
+table.table:not(.cbi-section-table) td[data-title*="MAC" i],
+table.table:not(.cbi-section-table) td[data-title*="Hash" i],
+table.table:not(.cbi-section-table) td[data-title*="Network" i],
+table.table:not(.cbi-section-table) td[data-title*="Hostname" i],
+.table:not(.cbi-section-table) .td[data-title*="Address" i],
+.table:not(.cbi-section-table) .td[data-title*="IP" i],
+.table:not(.cbi-section-table) .td[data-title*="MAC" i],
+.table:not(.cbi-section-table) .td[data-title*="Hash" i],
+.table:not(.cbi-section-table) .td[data-title*="Network" i],
+.table:not(.cbi-section-table) .td[data-title*="Hostname" i] {
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	letter-spacing: -0.01em;
+}
+
+/* Per-cell alignment follows .right hint (matches header convention). */
+table.table:not(.cbi-section-table) td.right,
+.table:not(.cbi-section-table) .td.right {
+	text-align: right;
+}
+
+/* ═══════════ End Round 43 Step 185 universal table upgrade ═══════════ */
+
 /* div > table > tbody > tr:nth-of-type(2n),
 div > .table > .tr:nth-of-type(2n) {
 	background-color: #f9f9f9;
