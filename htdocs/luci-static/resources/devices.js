@@ -292,9 +292,45 @@ return baseclass.extend({
 			setTimeout(L.bind(this.tryInject, this), 250);
 			return;
 		}
+		this.hideUpstreamDhcpSections();
 		this.injectCard();
 		this.refresh();
 		this._timer = setInterval(L.bind(this.refresh, this), 30000);
+	},
+
+	// Step 149 (Round 40):hide upstream LuCI 'Active DHCP Leases' and
+	// 'Active DHCPv6 Leases' sections on Overview only. The LAN Clients
+	// card is now the canonical device view (Steps 147-148 widen it to
+	// 1/1 and add MAC column + Set Static button), making those upstream
+	// sections redundant subsets.
+	//
+	// IMPORTANT — scope: this only fires when the LAN Clients card itself
+	// injects (devices.js __init__ already gates on node-admin-status-overview).
+	// The Network → DHCP/DNS configuration page (/admin/network/dhcp) is
+	// completely unaffected — that's where Set Static button (Step 148)
+	// navigates to for full DHCP config.
+	//
+	// Selector strategy: scan all .cbi-section in the view, look for child
+	// heading text matching /DHCP.*Leases/i (catches 'Active DHCP Leases',
+	// 'Active DHCPv6 Leases', and variant wording across LuCI versions).
+	// English-only matching by intent — for non-English LuCIs the upstream
+	// sections will remain visible, which is incomplete but not harmful;
+	// extension to localized strings is a future enhancement.
+	hideUpstreamDhcpSections: function () {
+		var view = document.getElementById('view');
+		if (!view) return;
+		var sections = view.querySelectorAll('.cbi-section');
+		for (var i = 0; i < sections.length; i++) {
+			var section = sections[i];
+			var headings = section.querySelectorAll('h2, h3, h4, .cbi-section-title');
+			for (var j = 0; j < headings.length; j++) {
+				var text = (headings[j].textContent || '').trim();
+				if (/DHCP.*Leases/i.test(text)) {
+					section.style.display = 'none';
+					break;
+				}
+			}
+		}
 	},
 
 	injectCard: function () {
