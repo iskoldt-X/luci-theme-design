@@ -60,6 +60,22 @@ var ICONS = {
 	error:   'i-alert-triangle'
 };
 
+// Round 42 Step 167: LuCI version whitelist for monkey-patching
+// ui.addNotification. The patch point is LuCI INTERNAL API (not
+// documented stable), so any LuCI release can move or rename it.
+// We only patch on major versions we've actually verified the wrap
+// works against; outside the range, skip silently and let LuCI's
+// native alert banner render unmodified. Codex P2-10.
+//
+// Verified range (as of Round 42, 2026-05-24): same as apply-modal.js
+// (LuCI majors 18 through 27 inclusive). Outside that band, degrade
+// to native.
+function isSupportedLuciVersion() {
+	if (!window.L || !L.env || typeof L.env.luciversion !== 'string') return false;
+	var major = parseInt(L.env.luciversion.split('.')[0], 10);
+	return !isNaN(major) && major >= 18 && major <= 27;
+}
+
 return baseclass.extend({
 	__init__: function() {
 		this.idCounter = 0;
@@ -112,6 +128,18 @@ return baseclass.extend({
 
 	_tryIntercept: function() {
 		var self = this;
+		// Round 42 Step 167: version pin. ui.addNotification is LuCI
+		// internal API — wrap only on versions we've verified. Outside
+		// the whitelist, leave LuCI alone and let its native banner
+		// renderer (cbi-notification div) handle calls unmodified.
+		if (!isSupportedLuciVersion()) {
+			if (console && console.log) {
+				console.log('toast: LuCI version outside whitelist; using native notification', {
+					luciversion: (window.L && L.env && L.env.luciversion) || '<unknown>'
+				});
+			}
+			return;
+		}
 		// Step 55: probe both the require-local `ui` and the LuCI singleton
 		// `L.ui`. In LuCI 26.x they SHOULD reference the same object, but
 		// the user's probe couldn't see `window.ui` directly, so we use

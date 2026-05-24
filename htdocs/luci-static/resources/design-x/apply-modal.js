@@ -164,6 +164,29 @@ function getChangesPromise() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Round 42 Step 167: LuCI version whitelist for monkey-patching
+// L.ui.changes.{displayChanges,apply}. The patch points are LuCI
+// INTERNAL API (not documented stable), so any LuCI release can move
+// or rename them. We only patch on major versions we've actually
+// verified the patch works against; outside the range, skip silently
+// and let LuCI's native Save&Apply modal handle the flow. Codex P2-10.
+//
+// Verified range (as of Round 42, 2026-05-24):
+//   18.06 — Lean lede secondary target
+//   19.07 — Lean lede legacy
+//   21.02 — OpenWrt mainstream
+//   23.05 — coolsnowwolf luci current
+//   24.10 — immortalwrt + openwrt current
+//   25.xx — buffer (assume same internal shape)
+//   26.xx — immortalwrt snapshot (verified live)
+//   27.xx — buffer
+// Outside this band (17.xx and older, 28.xx and newer), degrade to native.
+function isSupportedLuciVersion() {
+	if (!window.L || !L.env || typeof L.env.luciversion !== 'string') return false;
+	var major = parseInt(L.env.luciversion.split('.')[0], 10);
+	return !isNaN(major) && major >= 18 && major <= 27;
+}
+
 return baseclass.extend({
 	__init__: function () {
 		this.patch();
@@ -189,6 +212,18 @@ return baseclass.extend({
 
 	_tryPatch: function () {
 		var self = this;
+		// Round 42 Step 167: version pin. L.ui.changes.{apply,
+		// displayChanges} are LuCI internal API — patch only on
+		// versions we've verified. Outside the whitelist, leave LuCI
+		// alone and let its native modal handle Save&Apply.
+		if (!isSupportedLuciVersion()) {
+			if (console && console.log) {
+				console.log('apply-modal: LuCI version outside whitelist; using native flow', {
+					luciversion: (window.L && L.env && L.env.luciversion) || '<unknown>'
+				});
+			}
+			return;
+		}
 		// Step 58: also patch L.ui.changes.apply() — the Save & Apply button
 		// on config pages goes through THAT, not displayChanges. User
 		// reported clicking '保存并应用' still showed LuCI's native rollback
