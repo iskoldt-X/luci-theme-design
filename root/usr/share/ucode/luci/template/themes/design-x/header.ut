@@ -97,32 +97,33 @@
 	//   - "node-<path>"  → page-specific CSS (e.g. .node-admin-status-overview)
 	//                      Empty when no dispatch path (login form).
 	const reqpath = ctx?.request_path ?? [];
-	const authed  = (ctx?.authsession || !blank_page);
-	// Step 176 + 177 fix: derive a useful body class for the JS card
-	// injection guards to match against.
+	const authed  = ctx?.authsession ? true : false;
+	// Step 178 fix: `blank_page` (set by LuCI when rendering the sysauth
+	// login form) is the AUTHORITATIVE signal for "this is the login
+	// view, apply login-page CSS". It must override request_path because
+	// LuCI 24.10 preserves the original requested path in
+	// ctx.request_path even when serving the unauth login form:
 	//
-	// LuCI 24.10's ucode dispatcher serves Overview at /cgi-bin/luci/
-	// root URL for logged-in users (no redirect to /admin/status/
-	// overview). `ctx.request_path` is [] in that case. Our 6 Overview
-	// card modules (sparkline / wan-hero / speedtest / devices /
-	// traffic / quick-actions) all early-return when
-	// `body.classList.contains('node-admin-status-overview')` is
-	// false → on the root URL, no class → no cards inject → user
-	// sees a stripped-down Overview without our chrome.
+	//   user requests /cgi-bin/luci/admin/status/overview without auth
+	//   → LuCI returns the login form
+	//   → ctx.request_path is still ['admin','status','overview']
+	//   → without this fix we'd tag body with node-admin-status-overview
+	//   → login-page CSS (.node-main-login → radial gradient + card)
+	//     never fires → login form looks default/unstyled (Chrome-Claude
+	//     reported it looking "bootstrap-style")
 	//
-	// Fix: when request_path is empty AND user is logged in, tag the
-	// body with `node-admin-status-overview` directly. This is LuCI's
-	// default dispatch target for logged-in root, so the assumption is
-	// empirically correct >99% of the time. If LuCI is configured for
-	// a non-default landing page, the JS guards just early-return and
-	// no cards inject — same as before, no regression.
-	//
-	// `node-main-login` only emitted when actually NOT logged in (the
-	// real login-form scenario where the login-page CSS rules should
-	// apply).
-	const node_class = length(reqpath) > 0
-		? `node-${join('-', reqpath)}`
-		: (authed ? 'node-admin-status-overview' : 'node-main-login');
+	// Decision order:
+	//   1. blank_page or !authed → node-main-login (login form rendering)
+	//   2. explicit path → node-<path>
+	//   3. authed root URL → node-admin-status-overview (Overview default)
+	let node_class;
+	if (blank_page || !authed) {
+		node_class = 'node-main-login';
+	} else if (length(reqpath) > 0) {
+		node_class = `node-${join('-', reqpath)}`;
+	} else {
+		node_class = 'node-admin-status-overview';
+	}
 	const auth_class = authed ? 'logged-in' : '';
 -%}
 	<body class="lang_{{ dispatcher.lang }} {{ auth_class }} {{ node_class }}" data-page="{{ entityencode(join('-', reqpath), true) }}">
