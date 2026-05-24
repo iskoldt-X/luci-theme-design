@@ -1,0 +1,203 @@
+name: Cross-branch build matrix
+
+# Round 42 Step 169: weekly cross-branch sanity check.
+#
+# Catches regressions where our theme's Makefile / LUCI_DEPENDS /
+# shipped paths break against one of the 4 upstream LuCI flavours we
+# claim to support. Each matrix cell:
+#   1. Clones the upstream openwrt source for (org, branch)
+#   2. Adds our theme as a package symlink
+#   3. Sets up feeds + minimal .config
+#   4. Runs `make defconfig` and verifies our CONFIG_PACKAGE_luci-theme-
+#      design-x=y is preserved (a defconfig-silent-drop means a dep
+#      failed — the failure mode this job exists to catch)
+#   5. Runs `make package/luci-theme-design-x/prepare V=s` which extracts
+#      our source and walks the Makefile far enough to surface syntax /
+#      template / version errors WITHOUT triggering the multi-hour
+#      toolchain build that a full compile needs.
+#
+# We do NOT run `make package/.../compile` here — that requires building
+# the toolchain first (~hour per matrix cell). Step 160's lint.yml
+# "Check for luci-base path collisions" job already catches the failure
+# mode that DEFINITELY needs a full pack (file ownership). The prepare
+# step catches the rest at a fraction of the cost.
+#
+# Cron: Mondays 03:00 UTC. Manual dispatch also available for ad-hoc.
+# If any matrix cell fails, the workflow is red; future enhancement
+# is auto-opening an issue with the failed matrix entries listed.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 4 upstream LuCI flavours × the openwrt branch they live in.
+          # Architecture is set per-cell to capture cases where a
+          # target-specific dep resolution would differ.
+          - name: immortalwrt-24.10-x86_64
+            repo_url: https://github.com/immortalwrt/immortalwrt
+            repo_branch: openwrt-24.10
+            target: x86_64-generic
+          - name: immortalwrt-24.10-mt7986
+            repo_url: https://github.com/immortalwrt/immortalwrt
+            repo_branch: openwrt-24.10
+            target: mediatek-filogic
+          - name: immortalwrt-master-x86_64
+            repo_url: https://github.com/immortalwrt/immortalwrt
+            repo_branch: master
+            target: x86_64-generic
+          - name: openwrt-24.10-x86_64
+            repo_url: https://github.com/openwrt/openwrt
+            repo_branch: openwrt-24.10
+            target: x86_64-generic
+          - name: openwrt-24.10-mt7986
+            repo_url: https://github.com/openwrt/openwrt
+            repo_branch: openwrt-24.10
+            target: mediatek-filogic
+          - name: lean-master-x86_64
+            repo_url: https://github.com/coolsnowwolf/lede
+            repo_branch: master
+            target: x86_64-generic
+          - name: lean-master-mt7986
+            repo_url: https://github.com/coolsnowwolf/lede
+            repo_branch: master
+            target: mediatek-filogic
+
+    name: ${{ matrix.name }}
+
+    steps:
+      - name: Checkout theme
+        uses: actions/checkout@v5
+        with:
+          path: theme-src
+
+      - name: Install build prerequisites
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+              build-essential ccache ecj fastjar file g++ gawk \
+              gettext git java-propose-classpath libelf-dev libncurses5-dev \
+              libncursesw5-dev libssl-dev python3 python3-distutils \
+              python3-setuptools rsync subversion swig time unzip wget \
+              xsltproc zlib1g-dev || true
+
+      - name: Clone upstream openwrt source (${{ matrix.repo_branch }})
+        run: |
+          git clone --depth=1 ${{ matrix.repo_url }} -b ${{ matrix.repo_branch }} openwrt
+          echo "openwrt HEAD: $(git -C openwrt rev-parse --short HEAD)"
+
+      - name: Link theme into package tree
+        run: |
+          # Use symlink so any source change picks up immediately. The package
+          # NAME is luci-theme-design-x (per Round 42 Step 159's PKG_NAME).
+          ln -s "$GITHUB_WORKSPACE/theme-src" "openwrt/package/luci-theme-design-x"
+          ls -la openwrt/package/luci-theme-design-x/Makefile
+
+      - name: Update + install feeds
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a 2>&1 | tail -10
+          ./scripts/feeds install -a 2>&1 | tail -10
+
+      - name: Configure ${{ matrix.target }}
+        run: |
+          cd openwrt
+          # Minimal target config — let defconfig fill the rest.
+          case "${{ matrix.target }}" in
+              x86_64-generic)
+                  echo 'CONFIG_TARGET_x86=y'                       >> .config
+                  echo 'CONFIG_TARGET_x86_64=y'                    >> .config
+                  echo 'CONFIG_TARGET_x86_64_DEVICE_generic=y'     >> .config
+                  ;;
+              mediatek-filogic)
+                  echo 'CONFIG_TARGET_mediatek=y'                  >> .config
+                  echo 'CONFIG_TARGET_mediatek_filogic=y'          >> .config
+                  echo 'CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-ubootmod=y' >> .config
+                  ;;
+          esac
+          echo 'CONFIG_PACKAGE_luci-theme-design-x=y' >> .config
+          make defconfig 2>&1 | tail -10
+
+      - name: Verify our package survived defconfig
+        run: |
+          cd openwrt
+          # A silent drop of CONFIG_PACKAGE_luci-theme-design-x=y means
+          # one of LUCI_DEPENDS couldn't resolve — exactly the regression
+          # this job exists to catch.
+          if ! grep -q '^CONFIG_PACKAGE_luci-theme-design-x=y' .config; then
+              echo "❌ FAIL: luci-theme-design-x was dropped by defconfig."
+              echo "   This usually means a LUCI_DEPENDS (currently +luci-base"
+              echo "   +luci-lua-runtime) couldn't resolve in this feed setup."
+              echo
+              echo "Available luci-theme-* packages in this feed:"
+              find feeds -name Makefile -path '*luci-theme*' | head -5
+              echo
+              echo "Our resolved deps:"
+              grep -E '^(PKG_NAME|LUCI_DEPENDS|PKG_CONFLICTS)' package/luci-theme-design-x/Makefile || true
+              exit 1
+          fi
+          echo "✅ luci-theme-design-x=y preserved by defconfig"
+
+      - name: Prepare package (Makefile syntax + extract + structure check)
+        run: |
+          cd openwrt
+          # The prepare step extracts our source and runs all Makefile
+          # dispatch logic short of the actual compile. Catches:
+          # - Makefile syntax errors
+          # - missing files referenced in the Makefile
+          # - LUCI_DEPENDS that name nonexistent packages
+          # - PKG_CONFLICTS with malformed names
+          make package/luci-theme-design-x/prepare V=s 2>&1 | tee /tmp/prepare.log | tail -30
+          if grep -qE 'Makefile:.*\*\*\*|FAILED|error[: ]' /tmp/prepare.log; then
+              echo "❌ FAIL: prepare emitted errors"
+              tail -80 /tmp/prepare.log
+              exit 1
+          fi
+          echo "✅ prepare passed"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "================================================"
+          echo "Matrix cell: ${{ matrix.name }}"
+          echo "Upstream:    ${{ matrix.repo_url }} @ ${{ matrix.repo_branch }}"
+          echo "Target:      ${{ matrix.target }}"
+          echo "Result:      ${{ job.status }}"
+          echo "================================================"
+
+  summarize:
+    name: matrix summary
+    runs-on: ubuntu-24.04
+    needs: matrix
+    if: always()
+    steps:
+      - name: Report matrix status
+        run: |
+          # If we got here at all, the matrix completed. The `needs: matrix`
+          # with `if: always()` means we report even on failure. Failures of
+          # specific cells are surfaced via GitHub's matrix UI.
+          if [ "${{ needs.matrix.result }}" = "success" ]; then
+              echo "✅ Every matrix cell passed."
+          else
+              echo "❌ One or more matrix cells failed — see individual job logs."
+              echo "   Failure here means our theme's ipk doesn't pack cleanly"
+              echo "   against one or more (upstream luci × target) combinations."
+              echo "   Most likely causes: a Makefile change that didn't account"
+              echo "   for an older luci feed, a LUCI_DEPENDS addition that the"
+              echo "   target feed doesn't have, or a path collision with the"
+              echo "   target's luci-base (see lint.yml collision-check)."
+              exit 1
+          fi
