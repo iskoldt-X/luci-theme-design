@@ -36,6 +36,22 @@
 6. **数据 > 容器** —— 卡片是数据的衬托，不是主角。卡片不要竞争注意力。
 7. **性能即设计** —— 路由器嵌入式浏览器、4G 移动网络都是真实场景。CSS 不超过 60 KB、不加载 web font 是硬约束。
 8. **不为截图设计** —— 设计为每天用 10 次的人服务，不为发 Hacker News 服务。
+9. **形态适配信息(节奏感)** —— 同一个 overview 上有"表格""key-value 列表""带进度条的 KV""卡片"等多种信息形态。**每种形态都有它最佳表达,不强求统一**。Round 43 Chrome-Claude 提出 + 用户拍板永久原则。
+
+   - LAN Clients 是**"表格的样板"** —— 真正多行 × 多列的数据。表头大写 letter-spacing,IP/MAC 等宽,Signal pill,Lease emerald + 箭头。
+   - System / UPnP port table = **真表格**,该跟着 LAN Clients 的对齐 + 字号梯度 + 表头处理。
+   - Hostname / Uptime / Load / CPU% = **key-value 形态**,定义列表风格(label 浅灰小字、value 正常字号),**不**套表格 wrapper。
+   - Memory / Active Connections / Online Users = **key-value-with-bar**,同上。
+   - 唯一 polish: KV 列表里像 Firmware Version / Kernel Version / IP / MAC / Hash 这种**技术字符串**用 mono 字体(取得"高级感"而不破坏 KV 形态)。
+   - **让真表格都长得像 LAN Clients,让 key-value 卡保持 key-value 的样子。** 这样 overview 才有节奏感,不变成"风格强迫症"。
+
+10. **表头对齐策略** —— Round 43 用户拍板永久规则。
+
+    **所有表头居中**。但不是 column 整个空间的居中,而是**相对于该列实际内容的左右边界的居中** —— column 宽度应跟随内容,不留过多空白让 header"漂浮"。
+    
+    具体应用:数据 cell 可以左对齐(如 DEVICE 列的图标 + 名字)、右对齐(如 LEASE 列的剩余时间)或居中(如 SIGNAL pill)—— 数据各自走最自然的对齐;**表头一律居中**,跟所在 column 走。
+    
+    CSS 实现:对 `<th>` / grid-header cell 用 `text-align: center`(配合 column 宽度本身跟内容走)。
 
 ---
 
