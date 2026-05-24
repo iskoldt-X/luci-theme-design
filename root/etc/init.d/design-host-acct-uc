@@ -33,8 +33,12 @@ start_service() {
     # doc/bandwith.md §5 Tier 3 + memory/luci-26-response-class-hijack.md
     # for context on the LuCI 26.x quirk family.
     if [ ! -x "$CONNTRACK_BIN" ]; then
+        # Round 44 Step 222: the package name is `conntrack` (not
+        # `conntrack-tools` and NOT `conntrackd` — conntrackd is the
+        # replication daemon, separate package). Hint the user at the
+        # right install command.
         logger -t design-host-acct \
-            "conntrack binary missing (need conntrack-tools) — service not started"
+            "conntrack binary missing — install with: opkg install conntrack"
         return 1
     fi
     if [ ! -x "$DAEMON_SCRIPT" ]; then

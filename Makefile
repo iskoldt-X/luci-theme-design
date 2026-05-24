@@ -28,7 +28,16 @@ LUCI_DESCRIPTION:=Modern LuCI theme. Round 42 fork from luci-theme-design \
   to /www/luci-static/design-x/, mutually exclusive with the legacy \
   luci-theme-design package via PKG_CONFLICTS.
 LUCI_DEPENDS:=+luci-base +luci-lua-runtime \
-	+conntrack-tools
+	+conntrack
+# Round 44 Step 222: dep name. ImmortalWrt 24.10 splits the old
+# `conntrack-tools` meta-package into `conntrack` (command-line tool,
+# the binary we need at /usr/sbin/conntrack) and `conntrackd`
+# (replication daemon, NOT what we want). Verified on the user's box:
+#   opkg list | grep -iE '^conntrack'
+#     conntrack  - 1.4.8-r1 - Conntrack is a userspace command line program
+#     conntrackd - 1.4.8-r1 - Conntrackd can replicate the status of...
+# Don't switch to `conntrack-tools` without re-verifying — it doesn't
+# exist as an opkg target in the current ImmortalWrt feeds.
 
 # Hook definitions MUST come BEFORE include luci.mk — luci.mk's trailing
 # `$(eval $(call BuildPackage,...))` materialises the package definition,
