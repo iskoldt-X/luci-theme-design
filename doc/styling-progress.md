@@ -3502,6 +3502,216 @@ if (self._lastTestPeak && isFinite(self._lastTestPeak.download))
 
 ---
 
+## 🚨 第四十轮(Step 147-153):LAN Clients 接管 DHCP Leases — 包含项目首次生产事故
+
+> 触发:Chrome-Claude 报告 LAN Clients 卡和 LuCI 原生 Active DHCP Leases 表 ~90% 信息重复,LAN Clients 因 1/3 layout 太挤、device name 全部截断。整合方向:LAN Clients 升为 1/1,加 MAC 列 + Set Static 按钮,然后**隐藏**原生 DHCP/DHCPv6 sections。
+>
+> 7 个 Step,3 个干净 ship + 2 个"修没修干净"补丁(Step 149→150→151 反复)+ 1 个**生产事故引入**(Step 152) + 1 个**postmortem 修复**(Step 153)。本轮是项目 153 个 Step 里**第一次有 ship 代码在用户路由器上造成实际服务停摆**。
+
+### Step 147 — LAN Clients 1/3 → 1/1 wide
+
+Round 30 Step 114 把 devices-card / speedtest-card / traffic-card 三个 1/3 auto-fit。Round 38 Step 141 试图给 grid columns 加 `minmax(0, 1fr)` 救 name 列,部分有效但 1/3 layout 下仍挤(name 列只剩 ~24px)。
+
+修法一行 CSS:
+```css
+.node-admin-status-overview #view > .devices-card { grid-column: 1 / -1; }
+```
+
+speedtest/traffic 保留 auto-fit,只 devices opt-out 拿全宽 ~1100px。这给 Step 148 加 MAC 列腾出空间,也给 Step 149 隐藏 DHCP 表打下基础(canonical view 接管之后,redundant section 才能撤)。
+
+### Step 148 — `+MAC` 列 + Set Static 按钮 + minute Lease
+
+grid 6 列 → 7 列:`32px minmax(0, 1.4fr) minmax(120px, 0.9fr) minmax(140px, 0.9fr) 90px 90px 24px` = icon / Name / IP / MAC / Sig / Lease / chev。MAC 从 detail-only 升到主行,与 IP 共享 mono/tabular 样式。
+
+第 5 个 action button "Set Static →"(`btn-secondary` + → 后缀)插在 Whitelist 和 Limit 之间。click handler 用 `L.url('admin/network/dhcp')` 跳转 LuCI 原生 DHCP 配置页 —— 因为 Overview 不适合做完整 static lease 配置(modal 太多字段),而原生页面是 canonical 入口。**Rename ≠ Set Static** 的语义边界从此清晰。
+
+`formatLeaseRemaining()` 新 helper:`< 1h` 显示 `Xm`,`< 1d` 显示 `Xh Ym`,`≥ 1d` 显示 `Xd Yh`。匹配 LuCI 原生 DHCP 表的秒级精度但去掉每秒抖动。
+
+### Step 149-151 — 隐藏原生 Active DHCP/DHCPv6 sections(三次迭代)
+
+Step 149 第一次尝试:JS 扫 `.cbi-section`,找 child h2/h3/h4 textContent 含 "DHCP Leases" → `style.display='none'`。
+
+**用户实测:section 仍可见**。
+
+Step 150 第二次尝试(patch):扩 heading selectors(加 legend / .cbi-section-title / .cbi-section-descr)+ parentElement walk-up 找容器(cbi-section / cbi-map / fieldset)+ fallback 隐藏 heading + nextElementSibling + MutationObserver 监听 10s 兜底异步追加。控制台 log `'hid N sections'` 帮验证。
+
+**用户实测:console log 出现 `hid 2 sections`,但 section 仍可见**。
+
+矛盾。让用户跑 DOM ancestry dump:
+
+```js
+Array.from(document.querySelectorAll('h1,h2,h3,h4,legend'))
+  .filter(h => /DHCP.*Leases/i.test(h.textContent))
+  .forEach(h => { ...print chain to body... });
+```
+
+输出揭示真相:
+```
+Active DHCP Leases ← DIV.cbi-section.fade-in > DIV > H3
+  next sibling: TABLE#status_leases.table.lases
+Active DHCPv6 Leases ← DIV.cbi-section.fade-in > DIV > H3
+  next sibling: TABLE#status_leases6.table.leases6
+```
+
+**两个 DHCP heading 共享同一个外层 `.cbi-section.fade-in`**,各包在匿名 inner DIV 里。`fade-in` class 暗示 LuCI 有动画驱动的 rerender —— **我们 `style.display='none'` 后,LuCI 把该 element 替换重渲,inline style 丢失**。MutationObserver 10s 后断开,之后任何 rerender 都让 section 复活。
+
+Step 151 第三次尝试(real fix):**纯 CSS `:has()` + stable ID 锚定**:
+```css
+.node-admin-status-overview #view div:has(> #status_leases),
+.node-admin-status-overview #view div:has(> #status_leases6) {
+    display: none !important;
+}
+```
+
+`#status_leases` / `#status_leases6` 是 LuCI 17.x → 26.x 都稳定的 ID。`:has(> X)` 选父级。`!important` 不会被 LuCI rerender 覆盖,因为 LuCI 不在 inline style 上加 important。
+
+**用户实测:section 消失,/admin/network/dhcp 完整页面不受影响**。
+
+JS hide(Step 149/150)保留作 belt-and-suspenders(老浏览器 fallback),但 CSS 是主力。
+
+### Step 152 — actionRename 写 UCI(**引入事故**)
+
+Round 4 Step 44 ship 的 actionRename 用 localStorage 缓存改名,toast 明说"this browser only — UCI persistence coming later"。Step 152 是兑现这个 follow-up:
+
+```js
+actionRename: function (mac, currentName) {
+    var next = window.prompt(_('Rename this device') + ' (' + mac + ')', currentName);
+    if (next === null) return;
+    next = next.trim();
+    // ... 乐观 UI localStorage + DOM 更新 ...
+    uci.load('dhcp').then(function () {
+        // 找/创建 config host section,只填 mac + name (不绑 IP)
+        uci.set('dhcp', sid, 'name', next);
+        return uci.save();
+    }).then(function () {
+        return uci.apply();   // 触发 dnsmasq reload
+    }).then(...).catch(...);
+}
+```
+
+逻辑看起来干净。**但有个致命漏洞**:`next.trim()` 之后**没有任何 hostname 合法性校验**。用户输入什么都直接写 UCI。
+
+ship 时间 `Sun May 24 03:37:47 2026 +0200`。
+
+### 项目首次生产事故 — 03:37:47 → 10:21:00,LAN-wide DHCP+DNS 中断 ~7 小时
+
+事故时间线(用户配合 SSH 诊断,日志重建):
+
+```
+03:37:47  Step 152 commit,dev-sync 几秒内推送到路由器
+03:38:??  用户(熬夜测试中)点 LAN Clients 卡 → Rename → 输入 "MacBook Pro A"
+          (一个含两个空格的合法 macOS 设备名字)
+          Step 152 actionRename 接受,无校验,uci.set('dhcp', sid, 'name', 'MacBook Pro A')
+          uci.commit + uci.apply 触发 dnsmasq reload
+          /etc/config/dhcp 新增:
+            config host
+                option mac '6A:0F:4A:85:FF:72'
+                option name 'MacBook Pro A'    ← 含空格
+03:38:54  dnsmasq 重启,读 /var/etc/dnsmasq.conf.cfg01411c 第 27 行
+          dhcp-host=6A:0F:4A:85:FF:72,MacBook Pro A
+          dnsmasq 报错:"bad DHCP host name at line 27"
+          (dnsmasq 严格遵守 RFC 952/1123:hostname 只接受 [a-zA-Z0-9-],
+           不许空格/underscore/unicode/标点)
+          dnsmasq 退出 exit code != 0
+03:38:54-03:39:19  procd 6 次重试,每 5 秒一次,全部相同错误退出
+03:39:19  procd 投降:"Instance dnsmasq is in a crash loop, giving up"
+          dnsmasq 此后再也没起来
+03:39:20+ LAN 无 DHCP 服务器、无 DNS 解析器
+          已有租约的设备仍能用 DNS(Mac 因 Tailscale 走 100.100.100.100 没受影响)
+          iPhone DHCP 续约/重连尝试全部超时
+          用户 iPhone 重启无效(问题在路由器,不在 iPhone)
+~04:00    用户睡觉
+~09:30    用户醒,iPhone 仍连不上 Wi-Fi
+~09:50    用户报告"路由器变慢了"
+10:00+    诊断阶段开始(用户拒绝盲目重启,要求先定位)
+10:21     dnsmasq 通过 uci set + commit + start 恢复
+10:21+    iPhone 在 30-120 秒内自动重连 + 拿到 IP + 恢复上网
+```
+
+### Step 153 — postmortem 修复:`sanitizeHostname()` + UI 反馈
+
+```js
+function sanitizeHostname(input) {
+    if (!input) return '';
+    return input
+        .trim()
+        .replace(/[\s_]+/g, '-')          // whitespace/underscore → hyphen
+        .replace(/[^a-zA-Z0-9-]/g, '')    // strip non-alphanumeric-hyphen
+        .replace(/-+/g, '-')              // collapse consecutive hyphens
+        .replace(/^-+|-+$/g, '')          // strip leading/trailing hyphens
+        .substring(0, 63)                 // RFC 1035 label limit
+        .replace(/-+$/, '');              // re-strip if truncation left hyphen
+}
+```
+
+actionRename 改造:
+
+```js
+var raw = window.prompt(
+    _('Rename device') + ' — ' + _('letters, digits, hyphens only') +
+    '\n(' + _('e.g.') + ' MacBook-Pro-A) — ' + mac,
+    currentName
+);
+if (raw === null) return;
+raw = raw.trim();
+var next = raw === '' ? '' : sanitizeHostname(raw);
+
+if (raw !== '' && next === '') {
+    toastSafe('error', _('Invalid hostname — use letters, digits, and hyphens only'));
+    return;
+}
+if (next === currentName) return;
+if (next !== raw && next !== '') {
+    toastSafe('info', _('Saving as') + ' "' + next + '"');
+}
+// ... 后续 UCI write 用 sanitized next ...
+```
+
+**转换表**:
+
+| 输入 | sanitize 后 | UI 反馈 |
+|---|---|---|
+| `MacBook Pro A` | `MacBook-Pro-A` | info toast 告知 |
+| `iPad (Adam's)` | `iPad-Adams` | info toast |
+| `iPhone-12` | `iPhone-12`(不变) | 无 toast |
+| `''`(空,清除 rename) | `''` | 无 toast,删除 UCI 条目 |
+| `!@#$` 纯特殊字符 | `''`(拒绝) | error toast |
+| `我的手机` 纯中文 | `''`(拒绝) | error toast |
+| 100 字符长名 | 截断到 63 字符 | info toast |
+
+**保证**:dnsmasq 不可能再因 actionRename 输入崩溃。
+
+### 📊 第四十轮(Step 147-153)累计
+
+| 指标 | 第三十九轮后 | 第四十轮后 |
+|---|---|---|
+| LAN Clients 卡布局 | 1/3 auto-fit,name 列 ~24px ellipsis | 1/1 全宽,name 1.4fr,IP/MAC 均显 |
+| 列数 | 6(icon/name/ip/sig/seen/chev) | 7(+ MAC) |
+| Action buttons | 4(rename/whitelist/limit/block) | 5(+ Set Static →) |
+| Lease 格式精度 | `Xh left` | `Xh Ym` 分钟级 |
+| Overview 上 DHCP/DHCPv6 sections | 显示(跟 LAN Clients 90% 重复) | 隐藏(CSS `:has()`) |
+| actionRename 持久化 | localStorage 仅本浏览器 | UCI /etc/config/dhcp 系统级 + dnsmasq reload |
+| hostname 校验 | ❌ Step 152 无 → 引入事故 | ✅ Step 153 sanitize + 反馈 |
+| 项目生产事故数 | 0 | **1**(Step 152 引入,Step 153 修复) |
+
+## 🎯 Round 40 横向观察 + Postmortem
+
+**项目首次生产事故 — "UCI 接受不等于服务接受"**:dnsmasq 是**硬拒绝崩溃**型服务,启动时检查 config,失败就 exit,procd 6 次后放弃。LAN 基础服务(DHCP/DNS)挂了 7 小时。事故根因是**我自己**在 Step 152 写的 actionRename 没做客户端 hostname 校验。UCI 本身是 key/value 存储,**它接受任何字符串**,真正的校验在消费方(dnsmasq)启动时才做 —— 而那时已经太晚。**教训**:**任何写 UCI 配置的代码,都必须按目标服务的输入规则做客户端校验,而不是依赖 uci.apply() 返回错误**(uci.apply 返回成功,即使 dnsmasq 随后崩溃)。已落地为新 memory `uci-write-needs-service-validation.md`,含完整 sanitize 模板 + 恢复命令。
+
+**"诊断比修复重要十倍" — 用户的方法论是对的**:事故发生后,我第一反应是 "iPhone 问题应该是 TP-Link AP",带偏方向 30 分钟。**用户坚持"先定位再动手,不要重启任何服务"**,逼我做严格的 Phase 1→2→3→… 隔离测试。最后通过 `ps w | grep dnsmasq`(空)+ `logread | grep dnsmasq`(看到 "bad DHCP host name at line 27")**5 分钟就锁定**。如果当时盲目重启 dnsmasq 一次,虽然会"修好",但**我们永远不会知道根本原因**,也就不会有 Step 153,下一次同样的事故还会发生。**"先观察,后动手"是真正的工程纪律**,跟"赶紧让用户能用"是不同维度的优先级 —— 当事故已经持续 7 小时,多 30 分钟诊断不会让局面更糟,但能换来永久修复。
+
+**Mac 端 Tailscale 红色鲤鱼**:诊断早期我发现 Mac 的 DNS 是 `100.100.100.100`(Tailscale MagicDNS),Router → Mac ping 100% 丢包。我一度认为这是事故主线。**实际上 Mac 跟 iPhone 故障无关** —— iPhone 没 Tailscale,故障在 dnsmasq。Mac 的 Tailscale 行为是**另一个独立但同时存在**的现象。教训:**多条异常不一定同源**,不能把所有奇怪现象往一个 hypothesis 里塞。每个症状要独立验证。用户提醒我"iphone 上 tailscale 没开着,解释不通的"是关键转折,让我重新聚焦。
+
+**Step 149 → 150 → 151 三次迭代是经典 "JS-vs-CSS rerender war"**:LuCI 的 `.fade-in` class 暗示动画驱动的元素替换,我们 JS 写的 inline `display:none` 在每次 rerender 后丢失。MutationObserver 也只能撑 10 秒。**真正的修法是用 CSS `:has(#stableID)` + `!important`** —— CSS 规则在每次 layout pass 都重新应用,不会被 LuCI 替换元素干掉,而 `!important` 不会被 LuCI 的 inline style 战胜(LuCI 不用 important 在 inline 上)。教训:**遇到"我刚 hide 它就又出来"的 JS-vs-rerender 场景,先想 CSS 规则路径,JS 是 last resort**。CSS 是 declarative + 重新应用,JS 是 imperative + 一次性 —— rerender 战场是 CSS 主场。
+
+**":has() + stable ID" 是 LuCI 主题化又一个 power tool**:Round 32-33 学到 file-override(rsync no-delete + 同名 SVG)是覆盖 LuCI 上游图标的最优雅方式。Round 40 Step 151 又添一招:**`:has(#stableUpstreamID)` 可以在不动 LuCI HTML 的前提下,通过稳定的 element ID 隐藏/改造 LuCI section**。这两招加起来,我们对 LuCI 上游 HTML 的"无创干预"能力非常强 —— 几乎所有 cosmetic 改造都不需要 fork 模板。
+
+**"function correct, input wrong" 第二次出现**:Step 137 是 fmtBpsSplit() 函数对,但 6 个 consumer 传 Bytes/sec 当 bits/sec(单位错)。Step 152 是 `uci.set('dhcp', sid, 'name', input)` 函数对(LuCI API 没问题),但 `input` 没校验(语义错)。两次都不是 API bug,是**输入侧的语义校验缺失**。教训:**任何接受用户输入并写入持久化存储的代码,必须有明确的"输入规约"文档(input contract),并在 caller 处校验**。Step 153 的 sanitizeHostname 就是这个 contract 的实例化。
+
+**Round 40 是迭代 + 事故 + 复盘的浓缩**:7 个 Step 里 1 个引入事故、1 个修复事故、3 个修一个 hide 问题(149→150→151)、3 个干净 ship(147/148/152 不算事故部分)。**Step 154+ 应该开始"代码 review"心态**:任何写 UCI / 改 service config / 触发 reload 的 Step,主动加入"输入规约校验" + "失败回滚"两层防御。Round 40 是项目从"快速迭代 ship"过渡到"production-grade ship"的分水岭 —— 因为我们已经在用户实际生产环境跑了,任何 ship 都有"造成停摆"的能力。
+
+---
+
 ## 📊 第三轮（Step 21 + 22）累计变化（更新）
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
