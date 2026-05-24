@@ -27,17 +27,20 @@ LUCI_DESCRIPTION:=Modern LuCI theme. Round 42 fork from luci-theme-design \
   to escape file-collisions with immortalwrt 24.10's luci-base. Installs \
   to /www/luci-static/design-x/, mutually exclusive with the legacy \
   luci-theme-design package via PKG_CONFLICTS.
-LUCI_DEPENDS:=+luci-base +luci-lua-runtime \
-	+conntrack
-# Round 44 Step 222: dep name. ImmortalWrt 24.10 splits the old
-# `conntrack-tools` meta-package into `conntrack` (command-line tool,
-# the binary we need at /usr/sbin/conntrack) and `conntrackd`
-# (replication daemon, NOT what we want). Verified on the user's box:
-#   opkg list | grep -iE '^conntrack'
-#     conntrack  - 1.4.8-r1 - Conntrack is a userspace command line program
-#     conntrackd - 1.4.8-r1 - Conntrackd can replicate the status of...
-# Don't switch to `conntrack-tools` without re-verifying — it doesn't
-# exist as an opkg target in the current ImmortalWrt feeds.
+LUCI_DEPENDS:=+luci-base +luci-lua-runtime
+# Round 44 Step 223: dropped `+conntrack`. Empirically verified on user's
+# ImmortalWrt 24.10 router (Chrome-Claude Round 44 batch verify,
+# 2026-05-25) that `conntrack -E -e destroy` produces ZERO events under
+# default flow_offloading=1,flow_offloading_hw=1 — the offload fastpath
+# retires flows without firing NFNLGRP_CONNTRACK_DESTROY. The conntrack
+# CLI dependency was therefore useless: the daemon couldn't consume the
+# data it was designed for. Step 223's daemon reads Round 31's nft
+# bridge counters directly (offload-proof by virtue of bridge family
+# hooks firing below the inet/flow_offload layer), needing only
+# nftables + Round 31's design-host-acct service — both already shipped
+# in the base image, no new dep required. See doc/bandwith.md §6 and
+# memory/ucode-socket-no-netlink.md for the cascade of root-cause
+# discoveries Round 44 traversed.
 
 # Hook definitions MUST come BEFORE include luci.mk — luci.mk's trailing
 # `$(eval $(call BuildPackage,...))` materialises the package definition,
@@ -76,24 +79,20 @@ define Package/$(PKG_NAME)/postinst-pkg
 # Enable + start the (now shell) listener at install time. Only runs
 # in real install context (IPKG_INSTROOT empty), not ipk pack fakeroot.
 if [ "$${IPKG_INSTROOT}" = "" ] && [ -x /etc/init.d/design-host-acct-uc ]; then
+    # Round 44 Step 223: Round 31's design-host-acct service MUST stay
+    # enabled — it owns the nft bridge table that the new daemon reads.
+    # Step 219 erroneously stopped+disabled it (when daemon was supposed
+    # to be independent). Step 223 needs the producer/consumer relation.
+    if [ -x /etc/init.d/design-host-acct ]; then
+        /etc/init.d/design-host-acct enable 2>/dev/null
+        /etc/init.d/design-host-acct start 2>/dev/null
+    fi
     /etc/init.d/design-host-acct-uc enable 2>/dev/null
     /etc/init.d/design-host-acct-uc restart 2>/dev/null
-    # Step 219: kill the Round 31 nft-bridge daemon. Tier 3 is now the
-    # authoritative source — keeping the old running just doubles up
-    # service load + cron noise. Round 31's nft table is left in place
-    # (no `nft delete` here) so a manual revert is one /etc/init.d/start
-    # away if needed; Step 213 finishes the artifact wipe.
-    if [ -x /etc/init.d/design-host-acct ]; then
-        /etc/init.d/design-host-acct stop 2>/dev/null
-        /etc/init.d/design-host-acct disable 2>/dev/null
-    fi
-    # Step 219: also remove the Round 31 cron entry that was firing
-    # `design-host-acct refresh` every minute. New daemon is event-driven,
-    # cron not needed.
-    if [ -f /etc/crontabs/root ] && grep -q "design-host-acct refresh" /etc/crontabs/root; then
-        sed -i '/design-host-acct refresh/d' /etc/crontabs/root 2>/dev/null
-        /etc/init.d/cron reload 2>/dev/null || /etc/init.d/cron restart 2>/dev/null
-    fi
+    # Step 223: also restore the per-minute cron refresh — it's what
+    # Round 31's daemon uses to add nft counters for newly-arrived DHCP
+    # leases. Step 219 removed it (thinking the new daemon was event-
+    # driven). Step 223 reverts: cron line stays.
 fi
 # Round 42 Step 163: rpcd ubus object script needs +x. The IPKG_INSTROOT
 # guard around the rpcd reload ensures we only call /etc/init.d/rpcd at

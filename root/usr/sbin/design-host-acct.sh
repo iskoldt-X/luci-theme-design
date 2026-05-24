@@ -1,325 +1,228 @@
 #!/bin/sh
 #
-# design-host-acct.sh — per-host LAN bandwidth accounting daemon
-# Round 44 Step 219 — Tier 3 (conntrack-tools based, doc/bandwith.md §5).
+# design-host-acct.sh — per-host LAN bandwidth accounting JSON publisher
+# Round 44 Step 223 — read from Round 31 nft bridge counters.
 #
-# WHY THIS IMPL, NOT UCODE NETLINK
-# ────────────────────────────────
-# Step 210 originally tried ucode + AF_NETLINK to read conntrack events
-# directly. On ImmortalWrt 24.10 (luci-26.x), ucode-mod-socket does NOT
-# export AF_NETLINK and its internal sockaddr_from_ucv() rejects
-# family != INET/INET6/UNIX/PACKET. That path is structurally blocked
-# until ucode-mod-socket grows NETLINK support upstream.
+# WHY THE 3rd IMPL IN ROUND 44
+# ────────────────────────────
+# Step 210/211 used ucode + AF_NETLINK → blocked (ucode-mod-socket has no
+#   AF_NETLINK in ImmortalWrt 24.10).
+# Step 219 switched to `conntrack -E -e destroy` subprocess → empirically
+#   verified destroys_seen=0 for 11 minutes on a router with 10+ active
+#   clients (Chrome-Claude Round 44 batch verify, 2026-05-25). Root cause:
+#   ImmortalWrt 24.10 ships `flow_offloading=1, flow_offloading_hw=1` by
+#   default; the offload fastpath retires flows WITHOUT producing
+#   NFNLGRP_CONNTRACK_DESTROY notifications, so `conntrack -E` is silent.
+#   The daemon's own comment header described this exact failure mode
+#   for nlbwmon, then Step 219 walked into it.
 #
-# Tier 3 (bandwith.md §5) shells out to `conntrack` binary, which is
-# proven, well-tested, and has the same data access at the cost of
-# +50 KB on disk. Same Hybrid architecture (event stream + periodic
-# dump). Output is identical JSON shape — frontend / rpcd / widget
-# code unchanged from Steps 210-212.
+# Step 223 (this file): READ FROM the Round 31 design-host-acct service's
+# nft bridge family counters. Bridge family hooks fire BELOW the inet/
+# flow_offload layer, so byte counts are offload-proof. The Round 31
+# service maintains per-IP counters (host_tx_<ip>, host_rx_<ip>) and a
+# cron refreshes them as new DHCP leases appear. This daemon just polls,
+# joins to ARP for IP→MAC, aggregates, and writes JSON.
 #
-# HYBRID ARCHITECTURE (unchanged from doc/bandwith.md §4)
-# ───────────────────
-#   A) `conntrack -E -e destroy -o extended` event stream
-#      Each finalized flow yields a [DESTROY] line. 100% byte capture
-#      for short flows (kernel includes counters in the event before
-#      eviction).
+# DEPENDENCY: Round 31 design-host-acct service MUST be running (it owns
+# the nft table). Step 223's Makefile change un-does the Step 219
+# "stop + disable Round 31" postinst — they now coexist as
+# producer/consumer.
 #
-#   B) `conntrack -L -o extended` periodic dump every 5 s
-#      Snapshot of *active* flows so long streams (Twitch session,
-#      Netflix) show in-flight bytes without waiting for DESTROY.
+# ARCHITECTURE
+# ────────────
+#   /etc/init.d/design-host-acct (Round 31, START=99)
+#       nft add table bridge design_acct {...}
+#       nft add counter host_tx_X, host_rx_X for every DHCP-known IP
+#       counters accumulate bytes on every packet via bridge prerouting
+#       and bridge postrouting chains
 #
-# Both inputs are fed into one awk process via shell pipe muxing.
-# awk keeps:
-#   - in_flight[id]   → last-known orig_b + repl_b for active flows
-#   - per_mac[mac]_rx → running total downstream bytes per MAC
-#   - per_mac[mac]_tx → running total upstream bytes per MAC
-#   - ip_to_mac[ip]   → ARP/iwinfo lookup cache (refreshed every 60s)
+#   /etc/init.d/design-host-acct-uc (Round 44 Step 210→219→223, START=99)
+#       → /usr/sbin/design-host-acct.sh (THIS FILE)
+#           every POLL_INTERVAL seconds:
+#               1. read /proc/net/arp        → ip_to_mac
+#               2. read nft list table       → counter snapshot
+#               3. aggregate per MAC          → host totals
+#               4. atomic-rename JSON output  → /tmp/design-host-traffic.json
 #
-# Output: /tmp/design-host-traffic.json (atomic-rename every 5s)
+#   rpcd `host-traffic-acct` method serves the JSON file.
+#   traffic.js consumes via Tier 1 of the three-tier chain (Step 212).
 #
-# REQUIRES
-# ────────
-# - conntrack (from conntrack-tools, +50 KB)
-# - net.netfilter.nf_conntrack_acct=1 sysctl (Step 207's bootstrap)
-#
-# REFERENCES
-# ──────────
-# doc/bandwith.md §4 — full architecture
-# doc/bandwith.md §5 — tier matrix
-# doc/bandwith.md §6 — known risks (sysctl, ID reuse)
-# memory/luci-26-response-class-hijack.md (parallel quirk family)
+# OUTPUT SCHEMA (unchanged from Step 211 — frontend & rpcd untouched)
+#   {
+#     "version":1, "phase":3, "impl":"nft-bridge-direct",
+#     "generated_at": <epoch>,
+#     "stats": {
+#       "destroys_seen":0,         (not applicable — no event stream)
+#       "destroys_parsed":0,        (same)
+#       "dumps_completed": N,       (per-poll count)
+#       "dump_entries": K,           (per-poll: # counters joined to MAC)
+#       "bytes_credited": M,         (per-poll: bytes added across all MACs)
+#       "parse_errors":0,
+#       "id_reuses":0,                (not applicable — counters are persistent)
+#       "silent_evictions": E,        (per-poll: counters whose IP has no ARP MAC)
+#       "started": <epoch>
+#     },
+#     "hosts": {
+#       "<mac uppercase no colons>": { "tx": <total bytes>, "rx": <total bytes> },
+#       ...
+#     }
+#   }
 
 set -e
 
-ACCT_OUT="/tmp/design-host-traffic.json"
-ACCT_TMP="/tmp/.design-host-traffic.json.new"
-STARTED_AT="$(date +%s)"
+OUT_FILE=/tmp/design-host-traffic.json
+TMP_FILE=/tmp/.design-host-traffic.json.tmp
+ARP_FILE=/proc/net/arp
+NFT_TABLE=design_acct
+POLL_INTERVAL=5
+STATE_FILE=/tmp/.design-host-acct-state
 
-# Pre-flight: nf_conntrack_acct sysctl must be 1 or all bytes are 0.
-ACCT_FLAG="$(sysctl -n net.netfilter.nf_conntrack_acct 2>/dev/null || echo 0)"
-if [ "$ACCT_FLAG" != "1" ]; then
+STARTED_AT=$(date +%s)
+DUMPS_COMPLETED=0
+
+# Restore persistent counters across daemon restart so the widget
+# doesn't see dumps_completed reset to 0 every time procd respawns.
+# State file format: one shell `K=V` per line.
+if [ -r "$STATE_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE_FILE" 2>/dev/null || true
+fi
+
+cleanup() {
+    rm -f "$TMP_FILE"
+    exit 0
+}
+trap cleanup INT TERM HUP
+
+# Pre-flight: the Round 31 service must be alive (it owns the nft table).
+if ! nft list table bridge "$NFT_TABLE" >/dev/null 2>&1; then
     logger -t design-host-acct \
-        "WARN: nf_conntrack_acct=$ACCT_FLAG (need 1); all flows will read zero bytes"
+        "WARN: bridge $NFT_TABLE table missing — start /etc/init.d/design-host-acct first"
+    # Loop anyway and recover when the producer comes up. Some hosts
+    # may bring it up after this daemon starts (boot-order race).
 fi
 
-# Pre-flight: conntrack binary present?
-if ! command -v conntrack >/dev/null 2>&1; then
-    logger -t design-host-acct "FATAL: conntrack binary missing (need conntrack-tools)"
-    exit 1
-fi
+while :; do
+    DUMPS_COMPLETED=$((DUMPS_COMPLETED + 1))
+    NOW=$(date +%s)
 
-logger -t design-host-acct "starting (Tier 3, conntrack-tools)"
-
-# Mux event stream + periodic dump into one awk. Background the event
-# stream; foreground loop emits "===DUMP===" sentinel + a dump every
-# 5 s. awk distinguishes by line prefix.
-#
-# Inner subshell catches SIGTERM cleanly so procd's stop signal kills
-# the conntrack -E child too (no orphan).
-(
-    conntrack -E -e destroy -o extended -b 524288 2>/dev/null &
-    EV_PID=$!
-    trap 'kill $EV_PID 2>/dev/null; exit 0' TERM INT
-
-    # Periodic dump every 5 s. The first iteration also primes the
-    # in_flight table so the next dump has deltas to compute against.
-    while true; do
-        echo "===DUMP_START $(date +%s)==="
-        conntrack -L -o extended -f ipv4 2>/dev/null || true
-        echo "===DUMP_END==="
-        # ARP refresh sentinel — awk re-reads /proc/net/arp from this line.
-        echo "===ARP===$(awk 'NR>1 && $3!="0x0" && $4!="00:00:00:00:00:00" \
-            {printf "%s=%s|", $1, toupper($4)}' /proc/net/arp)==="
-        sleep 5
-    done
-) | awk -v started_at="$STARTED_AT" -v out_file="$ACCT_OUT" -v tmp_file="$ACCT_TMP" '
-    BEGIN {
-        # Counter stats — written into output JSON for observability.
-        destroys_seen = 0
-        destroys_parsed = 0
-        dumps_completed = 0
-        dump_entries = 0
-        bytes_credited = 0
-        parse_errors = 0
-        id_reuses = 0
-        silent_evictions = 0
-
-        # Mode flags — flip based on sentinel lines.
-        in_dump = 0
-        # CTA_IDs seen in the current dump pass. Cleared at DUMP_START.
-        delete seen_this_dump
-
-        # in_flight[id, "orig"] = last orig bytes; in_flight[id, "repl"] = last repl bytes
-        # in_flight[id, "src"]  = orig src ip; in_flight[id, "exists"] = 1
-        # per_mac[mac, "rx" or "tx"] = running total bytes
-        # ip_to_mac[ip] = uppercase MAC string
-        # last_arp_refresh = epoch of last refresh
-        last_arp_refresh = started_at
-    }
-
-    # ─── ARP refresh sentinel ───────────────────────────────────────
-    /^===ARP===/ {
-        # Strip prefix + suffix to get the IP=MAC|IP=MAC|... payload
-        sub(/^===ARP===/, "")
-        sub(/===$/, "")
-        # Clear and rebuild cache
-        for (k in ip_to_mac) delete ip_to_mac[k]
-        n = split($0, pairs, "|")
-        for (i = 1; i <= n; i++) {
-            if (pairs[i] == "") continue
-            split(pairs[i], kv, "=")
-            if (kv[1] != "" && kv[2] != "") ip_to_mac[kv[1]] = kv[2]
+    # ── 1. Build IP → MAC map from ARP table ──────────────────────
+    # /proc/net/arp columns: IP HW_TYPE FLAGS HW_ADDR MASK DEVICE
+    # Skip header line and incomplete entries (HW_ADDR = 00:00:00:00:00:00).
+    # MAC normalised to uppercase, no colons (matches host-presence rpcd
+    # method output from Step 218; frontend devices.js does the same
+    # mac.replace(/:/g,'') so keys match).
+    ARP_MAP=$(awk '
+        NR > 1 && $4 != "00:00:00:00:00:00" {
+            mac = toupper($4)
+            gsub(/:/, "", mac)
+            print $1 "=" mac
         }
-        last_arp_refresh = systime()
-        next
-    }
+    ' "$ARP_FILE" 2>/dev/null || true)
 
-    # ─── Dump boundary sentinels ────────────────────────────────────
-    /^===DUMP_START / {
-        in_dump = 1
-        delete seen_this_dump
-        next
-    }
-    /^===DUMP_END===/ {
-        # End of dump: anything in in_flight NOT in seen_this_dump was
-        # silently evicted (no DESTROY arrived). Drop without crediting.
-        for (key in in_flight) {
-            # key encodes "id|orig" or "id|repl" or "id|src" etc; want id
-            split(key, parts, SUBSEP)
-            id_only = parts[1]
-            if (!(id_only in seen_this_dump)) {
-                # Mark for deletion (cant delete while iterating in all awks).
-                drop_ids[id_only] = 1
+    # ── 2. Snapshot Round 31 nft bridge counters ──────────────────
+    # nft list (non-JSON) is more reliable to parse than -j with awk on
+    # busybox. The output we care about looks like:
+    #   counter host_tx_192_168_45_128 {
+    #       packets 1067 bytes 129438
+    #   }
+    # State-machine awk: on a `counter host_(tx|rx)_X` line capture
+    # name+direction+IP; on the next `bytes N` line emit + look up MAC.
+    NFT_OUT=$(nft list table bridge "$NFT_TABLE" 2>/dev/null || true)
+
+    # ── 3. Aggregate per-MAC totals + write JSON ──────────────────
+    RESULT=$(printf '%s\n' "$NFT_OUT" | awk -v arp="$ARP_MAP" -v ts="$NOW" \
+                                            -v started="$STARTED_AT" \
+                                            -v dumps="$DUMPS_COMPLETED" '
+        BEGIN {
+            # Parse the IP=MAC map passed in via -v
+            n = split(arp, lines, "\n")
+            for (i = 1; i <= n; i++) {
+                if (split(lines[i], kv, "=") == 2 && kv[1] != "" && kv[2] != "") {
+                    ip2mac[kv[1]] = kv[2]
+                }
             }
+            current_dir = ""
+            current_ip  = ""
+            entries        = 0
+            bytes_credited = 0
+            silent_evictions = 0
         }
-        for (id_only in drop_ids) {
-            delete in_flight[id_only, "orig"]
-            delete in_flight[id_only, "repl"]
-            delete in_flight[id_only, "src"]
-            delete in_flight[id_only, "dst"]
-            delete in_flight[id_only, "exists"]
-            silent_evictions++
-        }
-        delete drop_ids
-        dumps_completed++
-        in_dump = 0
-        # End of dump = good moment to flush JSON output.
-        flush_json()
-        next
-    }
 
-    # ─── DESTROY event line ─────────────────────────────────────────
-    /\[DESTROY\]/ {
-        destroys_seen++
-        parse_line($0, snap)
-        if (snap["src"] == "" || snap["id"] == "") {
-            parse_errors++
-            next
-        }
-        destroys_parsed++
-        # Final credit = current - last_known (delta since last sighting).
-        prev_orig = (snap["id"] SUBSEP "orig") in in_flight ? in_flight[snap["id"], "orig"] : 0
-        prev_repl = (snap["id"] SUBSEP "repl") in in_flight ? in_flight[snap["id"], "repl"] : 0
-        orig_inc = snap["orig_b"] - prev_orig
-        repl_inc = snap["repl_b"] - prev_repl
-        if (orig_inc < 0) orig_inc = snap["orig_b"]
-        if (repl_inc < 0) repl_inc = snap["repl_b"]
-        if (orig_inc > 0 || repl_inc > 0) credit_inc(snap["src"], snap["dst"], orig_inc, repl_inc)
-        # Drop from in_flight
-        delete in_flight[snap["id"], "orig"]
-        delete in_flight[snap["id"], "repl"]
-        delete in_flight[snap["id"], "src"]
-        delete in_flight[snap["id"], "dst"]
-        delete in_flight[snap["id"], "exists"]
-        next
-    }
-
-    # ─── Dump entry line (only valid inside a dump section) ─────────
-    in_dump && /id=[0-9]+/ {
-        parse_line($0, snap)
-        if (snap["src"] == "" || snap["id"] == "") next
-        dump_entries++
-        seen_this_dump[snap["id"]] = 1
-
-        if (!((snap["id"] SUBSEP "exists") in in_flight)) {
-            # New flow — record baseline, do not credit.
-            in_flight[snap["id"], "orig"] = snap["orig_b"]
-            in_flight[snap["id"], "repl"] = snap["repl_b"]
-            in_flight[snap["id"], "src"]  = snap["src"]
-            in_flight[snap["id"], "dst"]  = snap["dst"]
-            in_flight[snap["id"], "exists"] = 1
-            next
-        }
-        # Known flow — compute delta, credit, update last
-        prev_orig = in_flight[snap["id"], "orig"]
-        prev_repl = in_flight[snap["id"], "repl"]
-        # ID reuse detection: counters went backwards
-        if (snap["orig_b"] < prev_orig || snap["repl_b"] < prev_repl) {
-            id_reuses++
-            credit_inc(snap["src"], snap["dst"], snap["orig_b"], snap["repl_b"])
-            in_flight[snap["id"], "orig"] = snap["orig_b"]
-            in_flight[snap["id"], "repl"] = snap["repl_b"]
-            in_flight[snap["id"], "src"]  = snap["src"]
-            in_flight[snap["id"], "dst"]  = snap["dst"]
-            next
-        }
-        orig_inc = snap["orig_b"] - prev_orig
-        repl_inc = snap["repl_b"] - prev_repl
-        if (orig_inc > 0 || repl_inc > 0) {
-            credit_inc(snap["src"], snap["dst"], orig_inc, repl_inc)
-            in_flight[snap["id"], "orig"] = snap["orig_b"]
-            in_flight[snap["id"], "repl"] = snap["repl_b"]
-        }
-    }
-
-    # ─── Helper: parse one conntrack -o extended line ───────────────
-    function parse_line(line, out,    parts, i, f, first_src, first_dst, first_bytes, m) {
-        # Initialise output
-        out["src"] = ""
-        out["dst"] = ""
-        out["orig_b"] = 0
-        out["repl_b"] = 0
-        out["id"] = ""
-
-        # Tokenise on whitespace. Format example:
-        # [DESTROY] ipv4 2 tcp 6 src=A dst=B sport=X dport=Y packets=N bytes=M src=B dst=A sport=Y dport=X packets=N2 bytes=M2 [ASSURED] id=Z
-        n = split(line, parts, " ")
-        first_src = 1
-        first_dst = 1
-        first_bytes = 1
-        for (i = 1; i <= n; i++) {
-            f = parts[i]
-            if (index(f, "src=") == 1) {
-                if (first_src) { out["src"] = substr(f, 5); first_src = 0 }
-            } else if (index(f, "dst=") == 1) {
-                if (first_dst) { out["dst"] = substr(f, 5); first_dst = 0 }
-            } else if (index(f, "bytes=") == 1) {
-                if (first_bytes) { out["orig_b"] = substr(f, 7) + 0; first_bytes = 0 }
-                else             { out["repl_b"] = substr(f, 7) + 0 }
-            } else if (index(f, "id=") == 1) {
-                out["id"] = substr(f, 4)
+        # Match: "    counter host_tx_192_168_45_128 {"
+        # Capture direction (tx|rx) and ip (with underscores converted).
+        /counter[ \t]+host_(tx|rx)_/ {
+            for (i = 1; i <= NF; i++) {
+                if (substr($i, 1, 5) == "host_") {
+                    name = $i
+                    current_dir = substr(name, 6, 2)       # tx or rx
+                    ip = substr(name, 9)                    # 192_168_45_128
+                    gsub(/_/, ".", ip)
+                    current_ip = ip
+                    break
+                }
             }
+            next
         }
-    }
 
-    # ─── Helper: classify LAN side + credit per-MAC bytes ───────────
-    function is_lan(ip) {
-        if (ip == "") return 0
-        if (substr(ip, 1, 8) == "192.168.") return 1
-        if (substr(ip, 1, 3) == "10.") return 1
-        if (substr(ip, 1, 4) == "172.") {
-            split(ip, oc, ".")
-            return (oc[2] + 0 >= 16 && oc[2] + 0 <= 31) ? 1 : 0
+        # Match: "        packets 1067 bytes 129438"
+        # Emit when we have a captured counter.
+        /packets[ \t]+[0-9]+[ \t]+bytes[ \t]+[0-9]+/ {
+            if (current_dir == "" || current_ip == "") next
+            for (i = 1; i <= NF - 1; i++) {
+                if ($i == "bytes") {
+                    b = $(i + 1) + 0
+                    mac = ip2mac[current_ip]
+                    if (mac == "") {
+                        if (b > 0) silent_evictions++
+                    } else {
+                        if (current_dir == "tx") host_tx[mac] += b
+                        else                     host_rx[mac] += b
+                        # bytes_credited = sum across this poll
+                        bytes_credited += b
+                        entries++
+                    }
+                    break
+                }
+            }
+            current_dir = ""
+            current_ip  = ""
+            next
         }
-        return 0
-    }
 
-    function credit_inc(orig_src, orig_dst, orig_inc, repl_inc,    lan_ip, mac, tmp) {
-        if (is_lan(orig_src)) {
-            lan_ip = orig_src
-        } else if (is_lan(orig_dst)) {
-            lan_ip = orig_dst
-            # flow initiated from WAN side — orig is rx, repl is tx; flip.
-            tmp = orig_inc; orig_inc = repl_inc; repl_inc = tmp
-        } else {
-            return
+        END {
+            printf "{\"version\":1,\"phase\":3,\"impl\":\"nft-bridge-direct\","
+            printf "\"generated_at\":%d,", ts
+            printf "\"stats\":{"
+            printf "\"destroys_seen\":0,\"destroys_parsed\":0,"
+            printf "\"dumps_completed\":%d,\"dump_entries\":%d,", dumps, entries
+            printf "\"bytes_credited\":%d,\"parse_errors\":0,", bytes_credited
+            printf "\"id_reuses\":0,\"silent_evictions\":%d,", silent_evictions
+            printf "\"started\":%d", started
+            printf "},\"hosts\":{"
+            sep = ""
+            # Union of MACs that appear in either direction
+            for (m in host_tx) macs[m] = 1
+            for (m in host_rx) macs[m] = 1
+            for (m in macs) {
+                tx = host_tx[m] + 0
+                rx = host_rx[m] + 0
+                printf "%s\"%s\":{\"tx\":%d,\"rx\":%d,\"last_seen\":%d}", sep, m, tx, rx, ts
+                sep = ","
+            }
+            printf "}}"
         }
-        if (!(lan_ip in ip_to_mac)) return
-        mac = ip_to_mac[lan_ip]
-        per_mac[mac, "tx"] += orig_inc
-        per_mac[mac, "rx"] += repl_inc
-        per_mac[mac, "last_seen"] = systime()
-        bytes_credited += orig_inc + repl_inc
-    }
+    ')
 
-    # ─── Output ──────────────────────────────────────────────────────
-    function flush_json(    line, first, mac_key, macs, seen_macs) {
-        line = sprintf("{\"version\":1,\"phase\":2,\"impl\":\"conntrack-tools\",\"generated_at\":%d,\"stats\":{", systime())
-        line = line sprintf("\"destroys_seen\":%d,\"destroys_parsed\":%d,", destroys_seen, destroys_parsed)
-        line = line sprintf("\"dumps_completed\":%d,\"dump_entries\":%d,", dumps_completed, dump_entries)
-        line = line sprintf("\"bytes_credited\":%d,\"parse_errors\":%d,", bytes_credited, parse_errors)
-        line = line sprintf("\"id_reuses\":%d,\"silent_evictions\":%d,\"started\":%d", id_reuses, silent_evictions, started_at)
-        line = line "},\"hosts\":{"
-        first = 1
-        # Walk per_mac keys to discover MAC set. SUBSEP-separated, so split.
-        for (k in per_mac) {
-            split(k, kp, SUBSEP)
-            mac_key = kp[1]
-            if (mac_key in seen_macs) continue
-            seen_macs[mac_key] = 1
-            if (!first) line = line ","
-            rx = (mac_key SUBSEP "rx") in per_mac ? per_mac[mac_key, "rx"] : 0
-            tx = (mac_key SUBSEP "tx") in per_mac ? per_mac[mac_key, "tx"] : 0
-            ls = (mac_key SUBSEP "last_seen") in per_mac ? per_mac[mac_key, "last_seen"] : 0
-            line = line sprintf("\"%s\":{\"rx\":%d,\"tx\":%d,\"last_seen\":%d}", mac_key, rx, tx, ls)
-            first = 0
-        }
-        delete seen_macs
-        line = line "}}"
-        # Atomic write: tmp + rename
-        print line > tmp_file
-        close(tmp_file)
-        # Posix mv via system() — no rename() in awk
-        system("mv " tmp_file " " out_file)
-    }
-'
+    # ── 4. Atomic write ──────────────────────────────────────────
+    printf '%s' "$RESULT" > "$TMP_FILE"
+    mv "$TMP_FILE" "$OUT_FILE"
+
+    # ── 5. Persist counters across restart ──────────────────────
+    {
+        printf 'STARTED_AT=%d\n'     "$STARTED_AT"
+        printf 'DUMPS_COMPLETED=%d\n' "$DUMPS_COMPLETED"
+    } > "$STATE_FILE"
+
+    sleep "$POLL_INTERVAL"
+done
