@@ -586,16 +586,29 @@ return baseclass.extend({
 		var d = fmtBpsSplit(data.rxBitsPerSec);
 		var u = fmtBpsSplit(data.txBitsPerSec);
 
-		// 5-min rx peak (sparkline numeric anchor). Inline scan since
-		// MetricRing doesn't expose a max() accessor yet.
-		var rxPeak = 0;
+		// Round 44 Step 206 — Fix-3 (doc/wan_traffic.md §三, follow-up to
+		// Step 205). With sharedHi removed in Step 205, each sparkline
+		// auto-scales independently — the "upload is 1/10 of download"
+		// magnitude relationship that the shared y-axis tried to preserve
+		// is no longer visible in the curves themselves. Compensate by
+		// surfacing BOTH directions' 5-min peaks in the meta line:
+		// "Peak ↓123.4 Mbps ↑12.3 Mbps". Numbers give the magnitude
+		// relationship the sparkline visuals stopped imposing.
+		//
+		// Inline scan since MetricRing doesn't expose a max() accessor.
+		var rxPeak = 0, txPeak = 0;
 		for (var i = 0; i < this.rings.netRx.data.length; i++) {
 			if (this.rings.netRx.data[i] > rxPeak) rxPeak = this.rings.netRx.data[i];
 		}
+		for (var j = 0; j < this.rings.netTx.data.length; j++) {
+			if (this.rings.netTx.data[j] > txPeak) txPeak = this.rings.netTx.data[j];
+		}
 		var peakStr = '';
-		if (rxPeak > 0) {
-			var pf = fmtBpsSplit(rxPeak);
-			peakStr = ' · Peak ' + pf.num + ' ' + pf.unit;
+		if (rxPeak > 0 || txPeak > 0) {
+			var rxPf = fmtBpsSplit(rxPeak);
+			var txPf = fmtBpsSplit(txPeak);
+			peakStr = ' · Peak ↓' + rxPf.num + ' ' + rxPf.unit
+			        + ' ↑' + txPf.num + ' ' + txPf.unit;
 		}
 
 		setTile(this.tileNet, {

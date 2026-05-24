@@ -555,12 +555,20 @@
 /* Net tile secondary sparkline line (tx). Same accent color as primary
    line (same kind of metric, just different direction) but dashed +
    half-opacity so visual hierarchy reads 'rx is primary, tx is its
-   partner trace'. */
+   partner trace'.
+   Round 44 Step 206 — Fix-2 (doc/wan_traffic.md §三 P1). Original
+   stroke-width 1.5 + opacity 0.55 + tight dasharray "3 2" combined
+   to ~1.5:1 contrast on white tile bg — line was nearly invisible
+   even when path was correctly computed. After Step 205 removed the
+   sharedHi quantum compression, the line is in the right vertical
+   slot; this Fix bumps contrast so users can actually see it.
+   New values: stroke-width 2 (was 1.5), opacity 0.85 (was 0.55),
+   dasharray "5 3" (was "3 2", less staccato — reads as a line). */
 .design-tile-spark-line-secondary {
     stroke: var(--color-accent-500);
-    stroke-width: 1.5;
-    stroke-dasharray: 3 2;
-    opacity: 0.55;
+    stroke-width: 2;
+    stroke-dasharray: 5 3;
+    opacity: 0.85;
     fill: none;
     stroke-linecap: round;
     stroke-linejoin: round;
