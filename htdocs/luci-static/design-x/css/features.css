@@ -1364,15 +1364,23 @@
      90px      signal pill ("Wired" / "70 dBm")
      100px     lease ("10h 33m ↓")
      24px      chevron
-     1fr       filler — takes whatever's left in the card width
+
+   Step 183: dropped the trailing `1fr` filler (user dislikes the
+   "table is only half-card" perception). Instead, `justify-content:
+   space-between` distributes the extra horizontal space evenly
+   between columns, spreading the row across the full card width
+   while each column itself stays sized to its content. Header
+   `text-align: center` then still lands over content (column = content
+   width). `gap: var(--space-3)` becomes the MINIMUM between columns —
+   space-between adds more on top.
 
    If user later adds IPv6 / longer hostnames / etc., bump the
-   corresponding column width. Don't add another flex track — the
-   trailing 1fr is the only flex slot. */
+   corresponding column width. */
 .devices-thead {
     display: grid;
-    grid-template-columns: 32px 200px 140px 170px 90px 100px 24px 1fr;
+    grid-template-columns: 32px 200px 140px 170px 90px 100px 24px;
     gap: var(--space-3);
+    justify-content: space-between;
     padding: var(--space-2) var(--space-4);
     background: var(--color-surface-1);
     font-size: var(--text-xs);
@@ -1411,13 +1419,15 @@
    stays full opacity when expanded so the user can still read it. */
 .devices-row-offline .devices-summary { opacity: 0.55; }
 
-/* Summary row — grid IDENTICAL to .devices-thead (Step 182: fixed
-   widths + 1fr filler) so columns line up across header and data.
-   See .devices-thead comment for column width rationale. */
+/* Summary row — grid IDENTICAL to .devices-thead (Step 183: fixed
+   widths + space-between distribution) so columns line up across
+   header and data. See .devices-thead comment for the width +
+   space-between rationale. */
 .devices-summary {
     display: grid;
-    grid-template-columns: 32px 200px 140px 170px 90px 100px 24px 1fr;
+    grid-template-columns: 32px 200px 140px 170px 90px 100px 24px;
     gap: var(--space-3);
+    justify-content: space-between;
     align-items: center;
     padding: var(--space-2) var(--space-4);
     min-height: 44px;
