@@ -45,13 +45,18 @@
    - 唯一 polish: KV 列表里像 Firmware Version / Kernel Version / IP / MAC / Hash 这种**技术字符串**用 mono 字体(取得"高级感"而不破坏 KV 形态)。
    - **让真表格都长得像 LAN Clients,让 key-value 卡保持 key-value 的样子。** 这样 overview 才有节奏感,不变成"风格强迫症"。
 
-10. **表头对齐策略** —— Round 43 用户拍板永久规则。
+10. **表头对齐策略** —— Round 43 Step 184 修正(Chrome-Claude 实测纠错)。
 
-    **所有表头居中**。但不是 column 整个空间的居中,而是**相对于该列实际内容的左右边界的居中** —— column 宽度应跟随内容,不留过多空白让 header"漂浮"。
+    **表头对齐方式必须跟随该列内容对齐方式一致**。Vercel / Linear / Stripe / Notion 四家共同遵守的契约。先前 Step 179 尝试"所有表头居中"是错前提 —— 内容左对齐(IP / MAC 等)+ 表头居中 → 表头浮在内容右边;内容右对齐(LEASE)+ 表头居中 → 表头浮在内容左边。任意一种"居中"都会和列内容对齐方式冲突。
     
-    具体应用:数据 cell 可以左对齐(如 DEVICE 列的图标 + 名字)、右对齐(如 LEASE 列的剩余时间)或居中(如 SIGNAL pill)—— 数据各自走最自然的对齐;**表头一律居中**,跟所在 column 走。
+    正确规则:
+    - 内容左对齐(name / IP / MAC / signal pill) → 表头**左对齐**
+    - 内容右对齐(LEASE / 数字 metric) → 表头**右对齐**
+    - 内容居中(罕见 — 比如 status icon-only 列) → 表头居中
     
-    CSS 实现:对 `<th>` / grid-header cell 用 `text-align: center`(配合 column 宽度本身跟内容走)。
+    效果:每个表头**恰好落在该列内容文本的起点(或终点)正上方**,肉眼零 perceptible 失对齐,column 内剩余空间被自然分配为列内 padding。不需要 `justify-content: space-between`,不需要 `1fr` filler,不需要 `table-layout: auto`。
+    
+    CSS 实现:对每列 header cell 单独设 `text-align: left` 或 `right`(配合 `text-align: start/end` 的语义化写法亦可)。**不要**对 `.thead` 容器全局设 `text-align`,会盖过单列细调。
 
 ---
 

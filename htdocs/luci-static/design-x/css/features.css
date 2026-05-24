@@ -1339,48 +1339,40 @@
 /* Column header strip — must match .devices-summary grid EXACTLY so
    header cells line up vertically with data cells.
 
-   Round 43 evolution:
-     Step 179 — added `text-align: center`. But grid was flex (1.4fr
-                etc), columns stretched to fill row, headers landed
-                center-of-column ≠ center-of-content. Visually wrong.
-     Step 181 — switched all columns to `auto`. Each row's grid
-                computes column widths independently from its own
-                cells. Data rows aligned by coincidence (same-width
-                data). Header row's cells were narrow (header text
-                widths), columns collapsed → header row didn't line
-                up with data rows. Worse.
-     Step 182 (this) — use FIXED widths matching expected content
-                widths, plus a trailing `1fr` filler column to fill
-                the card. All rows use the IDENTICAL grid-template so
-                columns line up. Header text-align center within its
-                fixed column ≈ centered over content (column width ≈
-                content width). Filler at end eats leftover space.
+   Round 43 evolution (final understanding at Step 184):
+     179 — text-align: center on all headers. WRONG premise.
+     181 — auto cols. Each row independent, thead misaligned.
+     182 — fixed cols + 1fr filler. Header center ≈ content center
+           but user disliked the right-half-empty card.
+     183 — space-between. Headers spread, but columns oscillate on
+           resize and the "center" rule was wrong all along.
+     184 — Chrome-Claude diagnosis: "headers always centered" is
+           the bad rule. Vercel / Linear / Stripe / Notion all use
+           the SAME contract: HEADER ALIGNMENT FOLLOWS COLUMN
+           ALIGNMENT. Left-aligned data → left-aligned header.
+           Right-aligned data → right-aligned header. Pill /
+           centered data → centered header. With this rule, each
+           header lands EXACTLY at the data column's anchor edge
+           (start for left-aligned, end for right-aligned). No
+           visual drift, no need for space-between trickery, no
+           need for 1fr filler.
 
-   Width rationale (measured against actual data):
-     32px      icon
-     200px     name (fits "iPhone-of-John" + icon + padding)
-     140px     IP   (fits "192.168.45.224")
-     170px     MAC  (fits "BC:24:11:AC:63:CA" with mono font)
-     90px      signal pill ("Wired" / "70 dBm")
-     100px     lease ("10h 33m ↓")
-     24px      chevron
+           Plus: revert column widths to FLEX (1fr / 1.4fr etc.).
+           Flex columns stretch each column to take a proportional
+           share of card width → table fills full width naturally.
+           Data left-aligned inside each (now-wider) column sits at
+           column-left. Header left-aligned sits at SAME column-left.
+           They line up at the column's left anchor. Whitespace ends
+           up INSIDE each column (between data and column right
+           edge), distributed across the row instead of clumped in
+           one filler. User's "use full width" goal met.
 
-   Step 183: dropped the trailing `1fr` filler (user dislikes the
-   "table is only half-card" perception). Instead, `justify-content:
-   space-between` distributes the extra horizontal space evenly
-   between columns, spreading the row across the full card width
-   while each column itself stays sized to its content. Header
-   `text-align: center` then still lands over content (column = content
-   width). `gap: var(--space-3)` becomes the MINIMUM between columns —
-   space-between adds more on top.
-
-   If user later adds IPv6 / longer hostnames / etc., bump the
-   corresponding column width. */
+           Principle 10 in claude_style.md updated this Step to
+           reflect the corrected rule. */
 .devices-thead {
     display: grid;
-    grid-template-columns: 32px 200px 140px 170px 90px 100px 24px;
+    grid-template-columns: 32px minmax(160px, 1.4fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(80px, 0.6fr) minmax(90px, 0.7fr) 24px;
     gap: var(--space-3);
-    justify-content: space-between;
     padding: var(--space-2) var(--space-4);
     background: var(--color-surface-1);
     font-size: var(--text-xs);
@@ -1389,11 +1381,15 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     border-bottom: 1px solid var(--color-border-subtle);
-    text-align: center;
 }
-/* First label spans icon + name cells (preview convention). DEVICE
-   header centers within the combined (icon + name) auto span. */
-.devices-col-name { grid-column: 1 / 3; }
+
+/* Per-column header alignment — matches the data cell alignment
+   in the corresponding column. */
+.devices-col-name { grid-column: 2 / 3;    text-align: left;  }  /* over name cell only (not spanning icon — Chrome-Claude fix) */
+.devices-col-ip   {                        text-align: left;  }
+.devices-col-mac  {                        text-align: left;  }
+.devices-col-sig  {                        text-align: left;  }  /* pill is left-anchored within its cell */
+.devices-col-seen {                        text-align: right; }  /* lease "10h 33m ↓" is right-anchored */
 
 .devices-rows {
     background: var(--color-surface-0);
@@ -1419,15 +1415,14 @@
    stays full opacity when expanded so the user can still read it. */
 .devices-row-offline .devices-summary { opacity: 0.55; }
 
-/* Summary row — grid IDENTICAL to .devices-thead (Step 183: fixed
-   widths + space-between distribution) so columns line up across
-   header and data. See .devices-thead comment for the width +
-   space-between rationale. */
+/* Summary row — grid IDENTICAL to .devices-thead (Step 184: flex
+   minmax columns) so columns line up across header and data. See
+   .devices-thead for the flex-columns + per-column-alignment
+   rationale. */
 .devices-summary {
     display: grid;
-    grid-template-columns: 32px 200px 140px 170px 90px 100px 24px;
+    grid-template-columns: 32px minmax(160px, 1.4fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(80px, 0.6fr) minmax(90px, 0.7fr) 24px;
     gap: var(--space-3);
-    justify-content: space-between;
     align-items: center;
     padding: var(--space-2) var(--space-4);
     min-height: 44px;
