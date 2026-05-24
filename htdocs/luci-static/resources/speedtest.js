@@ -527,21 +527,65 @@ return baseclass.extend({
 		}).catch(function () { clearTimeout(to); return null; });
 	},
 
+	// Step 144 (Round 39):testUpload via XMLHttpRequest for live gauge.
+	// fetch() doesn't expose upload-side progress events for the request
+	// body — a 10+ year browser-spec gap. XMLHttpRequest's xhr.upload.
+	// onprogress IS the only standard API that gives bytes-sent-so-far
+	// during a POST.
+	//
+	// Same sliding-window + UI-throttle pattern as Step 143's testDownload,
+	// just driven by xhr.upload.onprogress (ev.loaded) instead of by
+	// reader.read() chunks. peakMbps tracked for Step 146.
 	testUpload: function (bytes) {
 		bytes = bytes || UPLOAD_BYTES;
+		var self    = this;
 		var payload = new Blob([new Uint8Array(bytes)]);
-		var t0 = performance.now();
-		var ctrl = new AbortController();
-		var to = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
-		return fetch('/cgi-bin/design/upload', {
-			method: 'POST', body: payload, signal: ctrl.signal, cache: 'no-store'
-		}).then(function (r) {
-			clearTimeout(to);
-			if (!r.ok) throw new Error('HTTP ' + r.status);
-			var ms = performance.now() - t0;
-			var mbps = (bytes * 8) / (ms / 1000) / 1e6;
-			return mbps;
-		}).catch(function () { clearTimeout(to); return null; });
+		var t0      = performance.now();
+
+		return new Promise(function (resolve) {
+			var xhr          = new XMLHttpRequest();
+			var lastUiUpdate = 0;
+			var samples      = [];   // [{ t, bytes }] sliding window
+			var WINDOW_MS    = 500;
+			var FPS_MS       = 100;
+			var peakMbps     = 0;
+			var done         = false;
+
+			xhr.open('POST', '/cgi-bin/design/upload', true);
+			xhr.timeout = TIMEOUT_MS;
+
+			xhr.upload.onprogress = function (ev) {
+				if (done || !ev.lengthComputable) return;
+				var now = performance.now();
+				samples.push({ t: now, bytes: ev.loaded });
+				while (samples.length > 1 && now - samples[0].t > WINDOW_MS) samples.shift();
+
+				if (now - lastUiUpdate > FPS_MS) {
+					lastUiUpdate = now;
+					var oldest   = samples[0];
+					var winBytes = ev.loaded - oldest.bytes;
+					var winMs    = now - oldest.t;
+					var mbps     = winMs > 0 ? (winBytes * 8) / (winMs / 1000) / 1e6 : 0;
+					if (mbps > peakMbps) peakMbps = mbps;
+					self.setGauge('upload', mbps);
+				}
+			};
+
+			xhr.onload = function () {
+				done = true;
+				if (xhr.status < 200 || xhr.status >= 300) { resolve(null); return; }
+				var totalMs = performance.now() - t0;
+				var avgMbps = (bytes * 8) / (totalMs / 1000) / 1e6;
+				self._lastTestPeak = self._lastTestPeak || {};
+				self._lastTestPeak.upload = peakMbps;
+				resolve(avgMbps);
+			};
+			xhr.onerror = function () { done = true; resolve(null); };
+			xhr.ontimeout = function () { done = true; resolve(null); };
+			xhr.onabort = function () { done = true; resolve(null); };
+
+			xhr.send(payload);
+		});
 	},
 
 	setStat: function (which, value) {
