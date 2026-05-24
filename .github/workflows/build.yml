@@ -352,8 +352,9 @@ jobs:
 
             ```sh
             cd /tmp
+            rm -rf luci-theme-design-x.ipk
             wget https://github.com/${{ github.repository }}/releases/download/nightly-${{ github.ref_name }}/luci-theme-design-x.ipk
-            opkg install luci-theme-design-x.ipk
+            opkg install luci-theme-design-x.ipk	--force-downgrade
             ```
 
             Or grab the timestamped build below if you want to pin a specific commit.
