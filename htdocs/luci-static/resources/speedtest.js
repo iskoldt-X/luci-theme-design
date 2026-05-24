@@ -457,22 +457,73 @@ return baseclass.extend({
 	// Step 64: testDownload/testUpload now take a bytes argument so the
 	// caller (runTest) can pass the user-selected size. Default args fall
 	// back to the legacy module-level constants for any external callers.
+	//
+	// Step 143 (Round 39):rewrote testDownload to use ReadableStream
+	// instead of r.blob(). The blob() variant waited for the ENTIRE
+	// response body before resolving — so during a 2.3s 50MB download the
+	// gauge needle stayed at empty, then jumped to final value in one
+	// frame. Chrome-Claude's polling recorder confirmed the gauge had ZERO
+	// updates between phase start and finish.
+	//
+	// Now: stream-read in chunks (CGI emits 5-10KB chunks ~5ms apart),
+	// accumulate received bytes, compute instantaneous mbps over a 500ms
+	// sliding window (smoother than per-chunk rate, more responsive than
+	// cumulative average), throttle UI updates to ~10fps, and call
+	// setGauge() each tick. Result: needle visibly moves throughout the
+	// test, matching the "car speedometer" visual metaphor.
+	//
+	// Final mbps returned is the full-test average (more stable than
+	// last-window mbps for history records). Peak tracked separately in
+	// self._lastTestPeak for Step 146 history enrichment.
 	testDownload: function (bytes) {
 		bytes = bytes || DOWNLOAD_BYTES;
+		var self = this;
 		var t0 = performance.now();
 		var ctrl = new AbortController();
 		var to = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
+
 		return fetch('/cgi-bin/design/download?bytes=' + bytes + '&t=' + Date.now(), {
 			signal: ctrl.signal, cache: 'no-store'
 		}).then(function (r) {
 			if (!r.ok) throw new Error('HTTP ' + r.status);
-			return r.blob();
-		}).then(function (blob) {
-			clearTimeout(to);
-			var ms = performance.now() - t0;
-			var actual = blob.size;
-			var mbps = (actual * 8) / (ms / 1000) / 1e6;
-			return mbps;
+
+			var reader       = r.body.getReader();
+			var received     = 0;
+			var lastUiUpdate = 0;
+			var samples      = [];   // [{ t, bytes }] sliding window
+			var WINDOW_MS    = 500;
+			var FPS_MS       = 100;  // ~10 fps UI cap
+			var peakMbps     = 0;
+
+			function pump() {
+				return reader.read().then(function (chunk) {
+					if (chunk.done) {
+						clearTimeout(to);
+						var totalMs = performance.now() - t0;
+						var avgMbps = (received * 8) / (totalMs / 1000) / 1e6;
+						// Cache peak for runTest → history (Step 146)
+						self._lastTestPeak = self._lastTestPeak || {};
+						self._lastTestPeak.download = peakMbps;
+						return avgMbps;
+					}
+					received += chunk.value.length;
+					var now = performance.now();
+					samples.push({ t: now, bytes: received });
+					while (samples.length > 1 && now - samples[0].t > WINDOW_MS) samples.shift();
+
+					if (now - lastUiUpdate > FPS_MS) {
+						lastUiUpdate = now;
+						var oldest   = samples[0];
+						var winBytes = received - oldest.bytes;
+						var winMs    = now - oldest.t;
+						var mbps     = winMs > 0 ? (winBytes * 8) / (winMs / 1000) / 1e6 : 0;
+						if (mbps > peakMbps) peakMbps = mbps;
+						self.setGauge('download', mbps);
+					}
+					return pump();
+				});
+			}
+			return pump();
 		}).catch(function () { clearTimeout(to); return null; });
 	},
 
