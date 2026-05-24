@@ -4141,7 +4141,7 @@ Step 195 ship 完用户接受了 Phase 1 视觉(没要求继续 hero 内容增�
 - **Step 206** — Fix-2 + Fix-3:secondary line stroke-width 1.5→2 / opacity 0.55→0.85 / dasharray "3 2"→"5 3",对比度提高;meta 行从 `Peak X Mbps`(只 rx)改 `Peak ↓X Mbps ↑Y Mbps`(双向)
 - **Step 209 hue separation** — Chrome-Claude 实机测后发现 ↑↓ 同色 + dasharray + opacity 仍 indistinguishable when ↑↓ 同步(home LAN 常见)。secondary line 颜色从 `--color-accent-500`(emerald 绿)改 `--color-info`(蓝)。色相 + texture 双轴区分
 
-### Phase 5 — bandwidth Hybrid 主轴(Step 207, 210→219, 211, 212)
+### Phase 5 — bandwidth Hybrid 主轴(Step 207, 210→219→223, 211, 212)
 
 `doc/bandwith.md` 的 Hybrid Tier 2 架构(DESTROY listener + 5s CT_GET dump)。Round 31 nft-bridge 在 HW offload 路径下读 0 字节 → 完全失败。Round 44 整建。
 
@@ -4150,7 +4150,9 @@ Step 195 ship 完用户接受了 Phase 1 视觉(没要求继续 hero 内容增�
 - **Step 211** — CT_GET dump + CTA_ID-keyed reconciliation。加 5s `NFNL_MSG_CT_GET` 请求,完整 Hybrid 架构,in-flight long stream 也能算
 - **Step 212** — rpcd `host-traffic-acct` method + traffic.js 三层 fallback chain(Tier 1 acct → Tier 2 Round 31 nft → Tier 3 nlbwmon)。endpoint 自动检测 `available:true` 即用,否则降级
 - **Step 210/211 部署即崩** — Chrome-Claude 验证后发现 ucode-mod-socket 不导出 AF_NETLINK 且不接受 family=16 → 整个 netlink 路径在 ucode 内**结构性不可达**。memory `ucode-socket-no-netlink.md` 沉淀
-- **Step 219 大转向** — pivot 到 `doc/bandwith.md` §5 Tier 3。daemon 从 ucode 重写为 shell + `conntrack-tools`(50 KB pack)。同样 Hybrid 架构:`conntrack -E -e destroy -o extended` background 事件流 + `conntrack -L -o extended` 5s 定期 dump,merge 到一个 awk accumulator。同样 JSON shape — rpcd/traffic.js 不动。**Round 31 nft init.d 同时 stop+disable**(Tier 3 取代)+ cron 删
+- **Step 219 第二次转向** — pivot 到 `doc/bandwith.md` §5 Tier 3。daemon 从 ucode 重写为 shell + `conntrack-tools`(50 KB pack)。同样 Hybrid 架构:`conntrack -E -e destroy -o extended` background 事件流 + `conntrack -L -o extended` 5s 定期 dump,merge 到一个 awk accumulator。同样 JSON shape — rpcd/traffic.js 不动。**Round 31 nft init.d 同时 stop+disable**(以为 Tier 3 取代)+ cron 删。**ship 后 Chrome-Claude 实机测验出 `destroys_seen=0` 11 分钟**:`flow_offloading=1, flow_offloading_hw=1` 是 ImmortalWrt 24.10 默认,offload fastpath retires flows 不发 `NFNLGRP_CONNTRACK_DESTROY`。**Step 219 重蹈了 daemon 注释头早就写过的 nlbwmon 坑**(`/etc/init.d/design-host-acct` 第一行就讲了这个 mechanism)
+- **Step 222** — opkg dep `conntrack-tools` → `conntrack`(ImmortalWrt 24.10 feed 把 meta-package 拆成 `conntrack` + `conntrackd`)。这个名字 fix 顺势完成,但 daemon 本身仍在 Step 219 的死路径上
+- **Step 223 第三次转向 — 终于对了** — daemon 改读 Round 31 nft bridge counters。Chrome-Claude `nft list table bridge design_acct` 实测:**counter 一直在累加真实 byte 数**(iPad rx=977KB,Qingping tx=164KB,10+ 设备覆盖)—— 数据本来就在内核里,只是 Step 219 选错了读取通路。新 daemon 5s 轮询 `nft list table bridge design_acct` + `/proc/net/arp` IP→MAC join + 聚合per-MAC,输出同样 JSON shape。Round 31 daemon 恢复 enable + start(它是数据生产者),Makefile 撤销 Step 219 的 stop+disable。`+conntrack` 依赖完全删掉。**ship 后 `bytes_credited=107298, hosts={14 个 MAC}` verified live**。新 memory:`[[sfo-bypasses-conntrack-events]]`(+`[[ucode-socket-no-netlink]]` from Step 219 diagnosis)
 
 ### Phase 6 — ARP-based Last Seen + 加固(Step 218, 220)
 
@@ -4167,7 +4169,9 @@ Step 195 ship 完用户接受了 Phase 1 视觉(没要求继续 hero 内容增�
 | MAC vendor lookup 状态 | "Unknown" placeholder | **real vendor names 13/14 UAA + 3/3 LAA detected** |
 | LuCI 26.x quirk memory 数 | 4 | **6**(+Response hijack +ucode-socket no NETLINK) |
 | WAN tile sparkline 双向区分 | 同色 + 对比度低 | **不同 hue + 双向 Peak meta + 更高对比度** |
-| Bandwidth daemon 实现 | Round 31 nft-bridge (HW offload 下 ~0% accuracy) | **conntrack-tools Tier 3**(架构准了,等装包验证) |
+| Bandwidth daemon 实现 | Round 31 nft-bridge (HW offload 下 ~0% accuracy) | **Step 223 nft-bridge-direct**(读 Round 31 counters + per-MAC 聚合,verified live `bytes_credited=107298, hosts=14`)|
+| Bandwidth daemon impl tried | 1(Round 31 nft) | **3**(Step 210 ucode/NETLINK + Step 219 shell/conntrack-E + Step 223 shell/nft-direct) |
+| LuCI 26.x quirk memory 数 | 4 | **6 → 7**(+Response hijack +ucode-socket no NETLINK +**SFO bypasses conntrack events**) |
 | LAN Clients Last Seen 数据源 | lease.expires (Round 38 honest rename) | **/proc/net/arp + iwinfo.assoclist** |
 | 一锅 ship 的 Step 数 | n/a | **25**(Round 44 是项目第一次「攒批量 + 一次性 Chrome-Claude 验证」工作流) |
 
@@ -4179,7 +4183,16 @@ Step 195 ship 完用户接受了 Phase 1 视觉(没要求继续 hero 内容增�
 
 **「降级路径设计」的价值再次被验证**。Step 212 的三层 fallback chain(host-traffic-acct → host-traffic → nlbw)在 Step 210/211 daemon 死透时**让 widget 仍然显示数据**(降级到 Round 31 nft 或 nlbwmon)。如果当时硬切 Tier 1 endpoint,widget 整个 4 小时空着。**lesson**:**重要 surface 切数据源时,旧数据源至少留 1 个 Round 作 fallback**。bandwith.md §8 step 197 的 "Old CGI retained as fallback" 这条架构师选择在 Step 210/211 大崩时直接救场。这是软件工程意义上的「parachute / 降落伞」—— Round 44 实战验证了它的价值。
 
-**Tier 2 → Tier 3 pivot 的成本**。Step 210/211 写了 ~500 LOC ucode netlink TLV parser → Step 219 大砍重写成 ~325 LOC shell + awk + conntrack-tools。**总成本**:~3-4 小时 ucode 开发 + 1 小时部署 debug + 1 小时验证 + ~2 小时 shell 重写 = ~7-8 小时。**架构没浪费** —— 同样的 Hybrid 设计(DESTROY listener + 5s dump),同样的 in_flight + per_mac state model,同样的 JSON 输出 shape,**只换了 binary TLV → text format parser**。**lesson**:**doc/bandwith.md §5 tier matrix 是真有价值的 design tool**。bandwith.md 提前列了 6 个 tier 的对照表(zero deps → ntopng);Step 219 不需要重新设计,只需「按 §5 切到 Tier 3」。**未来任何系统级工程之前,先列 tier matrix,即使不选最简单 tier,知道有哪条退路也救命**。
+**Tier 2 → Tier 3 pivot 的成本**(过早乐观版,Step 221 写的时候)。Step 210/211 写了 ~500 LOC ucode netlink TLV parser → Step 219 大砍重写成 ~325 LOC shell + awk + conntrack-tools。**总成本**:~3-4 小时 ucode 开发 + 1 小时部署 debug + 1 小时验证 + ~2 小时 shell 重写 = ~7-8 小时。**架构没浪费** —— 同样的 Hybrid 设计(DESTROY listener + 5s dump),同样的 in_flight + per_mac state model,同样的 JSON 输出 shape,**只换了 binary TLV → text format parser**。**lesson**:**doc/bandwith.md §5 tier matrix 是真有价值的 design tool**。bandwith.md 提前列了 6 个 tier 的对照表(zero deps → ntopng);Step 219 不需要重新设计,只需「按 §5 切到 Tier 3」。**未来任何系统级工程之前,先列 tier matrix,即使不选最简单 tier,知道有哪条退路也救命**。
+
+**3-impl saga(Step 221 后再补)** —— Step 219 ship 后 Chrome-Claude 实机验证发现 `destroys_seen=0`。原因:ImmortalWrt 24.10 默认 `flow_offloading=1, flow_offloading_hw=1`,offload fastpath retires flows 不发 NFNLGRP_CONNTRACK_DESTROY。**`conntrack -E -e destroy` 跟 nlbwmon 是同一个 mechanism 的受害者** —— 而 Step 118(Round 31)选 bridge family 的注释头里**第一段就讲了这个**。Step 219 重蹈这个坑,我没读自己 daemon 的注释。**真正的 lesson 是这个,不是「tier matrix 救场」**:
+
+- **「黑箱诊断之前,先 cat 自己代码的注释头」** —— Round 31 `/etc/init.d/design-host-acct` 的 60 行注释把"为什么选 bridge family、为什么不用 conntrack hooks、nlbwmon 为什么坏"全部写清楚了。Round 44 Step 219 我只看了 `doc/bandwith.md` 的 tier matrix,**没翻 Round 31 已有的 init.d 源码**。8-10 小时本可以省下来。
+- **「降级路径」的真正价值**:三层 fallback chain(Step 212)+ Round 31 daemon 保留(我 Step 219 错误地 disable 它,Step 223 恢复)= UI 全程不挂。任何系统级 ship 失败的瞬间,Round 31 nft 已存的 byte counter 就是 ground truth。**这是为什么 Step 213 (删 Round 31) 始终没 ship 的隐藏理由** — 它一直在保命。
+
+**daemon-track 三个 impl 全部留在 git history**:Step 210/211(ucode netlink) + Step 219(conntrack -E) + Step 223(nft-bridge-direct)。理论上 Round 45+ 任何人复活 ucode netlink 或 conntrack -E 路径前,git 历史 + 三条 memory(`luci-26-response-class-hijack` / `ucode-socket-no-netlink` / `sfo-bypasses-conntrack-events`)都会拦住他。**Round 44 这段是教科书级"知识沉淀防止 N+1 次重蹈"案例**。
+
+**Chrome-Claude 救命第三次**:Round 43 Phase 6 第一次系统性 catalog production / Round 44 batch verify 第一次实机 NETLINK 失败诊断 / **Round 44 daemon-track 收尾时 Chrome-Claude 一句 `cat /proc/net/nf_conntrack`(有 bytes 字段) + `nft list table bridge design_acct`(实测在涨)就把架构方向反转**。**lesson**:**Chrome-Claude 实机访问能力 + Code-Claude 代码生成能力的两端,缺一不可**。代码 + 文档没说真话(Step 219 误判 conntrack -E 能跑),实机能讲真话。
 
 **Chrome-Claude 角色稳定下来 — verification gateway + bug bug catalog producer**。Round 43 phase 6 已经用过一次 Chrome-Claude full overview scan;Round 44 整个走完依赖 Chrome-Claude 6-7 次实机 + browser DOM 验证。**lesson**:**code-Claude(我)做生成 / 改代码,Chrome-Claude 做 runtime verification + bug catalog production**。这种「双 Claude 分工」工作流比单一 Claude 全做高效得多 —— 每个 Claude 的 context window 各有用途,不互相干扰。**memory 留的 `chrome-claude-briefing.md`(Round 41 Step 155)是这套工作流的契约文件**,Round 44 加深了它的实战价值。
 
