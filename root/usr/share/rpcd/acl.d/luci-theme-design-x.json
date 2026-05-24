@@ -1,0 +1,17 @@
+{
+	"luci-theme-design-x": {
+		"description": "Read-only system metrics for the design-x LuCI theme dashboard. All methods are pure reads of /sys/class/, /proc/, or via iwinfo/nlbw ubus calls — no writes, no exec of user input. Replaces the legacy unauthenticated /cgi-bin/design/* endpoints (Round 42 Step 163, Codex P1-6).",
+		"read": {
+			"ubus": {
+				"luci-theme-design-x": [
+					"devstats",
+					"cpustat",
+					"temp",
+					"host-traffic",
+					"wifi-stations",
+					"nlbw"
+				]
+			}
+		}
+	}
+}

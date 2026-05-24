@@ -46,6 +46,14 @@ define Package/$(PKG_NAME)/postinst-pkg
     chmod +x "$${IPKG_INSTROOT}/etc/init.d/design-host-acct" 2>/dev/null
 [ -f "$${IPKG_INSTROOT}/etc/uci-defaults/40_design-host-acct" ] && \
     chmod +x "$${IPKG_INSTROOT}/etc/uci-defaults/40_design-host-acct" 2>/dev/null
+# Round 42 Step 163: rpcd ubus object script needs +x. The IPKG_INSTROOT
+# guard around the rpcd reload ensures we only call /etc/init.d/rpcd at
+# real install time (target), not at ipk pack time (fakeroot).
+[ -f "$${IPKG_INSTROOT}/usr/libexec/rpcd/luci-theme-design-x" ] && \
+    chmod +x "$${IPKG_INSTROOT}/usr/libexec/rpcd/luci-theme-design-x" 2>/dev/null
+if [ "$${IPKG_INSTROOT}" = "" ] && [ -x /etc/init.d/rpcd ]; then
+    /etc/init.d/rpcd reload 2>/dev/null
+fi
 exit 0
 endef
 

@@ -1,0 +1,68 @@
+#!/bin/sh
+# luci-theme-design-x — rpcd ubus object exposing read-only system
+# metrics to the theme's frontend JS, replacing the legacy
+# unauthenticated /cgi-bin/design/* endpoints (Codex P1-6 fix).
+#
+# Contract (rpcd convention):
+#   $1 = "list"  → emit JSON describing available methods + arg types
+#   $1 = "call"  $2 = <method>  → read JSON args from stdin, emit JSON result
+#
+# Auth: LuCI's authenticated session is granted "read" access to all 6
+# methods via /usr/share/rpcd/acl.d/luci-theme-design-x.json. Anonymous
+# callers get rpcd's standard "Access denied" — the unauthenticated
+# public exposure that the old CGIs had is now closed.
+#
+# Round 42 Step 163: SKELETON. All 6 methods declared but return
+# placeholder JSON so the frontend can be wired against the new
+# transport in a smoke-test mode before real implementation lands.
+# Step 164 fills in `devstats` (canonical pattern) + frontend switch.
+# Step 165 fills in the remaining 5.
+
+case "$1" in
+	list)
+		# Method declarations: name → expected args (type hint only).
+		# Empty {} = method takes no args.
+		echo '{ "devstats": {"dev":"string"}, "cpustat": {}, "temp": {}, "host-traffic": {}, "wifi-stations": {}, "nlbw": {} }'
+		;;
+
+	call)
+		# Args JSON arrives on stdin per rpcd contract.
+		INPUT=$(cat)
+
+		case "$2" in
+			devstats)
+				# Step 164 will replace this with the real
+				# /sys/class/net/<dev>/statistics/{rx,tx}_bytes read
+				# + strict device-name filtering (path-traversal guard
+				# preserved from root/www/cgi-bin/design/devstats).
+				DEV=$(echo "$INPUT" | jsonfilter -e '@.dev' 2>/dev/null)
+				printf '{"method":"devstats","step":163,"todo":"step-164","dev":"%s","up":false,"rx_bytes":0,"tx_bytes":0}\n' "$DEV"
+				;;
+			cpustat)
+				# Step 165 will replace with /proc/stat first-line parse.
+				echo '{"method":"cpustat","step":163,"todo":"step-165","user":0,"nice":0,"system":0,"idle":0,"iowait":0,"irq":0,"softirq":0,"steal":0,"total":0,"busy":0}'
+				;;
+			temp)
+				# Step 165 will replace with thermal_zone*/temp scan.
+				echo '{"method":"temp","step":163,"todo":"step-165","zones":[]}'
+				;;
+			host-traffic)
+				# Step 165 will replace with nft list table bridge design_acct.
+				echo '{"method":"host-traffic","step":163,"todo":"step-165","available":false,"hosts":[],"reason":"skeleton"}'
+				;;
+			wifi-stations)
+				# Step 165 will replace with ubus call iwinfo loop.
+				echo '{"method":"wifi-stations","step":163,"todo":"step-165","available":false,"interfaces":{}}'
+				;;
+			nlbw)
+				# Step 165 will replace with `nlbw -c json -g mac` shim.
+				echo '[]'
+				;;
+			*)
+				# Unknown method — rpcd will treat this as method not found
+				# but we emit something parseable just in case.
+				echo '{"error":"unknown-method"}'
+				;;
+		esac
+		;;
+esac
