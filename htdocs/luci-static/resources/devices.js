@@ -2,6 +2,7 @@
 'require baseclass';
 'require ui';
 'require rpc';
+'require uci';
 
 // Step 83 (Round 13): SVG namespace helpers. LuCI's E('svg',...) creates
 // HTMLUnknownElement — the browser doesn't paint that as SVG so all
@@ -660,24 +661,106 @@ return baseclass.extend({
 		if (row) row.classList.toggle('devices-row-expanded', this.expanded[mac]);
 	},
 
+	// Step 152 (Round 40):rename device system-wide via UCI /etc/config/dhcp.
+	//
+	// Old behavior (Step 44):only wrote to localStorage — per-browser cache,
+	// invisible to dnsmasq, doesn't affect DHCP lease names or DNS resolution.
+	// Multiple browsers / clearing localStorage → name lost.
+	//
+	// New behavior:also writes to /etc/config/dhcp as a `config host` section
+	// with just `mac + name` (NO ip — that's what Set Static is for, keeping
+	// Rename a lightweight name-only operation distinct from full static
+	// lease binding). After uci.save() + uci.apply(), dnsmasq reloads and:
+	//   - DHCP serves the new name (Option 12 override) for that MAC
+	//   - DNS resolves `<newname>.lan` to the device's IP
+	//   - Any /admin/network/dhcp page shows the static name entry
+	//
+	// Optimistic UI: localStorage + DOM update fires immediately (so the
+	// rename feels instant), and UCI roundtrip (~1-3s including dnsmasq
+	// reload) happens in background. If UCI fails, we roll back the DOM +
+	// localStorage and toast the error.
+	//
+	// Side effect to document: uci.apply() commits ALL pending UCI changes,
+	// not just ours. Overview users typically have none, but worth knowing.
 	actionRename: function (mac, currentName) {
-		// Minimal but honest UX: native prompt + localStorage. UCI persistence
-		// is a follow-up (would touch /etc/config + reload schema).
+		var self = this;
 		var next = window.prompt(_('Rename this device') + ' (' + mac + ')', currentName);
 		if (next === null) return;             // cancelled
 		next = next.trim();
+		if (next === currentName) return;      // no-op
+
+		// ── 1. Optimistic UI: instant DOM + localStorage update ─────────────
+		var prevCustom = this.customNames[mac];   // capture for rollback
 		if (next === '') {
-			// Empty → clear custom name and fall back to DHCP/vendor
 			delete this.customNames[mac];
 		} else {
 			this.customNames[mac] = next;
 		}
 		saveCustomNames(this.customNames);
-
-		// Update the visible name in-place (no full re-render)
 		var nameEl = document.querySelector('.devices-row-name[data-mac="' + mac + '"]');
 		if (nameEl) nameEl.textContent = next || mac;
+		toastSafe('info', _('Renaming…'));
 
-		toastSafe('success', _('Saved (this browser only — UCI persistence coming later)'));
+		// ── 2. Persist to UCI /etc/config/dhcp ──────────────────────────────
+		// Find existing `config host` section for this MAC, or create one.
+		// Empty `next` means user wants to remove the override — delete the
+		// section if it has ONLY mac + name (no ip/dns/etc that suggest a
+		// real static lease the user set elsewhere).
+		uci.load('dhcp').then(function () {
+			var sections = uci.sections('dhcp', 'host');
+			var macLower = mac.toLowerCase();
+			var existingSid = null;
+
+			for (var i = 0; i < sections.length; i++) {
+				var macField = sections[i].mac;
+				var macs = Array.isArray(macField) ? macField : (macField ? [macField] : []);
+				for (var k = 0; k < macs.length; k++) {
+					if ((macs[k] || '').toLowerCase() === macLower) {
+						existingSid = sections[i]['.name'];
+						break;
+					}
+				}
+				if (existingSid) break;
+			}
+
+			if (next === '') {
+				if (existingSid) {
+					var s = sections.find(function (x) { return x['.name'] === existingSid; }) || {};
+					var keys = Object.keys(s).filter(function (k) { return k.charAt(0) !== '.'; });
+					var onlyMacName = keys.every(function (k) { return k === 'mac' || k === 'name'; });
+					if (onlyMacName) {
+						uci.remove('dhcp', existingSid);
+					} else {
+						uci.unset('dhcp', existingSid, 'name');
+					}
+				}
+			} else if (existingSid) {
+				uci.set('dhcp', existingSid, 'name', next);
+			} else {
+				var sid = uci.add('dhcp', 'host');
+				uci.set('dhcp', sid, 'mac', mac);
+				uci.set('dhcp', sid, 'name', next);
+			}
+			return uci.save();
+		}).then(function () {
+			// uci.apply() commits to running config + reloads dnsmasq.
+			// Side effect: also commits ANY other pending UCI changes.
+			return uci.apply();
+		}).then(function () {
+			toastSafe('success', next
+				? _('Renamed system-wide') + ' → ' + next
+				: _('Custom name cleared'));
+		}).catch(function (err) {
+			// ── 3. Rollback optimistic UI on failure ────────────────────────
+			if (prevCustom === undefined) {
+				delete self.customNames[mac];
+			} else {
+				self.customNames[mac] = prevCustom;
+			}
+			saveCustomNames(self.customNames);
+			if (nameEl) nameEl.textContent = prevCustom || currentName;
+			toastSafe('error', _('Rename failed') + ': ' +
+				(err && err.message ? err.message : String(err)));
+		});
 	}
 });
