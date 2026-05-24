@@ -129,6 +129,15 @@ function pingOnce() {
 	}).catch(function () { clearTimeout(to); return null; });
 }
 
+// Sequential 5-sample latency measurement, NOT five independent
+// capability checks. The serial `return next()` chain means each fetch
+// completes before the next starts — total wall time is ~5 × ping RTT.
+// On a LAN that yields ~250 ms; in DevTools' network panel it looks
+// like a "thundering herd" of pings at page load (Round 43 Chrome-Claude
+// Bug #8 flagged this as a dedup miss; investigation found it's the
+// intentional measurement burst, working as designed). capability.js
+// has its own CACHE so the wireless/thermal/nlbw probes never duplicate
+// across modules — those are the real capability checks.
 function measurePing() {
 	var samples = [];
 	function next() {
