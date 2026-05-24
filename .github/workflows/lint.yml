@@ -44,68 +44,48 @@ jobs:
             python3 -m json.tool "$f" > /dev/null
           done
 
-      - name: Shellcheck uci-defaults + CGI scripts + dev scripts
-        # CGI scripts under /www/cgi-bin/design/ are user-reachable via the
-        # LuCI auth-gated uhttpd. Any shell-injection bug here is potentially
-        # remote code execution post-login — review carefully.
-        # Step 69 (Round 12): also include devstats + nlbw (added Round 9)
-        # and the Mac-side dev scripts (.sh extension auto-discovered by
-        # scandir: '.', but listed here for completeness/audit visibility).
+      - name: Shellcheck uci-defaults + rpcd ubus + dev scripts
+        # Round 44 Step 201: cgi-bin/design/* removed; the 6 shell-side
+        # endpoints all live in the rpcd ubus object now (Steps 163-167).
+        # Shellcheck still applies to that script + uci-defaults + init.d.
         uses: ludeeus/action-shellcheck@master
         with:
           scandir: '.'
           additional_files: >-
             root/etc/uci-defaults/30_luci-theme-design-x
-            root/www/cgi-bin/design/ping
-            root/www/cgi-bin/design/temp
-            root/www/cgi-bin/design/devstats
-            root/www/cgi-bin/design/download
-            root/www/cgi-bin/design/upload
-            root/www/cgi-bin/design/nlbw
+            root/usr/libexec/rpcd/luci-theme-design-x
           format: gcc
           severity: warning
 
-      - name: CGI safety audit
-        # See doc/upgrade.md §4.C5. We've shellchecked above; this step adds
-        # theme-specific assertions about CGI inputs.
+      - name: rpcd ubus script safety audit
+        # Round 44 Step 201: replaces the legacy "CGI safety audit". The
+        # rpcd ubus dispatcher (root/usr/libexec/rpcd/luci-theme-design-x)
+        # is now the only user-reachable shell entrypoint. It's auth-gated
+        # by ACL (acl.d/luci-theme-design-x.json) but a shell-injection bug
+        # here is still RCE post-auth — keep theme-specific asserts.
         run: |
           python3 <<'PY'
-          import re, sys, os, glob
+          import re, sys, os
+          path = 'root/usr/libexec/rpcd/luci-theme-design-x'
+          if not os.path.isfile(path):
+              print(f'SKIP — {path} not present')
+              sys.exit(0)
+          src = open(path).read()
           fail = []
-
-          cgi_files = glob.glob('root/www/cgi-bin/design/*')
-          cgi_files = [f for f in cgi_files if os.path.isfile(f) and not f.endswith('.gitkeep')]
-
-          for path in cgi_files:
-              src = open(path).read()
-              name = os.path.basename(path)
-
-              # 1. Must start with shebang
-              if not src.startswith('#!/bin/sh') and not src.startswith('#!/bin/bash'):
-                  fail.append(f'{path}: missing #!/bin/sh shebang')
-
-              # 2. Must NOT eval/exec/source untrusted input from $QUERY_STRING
-              if re.search(r'(eval|exec|source|\.\s+)\s+["\']?\$\{?QUERY_STRING', src):
-                  fail.append(f'{path}: dangerous use of $QUERY_STRING with eval/exec/source')
-
-              # 3. download.cgi must clamp bytes (avoid OOM / abuse)
-              if name == 'download':
-                  if 'BYTES' not in src or '-gt' not in src:
-                      fail.append(f'{path}: missing input bounds check on BYTES')
-
-              # 4. Must emit Content-Type header
-              if 'Content-Type:' not in src:
-                  fail.append(f'{path}: missing Content-Type header')
-
-              # 5. Cache-Control no-store (CGI responses change per request)
-              if 'Cache-Control' not in src:
-                  print(f'WARN {path}: no Cache-Control header (may be cached by uhttpd/browser)')
-
+          # 1. Must start with shebang
+          if not src.startswith('#!/bin/sh') and not src.startswith('#!/bin/bash'):
+              fail.append('missing #!/bin/sh shebang')
+          # 2. Must NOT eval/exec/source on raw stdin INPUT
+          if re.search(r'(eval|exec|source|\.\s+)\s+["\']?\$\{?INPUT', src):
+              fail.append('dangerous eval/exec/source of $INPUT')
+          # 3. Device-name args (devstats / wifi-stations) must allowlist
+          if 'devstats' in src and '[!A-Za-z0-9_-]' not in src:
+              fail.append('devstats: missing device name allowlist')
           if fail:
-              print('FAIL — CGI safety audit issues:')
+              print('FAIL — rpcd safety audit:')
               for f in fail: print(f'  {f}')
               sys.exit(1)
-          print(f'OK — {len(cgi_files)} CGI scripts pass theme safety audit')
+          print(f'OK — rpcd ubus dispatcher passes safety audit')
           PY
 
       - name: Validate CSS brace balance
@@ -198,7 +178,7 @@ jobs:
               'htdocs/**/*.css',
               'luasrc/**/*.htm',
               'luasrc/**/*.lua',
-              'root/www/cgi-bin/**/*',
+              'root/usr/libexec/rpcd/luci-theme-design-x',
           ]
           for path in sum((glob.glob(p, recursive=True) for p in patterns), []):
               try:
@@ -332,7 +312,7 @@ jobs:
                                      'htdocs/luci-static/resources/design-x/*.js']),
               'fonts': (25 * 1024, ['htdocs/luci-static/design-x/fonts/*']),
               'sprite':(20 * 1024, ['htdocs/luci-static/design-x/icons.svg']),
-              'cgi':   ( 8 * 1024, ['root/www/cgi-bin/design/*'])
+              'rpcd':  ( 8 * 1024, ['root/usr/libexec/rpcd/luci-theme-design-x'])
           }
 
           fail = False

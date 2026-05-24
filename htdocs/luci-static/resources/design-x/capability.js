@@ -103,15 +103,10 @@ return baseclass.extend({
 		});
 	},
 
-	// Generic CGI reachability probe.
-	cgi: function (name) {
-		return cached('cgi:' + name, function () {
-			var to = withTimeout(800);
-			return fetch('/cgi-bin/design/' + name + '?probe=1', { signal: to.signal })
-				.then(function (r) { to.clear(); return r.ok; })
-				.catch(function () { return false; });
-		});
-	},
+	// Round 44 Step 201: capability.cgi() removed — all 9 CGI endpoints
+	// migrated to rpcd ubus (Steps 163-167) + LuCI Lua controller
+	// (Step 166). There were no in-tree callers of .cgi(); the dead
+	// method (and its /cgi-bin/design/<name>?probe=1 fetch) is gone.
 
 	__reset__: function () { CACHE = {}; }
 });

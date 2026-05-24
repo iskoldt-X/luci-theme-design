@@ -40,8 +40,9 @@ LUCI_DEPENDS:=+luci-base +luci-lua-runtime
 
 define Package/$(PKG_NAME)/postinst-pkg
 #!/bin/sh
-[ -d "$${IPKG_INSTROOT}/www/cgi-bin/design" ] && \
-    chmod -R +x "$${IPKG_INSTROOT}/www/cgi-bin/design/" 2>/dev/null
+# Round 44 Step 201: cgi-bin/design/ removed — all 9 endpoints migrated
+# to luci-theme-design-x rpcd ubus object (Steps 163-167). The chmod -R
+# +x guard for that dir is no longer needed.
 [ -f "$${IPKG_INSTROOT}/etc/init.d/design-host-acct" ] && \
     chmod +x "$${IPKG_INSTROOT}/etc/init.d/design-host-acct" 2>/dev/null
 [ -f "$${IPKG_INSTROOT}/etc/uci-defaults/40_design-host-acct" ] && \

@@ -1,9 +1,0 @@
-#!/bin/sh
-# Theme-provided CGI: tiny pong for browser-side latency measurement.
-# Browser fetches this multiple times; round-trip time = latency.
-# See doc/upgrade.md §0.5, §2.A1, §2.A5.
-
-echo "Content-Type: text/plain"
-echo "Cache-Control: no-store"
-echo ""
-echo "pong"
