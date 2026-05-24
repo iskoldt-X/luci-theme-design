@@ -1,6 +1,7 @@
 'use strict';
 'require baseclass';
 'require network';
+'require rpc';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WAN throughput stats — shared singleton
@@ -44,13 +45,27 @@
 
 var POLL_INTERVAL_MS = 2000;
 
+// Round 42 Step 164: data path migrated from the public unauth CGI
+// /cgi-bin/design/devstats to the auth-gated rpcd ubus method
+// luci-theme-design-x.devstats. The wire format is unchanged (same
+// {dev, up, rx_bytes, tx_bytes} on success, same {error, rx_bytes:0,
+// tx_bytes:0, up:false} on bad input — see /usr/libexec/rpcd/
+// luci-theme-design-x). Only the transport flips: HTTP GET to CGI →
+// JSON-RPC POST to /ubus, with LuCI session ACL gating the call.
+//
+// The old CGI is intentionally NOT deleted in this Step — kept as a
+// fallback while the new path is being verified against production.
+// A later Sub-B2 cleanup Step will rm root/www/cgi-bin/design/devstats
+// once the user confirms the new path works on the MTK build.
+var callDevstats = rpc.declare({
+	object: 'luci-theme-design-x',
+	method: 'devstats',
+	params: [ 'dev' ],
+	expect: { '': {} }
+});
+
 function fetchDevStats(deviceName) {
-	return fetch('/cgi-bin/design/devstats?dev=' + encodeURIComponent(deviceName), {
-		cache: 'no-store'
-	}).then(function (r) {
-		if (!r.ok) throw new Error('http ' + r.status);
-		return r.json();
-	});
+	return callDevstats(deviceName);
 }
 
 function warn(msg, obj) {

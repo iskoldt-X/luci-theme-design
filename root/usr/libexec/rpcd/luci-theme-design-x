@@ -31,12 +31,31 @@ case "$1" in
 
 		case "$2" in
 			devstats)
-				# Step 164 will replace this with the real
-				# /sys/class/net/<dev>/statistics/{rx,tx}_bytes read
-				# + strict device-name filtering (path-traversal guard
-				# preserved from root/www/cgi-bin/design/devstats).
+				# Read /sys/class/net/<dev>/statistics/{rx,tx}_bytes plus
+				# operstate. Mirrors root/www/cgi-bin/design/devstats
+				# verbatim — same input sanitization, same response shape
+				# (HTTP 200 + error payload on bad input, NOT HTTP 400 —
+				# tester agent flagged this contract; JS consumer relies
+				# on it at wan-stats.js: `if (!data || data.error) ...`).
 				DEV=$(echo "$INPUT" | jsonfilter -e '@.dev' 2>/dev/null)
-				printf '{"method":"devstats","step":163,"todo":"step-164","dev":"%s","up":false,"rx_bytes":0,"tx_bytes":0}\n' "$DEV"
+				# Strict filter: only [A-Za-z0-9._-] survives, defends
+				# against path traversal even if the next check were
+				# bypassed.
+				DEV=$(printf '%s' "$DEV" | tr -cd 'a-zA-Z0-9._-')
+				case "$DEV" in
+					""|"."|".."|*..*) DEV="" ;;
+				esac
+				if [ -z "$DEV" ] || [ ! -d "/sys/class/net/$DEV/statistics" ]; then
+					# Error shape preserved: NO `dev` key, has `error` key.
+					echo '{"error":"invalid device","rx_bytes":0,"tx_bytes":0,"up":false}'
+				else
+					RX=$(cat "/sys/class/net/$DEV/statistics/rx_bytes" 2>/dev/null || echo 0)
+					TX=$(cat "/sys/class/net/$DEV/statistics/tx_bytes" 2>/dev/null || echo 0)
+					UP="false"
+					[ "$(cat /sys/class/net/$DEV/operstate 2>/dev/null)" = "up" ] && UP="true"
+					printf '{"dev":"%s","up":%s,"rx_bytes":%s,"tx_bytes":%s}\n' \
+						"$DEV" "$UP" "$RX" "$TX"
+				fi
 				;;
 			cpustat)
 				# Step 165 will replace with /proc/stat first-line parse.
