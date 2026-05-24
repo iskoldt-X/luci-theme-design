@@ -1060,6 +1060,54 @@
     color: var(--color-text-muted);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Round 40 / Step 151 — pure CSS hide upstream DHCP lease sections.
+ *
+ * Steps 149-150 (JS-based hide) didn't stick — user reported sections still
+ * visible after Step 150. Console diagnostic confirmed:
+ *   - regex matched 2 headings (log: "hid 2 upstream DHCP section(s)")
+ *   - heading display computed as 'block' (i.e. visible)
+ *   - data-design-hidden absent on heading (because we set it on the
+ *     ancestor .cbi-section.fade-in, not on the heading itself)
+ *
+ * Root cause: LuCI's overview view rerenders the .cbi-section.fade-in
+ * wrapper (fade-in class is animation-related, suggests it's regenerated
+ * on view-state changes). Our inline style.display='none' on the wrapper
+ * gets clobbered when LuCI replaces the element.
+ *
+ * Fix: bypass the JS-and-inline-style cat-and-mouse, use stable table IDs.
+ * LuCI emits #status_leases (DHCPv4) and #status_leases6 (DHCPv6) — these
+ * IDs have been stable across LuCI 17.x → 26.x. `:has()` targets the
+ * wrapper div containing each table; `display: none !important` wins
+ * against any rerender / inline style.
+ *
+ * The DOM structure (from user's diagnostic):
+ *   #view
+ *     .cbi-section.fade-in
+ *       div                     ← target THIS (hides h3 + table together)
+ *         h3 "Active DHCP Leases"
+ *         table#status_leases
+ *       div                     ← and THIS one
+ *         h3 "Active DHCPv6 Leases"
+ *         table#status_leases6
+ *
+ * `:has()` supported Chrome 105+ / FF 121+ / Safari 15.4+ — already used
+ * elsewhere in this project (Step 107). The JS hide (Steps 149-150) is
+ * left in place as a belt-and-suspenders fallback for older browsers,
+ * even though it didn't fully work — it doesn't hurt to also try the
+ * JS path.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.node-admin-status-overview #view div:has(> #status_leases),
+.node-admin-status-overview #view div:has(> #status_leases6) {
+    display: none !important;
+}
+/* Defensive: also hide the tables themselves in case some build wraps
+ * them differently than (div > h3 + table). */
+.node-admin-status-overview #view #status_leases,
+.node-admin-status-overview #view #status_leases6 {
+    display: none !important;
+}
+
 /* Step 145 (Round 39):scale indicator below the gauge value. Tells user
  * what 100% of the gauge represents (auto-adjusts: "max 250 Mbps" /
  * "max 2.5 Gbps" etc). Small + muted so it's available reference but
