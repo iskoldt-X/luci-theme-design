@@ -272,7 +272,13 @@ return baseclass.extend({
 				E('span', { 'class': 'speedtest-gauge-arrow' }, arrow),
 				E('span', { 'class': 'speedtest-gauge-num', 'id': valueId }, '—'),
 				E('span', { 'class': 'speedtest-gauge-unit' }, ' Mbps')
-			])
+			]),
+			// Step 145 (Round 39):scale indicator. setGauge() writes
+			// "max 1 Gbps" / "max 2.5 Gbps" etc. so users know what 100%
+			// of the gauge represents. Without this, 184 Mbps showing at
+			// 18% of the bar is ambiguous (could mean "18% of 1 Gbps" or
+			// "18% of whatever this gauge maxes at").
+			E('div', { 'class': 'speedtest-gauge-scale', 'id': 'st-scale-' + kind }, '')
 		]);
 	},
 
@@ -287,26 +293,77 @@ return baseclass.extend({
 		]);
 	},
 
-	// Step 52: update one gauge — both the SVG bar (stroke-dashoffset)
-	// and the value text. mbps=null means "reset to —".
-	// SCALE_MBPS picks the dashoffset scale: 1000 Mbps = full bar.
-	// Linear; sub-Gbps connections will look proportional. Could switch
-	// to log scale later if users with 10 Mbps WAN report the gauge
-	// feels empty.
+	// Step 52 → Step 145 (Round 39):adaptive gauge scale.
+	//
+	// Old design hardcoded SCALE_MBPS = 1000 (1 Gbps = full bar). Worked
+	// for typical home connections (100-940 Mbps lands in the visually
+	// active 10-94% range). Broke on:
+	//   - LAN tests over 2.5GbE / 10GbE wired (1300-9000 Mbps → clamped
+	//     to 100%, gauge needle pegged at right side, displayed Mbps
+	//     could exceed gauge max with no visual feedback)
+	//   - Sub-100Mbps connections at the lower end where a 50 Mbps test
+	//     only fills 5% of the bar — looks like 'nothing happened'.
+	//
+	// New: pick the smallest standard scale from SCALES_MBPS that fits
+	// the current value with ~20% headroom (mbps * 1.2 <= scale). Scale
+	// label below the gauge shows the active range.
+	//
+	// IMPORTANT — monotone-up within a single test
+	// Step 143/144 stream live updates ~10x/sec. If the scale auto-picked
+	// per call, mid-test variations (e.g. TCP slow-start at 50 Mbps →
+	// steady 800 Mbps) would cause the bar to JUMP backward visually
+	// (50/100 = 50% → 800/1000 = 80%) — gauge needle skating sideways.
+	// Instead: scale only INCREASES within a test (peak ratchets up).
+	// runTest() resets the ratchet at the start of every run via
+	// resetGaugeScale().
+	//
+	// The 'rescale-up' transition has a UX benefit: when network is
+	// faster than the gauge initially picked, user sees the gauge
+	// "shift down a notch and keep going" — communicates 'you're faster
+	// than I thought, here's more headroom'. Positive feedback signal.
 	setGauge: function (kind, mbps) {
-		var SCALE_MBPS = 1000;
-		var bar  = document.getElementById('st-bar-' + kind);
-		var num  = document.getElementById('st-' + (kind === 'download' ? 'down' : 'up') + '-num');
-		if (bar) {
-			var progress = (mbps === null || !isFinite(mbps))
-				? 0
-				: Math.min(1, Math.max(0, mbps / SCALE_MBPS));
-			var offset = 251 * (1 - progress);
-			bar.setAttribute('stroke-dashoffset', offset.toFixed(1));
+		var SCALES_MBPS = [100, 250, 500, 1000, 2500, 5000, 10000];
+		var bar     = document.getElementById('st-bar-' + kind);
+		var num     = document.getElementById('st-' + (kind === 'download' ? 'down' : 'up') + '-num');
+		var scaleEl = document.getElementById('st-scale-' + kind);
+
+		this._gaugeScale = this._gaugeScale || { download: SCALES_MBPS[0], upload: SCALES_MBPS[0] };
+
+		if (mbps === null || !isFinite(mbps)) {
+			// Reset state
+			if (bar) bar.setAttribute('stroke-dashoffset', 251);
+			if (num) num.textContent = '—';
+			if (scaleEl) scaleEl.textContent = '';
+			return;
 		}
-		if (num) {
-			num.textContent = (mbps === null || !isFinite(mbps)) ? '—' : mbps.toFixed(1);
+
+		// Pick smallest scale that fits with 20% headroom
+		var fitScale = SCALES_MBPS[SCALES_MBPS.length - 1];
+		for (var i = 0; i < SCALES_MBPS.length; i++) {
+			if (mbps * 1.2 <= SCALES_MBPS[i]) { fitScale = SCALES_MBPS[i]; break; }
 		}
+		// Monotone-up: ratchet, never decrease during a single test
+		if (fitScale > this._gaugeScale[kind]) this._gaugeScale[kind] = fitScale;
+		var useScale = this._gaugeScale[kind];
+
+		var progress = Math.min(1, Math.max(0, mbps / useScale));
+		var offset = 251 * (1 - progress);
+		if (bar) bar.setAttribute('stroke-dashoffset', offset.toFixed(1));
+		// More precision for sub-100 Mbps so slow links don't drop to "0.0"
+		if (num) num.textContent = mbps < 100 ? mbps.toFixed(1) : mbps.toFixed(0);
+		if (scaleEl) {
+			scaleEl.textContent = useScale >= 1000
+				? 'max ' + (useScale / 1000) + ' Gbps'
+				: 'max ' + useScale + ' Mbps';
+		}
+	},
+
+	// Step 145 (Round 39):called by runTest() before each test starts to
+	// reset the gauge-scale ratchet. Without this, a slow test (50 Mbps)
+	// after a fast one (2500 Mbps) would still use the 2500 Mbps scale,
+	// showing the slow test as 2% of the bar.
+	resetGaugeScale: function () {
+		this._gaugeScale = { download: 100, upload: 100 };
 	},
 
 	runTest: function () {
@@ -315,6 +372,9 @@ return baseclass.extend({
 		var self = this;
 
 		// Step 52: reset both gauges + stats to '—' at the start of a run.
+		// Step 145 (Round 39):also reset the adaptive scale ratchet so a
+		// slow test after a fast one doesn't render at 2% of an oversized bar.
+		this.resetGaugeScale();
 		this.setGauge('download', null);
 		this.setGauge('upload',   null);
 		this.setStat('latency', '—');

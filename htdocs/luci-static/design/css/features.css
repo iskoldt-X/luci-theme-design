@@ -1060,6 +1060,21 @@
     color: var(--color-text-muted);
 }
 
+/* Step 145 (Round 39):scale indicator below the gauge value. Tells user
+ * what 100% of the gauge represents (auto-adjusts: "max 250 Mbps" /
+ * "max 2.5 Gbps" etc). Small + muted so it's available reference but
+ * doesn't compete with the headline number. */
+.speedtest-gauge-scale {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-subtle);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    margin-top: 2px;
+    min-height: 1em;          /* reserve space so empty state doesn't shift layout */
+    letter-spacing: 0.02em;
+}
+
 /* Step 52: 3 compact stat cards under the gauges — latency / jitter
    / loss. tnum so digits line up between values. */
 .speedtest-stats {
