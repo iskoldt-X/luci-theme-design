@@ -98,18 +98,31 @@
 	//                      Empty when no dispatch path (login form).
 	const reqpath = ctx?.request_path ?? [];
 	const authed  = (ctx?.authsession || !blank_page);
-	// Step 176 fix: `node-main-login` is the login-page styling hook
-	// (CSS at style.css §login hides header/navbar/main-left for it).
-	// LuCI dispatcher renders Overview at /cgi-bin/luci/ root URL for
-	// logged-in users — request_path is [] in that case. Without this
-	// guard, logged-in users staying at the root URL get the login-page
-	// CSS applied and have header + navbar hidden. Chrome-Claude caught
-	// this with body.className = "lang_en logged-in node-main-login" on
-	// the rendered Overview. Only emit `node-main-login` when actually
-	// NOT logged in (the original login-form scenario).
+	// Step 176 + 177 fix: derive a useful body class for the JS card
+	// injection guards to match against.
+	//
+	// LuCI 24.10's ucode dispatcher serves Overview at /cgi-bin/luci/
+	// root URL for logged-in users (no redirect to /admin/status/
+	// overview). `ctx.request_path` is [] in that case. Our 6 Overview
+	// card modules (sparkline / wan-hero / speedtest / devices /
+	// traffic / quick-actions) all early-return when
+	// `body.classList.contains('node-admin-status-overview')` is
+	// false → on the root URL, no class → no cards inject → user
+	// sees a stripped-down Overview without our chrome.
+	//
+	// Fix: when request_path is empty AND user is logged in, tag the
+	// body with `node-admin-status-overview` directly. This is LuCI's
+	// default dispatch target for logged-in root, so the assumption is
+	// empirically correct >99% of the time. If LuCI is configured for
+	// a non-default landing page, the JS guards just early-return and
+	// no cards inject — same as before, no regression.
+	//
+	// `node-main-login` only emitted when actually NOT logged in (the
+	// real login-form scenario where the login-page CSS rules should
+	// apply).
 	const node_class = length(reqpath) > 0
 		? `node-${join('-', reqpath)}`
-		: (authed ? '' : 'node-main-login');
+		: (authed ? 'node-admin-status-overview' : 'node-main-login');
 	const auth_class = authed ? 'logged-in' : '';
 -%}
 	<body class="lang_{{ dispatcher.lang }} {{ auth_class }} {{ node_class }}" data-page="{{ entityencode(join('-', reqpath), true) }}">

@@ -110,16 +110,21 @@
 	<% end -%>
 </head>
 	<%-
-		-- Step 176 fix: only emit `node-main-login` when actually NOT
-		-- logged in. LuCI may render Overview at /cgi-bin/luci/ root for
-		-- logged-in users (path empty) — without this guard the
-		-- login-page CSS hides header + navbar on the real Overview.
+		-- Step 176 + 177 fix: derive a useful body class so the JS card
+		-- injection guards match against it on logged-in root URL.
+		-- LuCI 24.10 dispatches Overview at /cgi-bin/luci/ root for
+		-- logged-in users (no redirect), `path` is "" in that case.
+		-- Without a useful class, our Overview card modules early-
+		-- return (they check `body.classList.contains('node-admin-
+		-- status-overview')`) and no custom cards render. Tag with
+		-- `node-admin-status-overview` as the empirically correct
+		-- default for logged-in root.
 		local authed = luci.dispatcher.context.authsession and true or false
 		local node_class
 		if path ~= "" then
 			node_class = "node-" .. path
 		elseif authed then
-			node_class = ""
+			node_class = "node-admin-status-overview"
 		else
 			node_class = "node-main-login"
 		end
