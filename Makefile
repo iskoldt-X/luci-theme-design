@@ -27,7 +27,9 @@ LUCI_DESCRIPTION:=Modern LuCI theme. Round 42 fork from luci-theme-design \
   to escape file-collisions with immortalwrt 24.10's luci-base. Installs \
   to /www/luci-static/design-x/, mutually exclusive with the legacy \
   luci-theme-design package via PKG_CONFLICTS.
-LUCI_DEPENDS:=+luci-base +luci-lua-runtime
+LUCI_DEPENDS:=+luci-base +luci-lua-runtime \
+	+ucode +ucode-mod-uloop +ucode-mod-fs +ucode-mod-struct \
+	+ucode-mod-socket
 
 # Hook definitions MUST come BEFORE include luci.mk — luci.mk's trailing
 # `$(eval $(call BuildPackage,...))` materialises the package definition,
@@ -52,6 +54,20 @@ define Package/$(PKG_NAME)/postinst-pkg
 # sysctl on first install.
 [ -f "$${IPKG_INSTROOT}/etc/uci-defaults/45_design-conntrack-acct" ] && \
     chmod +x "$${IPKG_INSTROOT}/etc/uci-defaults/45_design-conntrack-acct" 2>/dev/null
+# Round 44 Step 210: bandwidth Hybrid Tier 2 Phase 1 — ucode daemon
+# + its procd init.d wrapper. Both need +x; init.d also needs to be
+# enabled/start at boot via procd's own mechanism.
+[ -f "$${IPKG_INSTROOT}/etc/init.d/design-host-acct-uc" ] && \
+    chmod +x "$${IPKG_INSTROOT}/etc/init.d/design-host-acct-uc" 2>/dev/null
+[ -f "$${IPKG_INSTROOT}/usr/sbin/design-host-acct.uc" ] && \
+    chmod +x "$${IPKG_INSTROOT}/usr/sbin/design-host-acct.uc" 2>/dev/null
+# Enable + start the new ucode listener at install time. Only runs in
+# real install context (IPKG_INSTROOT empty), not in the ipk pack
+# fakeroot. procd handles supervision after this.
+if [ "$${IPKG_INSTROOT}" = "" ] && [ -x /etc/init.d/design-host-acct-uc ]; then
+    /etc/init.d/design-host-acct-uc enable 2>/dev/null
+    /etc/init.d/design-host-acct-uc start 2>/dev/null
+fi
 # Round 42 Step 163: rpcd ubus object script needs +x. The IPKG_INSTROOT
 # guard around the rpcd reload ensures we only call /etc/init.d/rpcd at
 # real install time (target), not at ipk pack time (fakeroot).
@@ -68,9 +84,16 @@ endef
 # fails silently every 5 minutes.
 define Package/$(PKG_NAME)/prerm
 #!/bin/sh
+# Round 31 nft-bridge daemon (kept running in parallel until Step 213
+# removes it).
 if [ -x /etc/init.d/design-host-acct ]; then
     /etc/init.d/design-host-acct stop 2>/dev/null
     /etc/init.d/design-host-acct disable 2>/dev/null
+fi
+# Round 44 Step 210 ucode DESTROY listener daemon.
+if [ -x /etc/init.d/design-host-acct-uc ]; then
+    /etc/init.d/design-host-acct-uc stop 2>/dev/null
+    /etc/init.d/design-host-acct-uc disable 2>/dev/null
 fi
 if [ -f /etc/crontabs/root ]; then
     sed -i '/design-host-acct refresh/d' /etc/crontabs/root 2>/dev/null
