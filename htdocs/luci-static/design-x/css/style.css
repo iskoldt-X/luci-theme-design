@@ -3012,6 +3012,13 @@ div.cbi-value > .cbi-value-description {
     color: var(--color-text-onaccent) !important;
     background: var(--color-accent-500) !important;
     border-radius: inherit;
+    /* Round 44 Step 196 — Bug #9 (Chrome-Claude). When LuCI sets the
+       fill width to literally 0% (Buffered when there's no buffered
+       memory, fresh Active Connections after reboot, Swap on swap-
+       less boxes), the fill rendered as 0px wide → looked like "bar
+       failed to load" rather than "this metric is 0". A 2px minimum
+       gives a thin emerald sliver that says "alive, just empty". */
+    min-width: 2px;
 }
 
 .cbi-progressbar::after {
