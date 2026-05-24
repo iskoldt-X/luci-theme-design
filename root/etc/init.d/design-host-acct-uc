@@ -23,19 +23,22 @@ USE_PROCD=1
 START=99
 STOP=09
 
-UCODE_BIN="/usr/bin/ucode"
-DAEMON_SCRIPT="/usr/sbin/design-host-acct.uc"
+DAEMON_SCRIPT="/usr/sbin/design-host-acct.sh"
+CONNTRACK_BIN="/usr/sbin/conntrack"
 
 start_service() {
-    # Defensive: skip if ucode runtime is missing. The IPK declares
-    # +ucode as a dep via Makefile, but a manual remove of ucode-base
-    # would otherwise leave a broken init script in the rc.d chain.
-    if [ ! -x "$UCODE_BIN" ]; then
-        logger -t design-host-acct-uc "ucode binary missing — service not started"
+    # Round 44 Step 219: daemon migrated from ucode (Step 210/211) to
+    # shell + conntrack-tools after Chrome-Claude verified ucode-mod-socket
+    # doesn't export AF_NETLINK on ImmortalWrt 24.10's luci-26.x. See
+    # doc/bandwith.md §5 Tier 3 + memory/luci-26-response-class-hijack.md
+    # for context on the LuCI 26.x quirk family.
+    if [ ! -x "$CONNTRACK_BIN" ]; then
+        logger -t design-host-acct \
+            "conntrack binary missing (need conntrack-tools) — service not started"
         return 1
     fi
-    if [ ! -r "$DAEMON_SCRIPT" ]; then
-        logger -t design-host-acct-uc "daemon script $DAEMON_SCRIPT missing"
+    if [ ! -x "$DAEMON_SCRIPT" ]; then
+        logger -t design-host-acct "daemon script $DAEMON_SCRIPT missing"
         return 1
     fi
 
@@ -44,12 +47,12 @@ start_service() {
     # Step 207's conf file not being applied yet, e.g. on a hand-copy).
     local acct=$(sysctl -n net.netfilter.nf_conntrack_acct 2>/dev/null)
     if [ "$acct" != "1" ]; then
-        logger -t design-host-acct-uc \
+        logger -t design-host-acct \
             "WARN: net.netfilter.nf_conntrack_acct=$acct — flows will report zero bytes (run: sysctl -p /etc/sysctl.d/11-design-conntrack-acct.conf)"
     fi
 
-    procd_open_instance "design-host-acct-uc"
-    procd_set_param command "$UCODE_BIN" "$DAEMON_SCRIPT"
+    procd_open_instance "design-host-acct"
+    procd_set_param command /bin/sh "$DAEMON_SCRIPT"
     procd_set_param respawn 60 5 0
     procd_set_param stdout 1
     procd_set_param stderr 1

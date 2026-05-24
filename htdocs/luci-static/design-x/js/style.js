@@ -88,23 +88,42 @@
 	//   4. MutationObserver watches inline style changes (LuCI polls every
 	//      5s and updates the width attr) so the tier recomputes live.
 	function tierForWidth(pct) {
+		// Round 44 Step 219: thresholds lowered from 90/95 to 80/95.
+		// Chrome-Claude verification of Step 199 found that 90% is rarely
+		// crossed on real routers — Memory typically sits 60-85% — so
+		// the tier coloring feature was invisible in practice. 80% is
+		// the "worth knowing" memory pressure point on a 1 GB ARM box.
+		// 95% remains the "near OOM / swap engaged" red zone.
 		if (pct >= 95) return 'danger';
-		if (pct >= 90) return 'warn';
+		if (pct >= 80) return 'warn';
 		return null;
 	}
 	function applyTier(bar) {
-		var fill = bar.querySelector(':scope > div');
-		if (!fill) return;
-		// Inline width is "X%" or "X.Ypx" depending on LuCI version. Strip
-		// non-numeric tail, parse as float, treat NaN as 0.
-		var raw = fill.style.width || '';
-		var pct = parseFloat(raw);
-		if (!isFinite(pct)) pct = 0;
-		// If width is in pixels (rare), assume bar is at most 100% wide of
-		// its container — fall through to using offsetWidth ratio.
-		if (raw.indexOf('%') === -1 && bar.offsetWidth) {
-			pct = (fill.offsetWidth / bar.offsetWidth) * 100;
+		// Round 44 Step 219: read pct via 3-way fallback. Chrome-Claude
+		// found Step 199's `fill.style.width` path doesn't fire on some
+		// LuCI 26 progressbars because LuCI uses `bar.title` ("X / Y (Z%)")
+		// as the authoritative readout and may not always set inline
+		// width on the fill div (depends on cbi.js render path).
+		//   1. parse `(NN%)` out of bar.title — primary, matches LuCI's
+		//      own pct source of truth
+		//   2. parse `fill.style.width` inline — works when LuCI used
+		//      old-style render path
+		//   3. fall back to offsetWidth ratio — last resort
+		var pct = NaN;
+		var title = bar.getAttribute('title') || bar.title || '';
+		var titleMatch = title.match(/\((\d+(?:\.\d+)?)%\)/);
+		if (titleMatch) {
+			pct = parseFloat(titleMatch[1]);
 		}
+		var fill = bar.querySelector(':scope > div');
+		if (!isFinite(pct) && fill) {
+			var raw = fill.style.width || '';
+			pct = parseFloat(raw);
+			if (!isFinite(pct) && bar.offsetWidth && fill.offsetWidth) {
+				pct = (fill.offsetWidth / bar.offsetWidth) * 100;
+			}
+		}
+		if (!isFinite(pct)) pct = 0;
 		var tier = tierForWidth(pct);
 		if (tier) bar.setAttribute('data-tier', tier);
 		else bar.removeAttribute('data-tier');

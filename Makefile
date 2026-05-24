@@ -28,8 +28,7 @@ LUCI_DESCRIPTION:=Modern LuCI theme. Round 42 fork from luci-theme-design \
   to /www/luci-static/design-x/, mutually exclusive with the legacy \
   luci-theme-design package via PKG_CONFLICTS.
 LUCI_DEPENDS:=+luci-base +luci-lua-runtime \
-	+ucode +ucode-mod-uloop +ucode-mod-fs +ucode-mod-struct \
-	+ucode-mod-socket
+	+conntrack-tools
 
 # Hook definitions MUST come BEFORE include luci.mk — luci.mk's trailing
 # `$(eval $(call BuildPackage,...))` materialises the package definition,
@@ -54,19 +53,38 @@ define Package/$(PKG_NAME)/postinst-pkg
 # sysctl on first install.
 [ -f "$${IPKG_INSTROOT}/etc/uci-defaults/45_design-conntrack-acct" ] && \
     chmod +x "$${IPKG_INSTROOT}/etc/uci-defaults/45_design-conntrack-acct" 2>/dev/null
-# Round 44 Step 210: bandwidth Hybrid Tier 2 Phase 1 — ucode daemon
-# + its procd init.d wrapper. Both need +x; init.d also needs to be
-# enabled/start at boot via procd's own mechanism.
+# Round 44 Step 210 → Step 219: bandwidth Hybrid Tier 3 — shell daemon
+# + conntrack-tools, supersedes the ucode/AF_NETLINK approach that
+# Chrome-Claude verified is blocked by ucode-mod-socket on LuCI 26.x.
 [ -f "$${IPKG_INSTROOT}/etc/init.d/design-host-acct-uc" ] && \
     chmod +x "$${IPKG_INSTROOT}/etc/init.d/design-host-acct-uc" 2>/dev/null
+[ -f "$${IPKG_INSTROOT}/usr/sbin/design-host-acct.sh" ] && \
+    chmod +x "$${IPKG_INSTROOT}/usr/sbin/design-host-acct.sh" 2>/dev/null
+# Step 219: also clean up the dead ucode daemon if a previous Step 210
+# install left it behind. The .sh is the live file now.
 [ -f "$${IPKG_INSTROOT}/usr/sbin/design-host-acct.uc" ] && \
-    chmod +x "$${IPKG_INSTROOT}/usr/sbin/design-host-acct.uc" 2>/dev/null
-# Enable + start the new ucode listener at install time. Only runs in
-# real install context (IPKG_INSTROOT empty), not in the ipk pack
-# fakeroot. procd handles supervision after this.
+    rm -f "$${IPKG_INSTROOT}/usr/sbin/design-host-acct.uc" 2>/dev/null
+# Enable + start the (now shell) listener at install time. Only runs
+# in real install context (IPKG_INSTROOT empty), not ipk pack fakeroot.
 if [ "$${IPKG_INSTROOT}" = "" ] && [ -x /etc/init.d/design-host-acct-uc ]; then
     /etc/init.d/design-host-acct-uc enable 2>/dev/null
-    /etc/init.d/design-host-acct-uc start 2>/dev/null
+    /etc/init.d/design-host-acct-uc restart 2>/dev/null
+    # Step 219: kill the Round 31 nft-bridge daemon. Tier 3 is now the
+    # authoritative source — keeping the old running just doubles up
+    # service load + cron noise. Round 31's nft table is left in place
+    # (no `nft delete` here) so a manual revert is one /etc/init.d/start
+    # away if needed; Step 213 finishes the artifact wipe.
+    if [ -x /etc/init.d/design-host-acct ]; then
+        /etc/init.d/design-host-acct stop 2>/dev/null
+        /etc/init.d/design-host-acct disable 2>/dev/null
+    fi
+    # Step 219: also remove the Round 31 cron entry that was firing
+    # `design-host-acct refresh` every minute. New daemon is event-driven,
+    # cron not needed.
+    if [ -f /etc/crontabs/root ] && grep -q "design-host-acct refresh" /etc/crontabs/root; then
+        sed -i '/design-host-acct refresh/d' /etc/crontabs/root 2>/dev/null
+        /etc/init.d/cron reload 2>/dev/null || /etc/init.d/cron restart 2>/dev/null
+    fi
 fi
 # Round 42 Step 163: rpcd ubus object script needs +x. The IPKG_INSTROOT
 # guard around the rpcd reload ensures we only call /etc/init.d/rpcd at
