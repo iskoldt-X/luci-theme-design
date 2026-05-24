@@ -121,6 +121,81 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+      - name: Fetch + transform Wireshark manuf OUI database
+        # Round 44 Step 202 — MAC vendor lookup Phase 2B (doc/macvendor.md §四).
+        # Fetches the upstream Wireshark `manuf` community-curated OUI database,
+        # filters to 24-bit MA-L entries only (skip MA-M / MA-S — see
+        # doc/macvendor.md §七 #7 for why), serialises to compact JSON keyed
+        # by 6-hex-char uppercase prefix, gzips. The resulting oui.json.gz
+        # is NOT committed (.gitignore'd) — regenerated fresh on every build
+        # so we ship the latest registrations automatically.
+        #
+        # Real-world size (measured 2026-05-24 against current manuf):
+        #   ~39K MA-L entries, ~853 KB raw JSON, ~332 KB gzip -9
+        # doc/macvendor.md §四's 150 KB estimate was optimistic — short
+        # names have low entropy and don't compress as well as the doc
+        # author projected. 332 KB is still small for what we're shipping.
+        #
+        # Sanity rails:
+        #   floor 250 KB — < 250 means fetch / transform broke (real DB
+        #                  has had >300 KB gzip for years)
+        #   ceiling 450 KB — < 450 catches accidental MA-M inclusion (would
+        #                    add ~75% to size) or future Wireshark format
+        #                    bloat
+        # Awk transform: parses tab-separated columns explicitly via
+        # FS='\t' because the raw format pads col 1 with trailing spaces
+        # before the tab — a naive `^XX:XX:XX\t` regex misses everything.
+        # MA-M / MA-S filtered by demanding col 1 contains no `/` (those
+        # entries look like `00:1B:C5:00:00/36` in col 1).
+        run: |
+          mkdir -p htdocs/luci-static/design-x/data
+          curl -fsSL --max-time 60 \
+            https://www.wireshark.org/download/automated/data/manuf \
+            -o /tmp/manuf
+          awk -F'\t' '
+            !/^#/ && /[^[:space:]]/ {
+              # MA-L: col 1 is "XX:XX:XX           " (8 hex chars + padding,
+              # no slash). MA-M / MA-S have "/28" or "/36" suffix — reject.
+              if ($1 ~ /^[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f][ ]*$/) {
+                prefix = $1
+                gsub(/[ \t]+$/, "", prefix)
+                gsub(":", "", prefix)
+                prefix = toupper(prefix)
+                # Short name (col 2) is Wireshark-curated to a sensible
+                # 12-char abbrev. Long name (col 3) is the full registry
+                # entity — too verbose for the LAN Clients vendor cell.
+                name = $2
+                gsub(/[ \t]+$/, "", name)
+                gsub(/[\\"]/, "", name)
+                if (length(name) > 0) entries[prefix] = name
+              }
+            }
+            END {
+              printf "{"
+              first = 1
+              for (p in entries) {
+                if (!first) printf ","
+                printf "\"%s\":\"%s\"", p, entries[p]
+                first = 0
+              }
+              printf "}"
+            }
+          ' /tmp/manuf | gzip -9 > htdocs/luci-static/design-x/data/oui.json.gz
+
+          SIZE=$(stat -c%s htdocs/luci-static/design-x/data/oui.json.gz)
+          echo "oui.json.gz size: $SIZE bytes"
+          if [ "$SIZE" -gt 460800 ]; then
+            echo "ERROR: oui.json.gz exceeded 450 KB ceiling — MA-M / MA-S leaked in?"
+            exit 1
+          fi
+          if [ "$SIZE" -lt 256000 ]; then
+            echo "ERROR: oui.json.gz < 250 KB — fetch / transform broke"
+            exit 1
+          fi
+          RAW=$(gunzip -c htdocs/luci-static/design-x/data/oui.json.gz | wc -c)
+          ENTRIES=$(gunzip -c htdocs/luci-static/design-x/data/oui.json.gz | tr ',' '\n' | wc -l)
+          echo "oui.json (raw): $RAW bytes / $ENTRIES MA-L entries"
+
       - name: Stage theme into SDK
         run: |
           mkdir -p sdk/package/luci-theme-design-x
@@ -133,6 +208,9 @@ jobs:
             --exclude='sdk/' \
             --exclude='*.tar' \
             ./ sdk/package/luci-theme-design-x/
+          # Confirm the OUI artifact made it into staging
+          ls -l sdk/package/luci-theme-design-x/htdocs/luci-static/design-x/data/oui.json.gz \
+            || (echo "ERROR: oui.json.gz missing from SDK staging"; exit 1)
           echo "Staged tree:"
           find sdk/package/luci-theme-design-x -maxdepth 3 -type f | head -30
 
