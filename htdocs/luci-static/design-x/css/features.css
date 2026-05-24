@@ -552,23 +552,24 @@
     margin-top: auto;
 }
 
-/* Net tile secondary sparkline line (tx). Same accent color as primary
-   line (same kind of metric, just different direction) but dashed +
-   half-opacity so visual hierarchy reads 'rx is primary, tx is its
-   partner trace'.
-   Round 44 Step 206 — Fix-2 (doc/wan_traffic.md §三 P1). Original
-   stroke-width 1.5 + opacity 0.55 + tight dasharray "3 2" combined
-   to ~1.5:1 contrast on white tile bg — line was nearly invisible
-   even when path was correctly computed. After Step 205 removed the
-   sharedHi quantum compression, the line is in the right vertical
-   slot; this Fix bumps contrast so users can actually see it.
-   New values: stroke-width 2 (was 1.5), opacity 0.85 (was 0.55),
-   dasharray "5 3" (was "3 2", less staccato — reads as a line). */
+/* Net tile secondary sparkline line (tx — upload).
+   Round 44 Step 206: stroke-width / opacity / dasharray bumped from
+   Step 139's original values to make the line visible at all (was
+   ~1.5:1 contrast).
+   Round 44 Step 209: COLOR changed from emerald (--color-accent-500)
+   to blue (--color-info). Chrome-Claude verification of Step 205+206
+   on user's box found that even with bumped opacity + thicker stroke,
+   the two same-color emerald lines are indistinguishable when ↑↓
+   move in lockstep (which is most of the time on home LAN traffic).
+   Hue separation is the only thing that reliably distinguishes them.
+   ↓ download stays emerald (it's the primary signal); ↑ upload
+   becomes blue. Dasharray retained as a secondary cue — readable
+   even for color-blind viewers via line texture. */
 .design-tile-spark-line-secondary {
-    stroke: var(--color-accent-500);
+    stroke: var(--color-info);
     stroke-width: 2;
     stroke-dasharray: 5 3;
-    opacity: 0.85;
+    opacity: 0.9;
     fill: none;
     stroke-linecap: round;
     stroke-linejoin: round;
