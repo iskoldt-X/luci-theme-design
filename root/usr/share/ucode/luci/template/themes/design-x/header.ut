@@ -20,81 +20,35 @@
 	Licensed to the public under the Apache License 2.0
 -#}
 
-{%-
-	// LuCI 24.10+ ucode template runtime pre-populates these globals:
-	//   media, resource, lang, csrf_token, luciversion, luciname, distversion
-	//   boardinfo, request, request_path, nodespec, path
-	//   url(), include(), striptags(), pcdata(), translate(), translatef()
-	//   dispatcher.lookup(), http.prepare_content(), fs, ubus
-	// No `require` statements needed (Lua-side counterpart loaded
-	// luci.sys / luci.util / luci.http / luci.dispatcher / luci.version
-	// — all surfaced as template globals here).
+{#-
+	Round 42 Step 171 hotfix — ucode template runtime in LuCI 24.10
+	(/usr/share/ucode/luci/runtime.uc) does NOT expose `fs` or
+	`dispatcher` as globals in the template scope. The first ipk
+	release (dee7291) had calls to fs.open() + dispatcher.lookup()
+	that crashed at runtime.uc:133 with "left-hand side expression
+	is null" (null dereference). This rewrite drops those calls.
 
-	// Step 87 (Round 14): per-deploy cache-buster token used on all
-	// theme-asset `?v=` URLs below.
-	//
-	// Why: LuCI's default cache-buster is luciversion (e.g.
-	// "26.136.30825~c9cbaea") which only changes when LuCI itself
-	// upgrades. That means every dev-sync rsync writes new JS/CSS but
-	// the browser keeps serving cached copies.
-	//
-	// How: scripts/dev-sync.sh writes /tmp/luci-design.cachebust on the
-	// router after each successful rsync. We read it here and append
-	// to our asset URLs. End users (no dev-sync file) fall back to
-	// luciversion, identical to pre-Step-87 behaviour. /tmp is tmpfs
-	// (RAM) so reboot wipes it — falls back cleanly.
-	//
-	// Bonus: line ~71 also gets `cb` instead of luciversion. LuCI's own
-	// luci.js extracts ?v=... from its own <script src=...> and uses
-	// it as env.resource_version for ALL L.require() calls — cascade.
-	let cb = luciversion;
-	let fd = fs.open("/tmp/luci-design.cachebust", "r");
-	if (fd) {
-		let v = fd.read("line");
-		fd.close();
-		if (v) {
-			v = replace(v, /\n$/, "");
-			if (length(v) > 0) cb = v;
-		}
-	}
+	Features SACRIFICED on the ucode track (Lua track keeps them):
+	  - Per-deploy cache-buster reading /tmp/luci-design.cachebust
+	    (Step 87 / Round 14) — `cb` now just equals `luciversion`,
+	    same as LuCI's default cache-buster
+	  - Root-no-password warning (Step 153 / Round 40) — needs
+	    /etc/shadow read which non-root rpcd can't do anyway
+	  - OpenClash navbar tab conditional render (Step 104 /
+	    Round 22) — no way to check installed apps without
+	    dispatcher.lookup. Tab dropped entirely from ucode track.
 
-	// Step 153 (Round 40) — root-no-password warning.
-	//
-	// Lua original used:
-	//   luci.sys.process.info("uid") == 0
-	//   luci.sys.user.getuser("root")
-	//   luci.sys.user.getpasswd("root")
-	//
-	// On 24.10+ LuCI runs as non-root via rpcd. The uid check is
-	// misleading (always false now). /etc/shadow is 0600 owned by
-	// root so a non-root template can't read it directly.
-	//
-	// Try fs.access first — fail-closed if denied (no warning shown).
-	// The Lua track at luasrc/view/themes/design-x/header.htm still
-	// shows the warning on systems with luci-lua-runtime installed.
-	// TODO(round-42+): expose root-pw status via an rpcd ACL'd object
-	// so the warning works on ucode-only systems too.
-	let root_no_pw = false;
-	if (fs.access("/etc/shadow", "r")) {
-		let sf = fs.open("/etc/shadow", "r");
-		if (sf) {
-			let line;
-			while ((line = sf.read("line")) !== null) {
-				if (substr(line, 0, 5) == "root:") {
-					let parts = split(line, ":");
-					let hash = parts[1];
-					if (hash == "" || hash == "!" || hash == "*") {
-						root_no_pw = true;
-					}
-					break;
-				}
-			}
-			sf.close();
-		}
-	}
+	The Lua track at luasrc/view/themes/design-x/header.htm keeps
+	all three features for builds with luci-lua-runtime + when LuCI's
+	template engine picks .htm over .ut (older LuCI versions, or
+	if .ut is missing on the install).
 
-	http.prepare_content("text/html; charset=UTF-8");
--%}
+	TODO Round 43+: investigate the exact globals exposed by LuCI
+	24.10's ucode template scope (cat /usr/share/ucode/luci/
+	template/themes/bootstrap/header.ut for a known-working ref),
+	then re-introduce the lost features via the correct API surface.
+-#}
+
 <!DOCTYPE html>
 <html lang="{{ lang }}">
 <head>
@@ -118,20 +72,17 @@
 	<link rel="apple-touch-icon" sizes="192x192" href="{{ media }}/images/icon.png">
 	<link rel="shortcut icon" type="image/png" href="{{ media }}/images/icon.png">
 
-	<link rel="stylesheet" href="{{ media }}/css/style.css?v={{ cb }}">
+	<link rel="stylesheet" href="{{ media }}/css/style.css?v={{ luciversion }}">
 	{#- Step 67 (Round 11): features.css used to be @import-ed from the end
-	    of style.css. CSS spec says @import must come BEFORE all other rules
-	    — Edge/Chrome stopped honouring our trailing @import on 2026-05-23,
-	    breaking every feature card on Overview. Loading via a separate
-	    <link> tag is spec-compliant, parallel-loadable, and faster. -#}
-	<link rel="stylesheet" href="{{ media }}/css/features.css?v={{ cb }}">
+	    of style.css. CSS spec says @import must come BEFORE all other rules. -#}
+	<link rel="stylesheet" href="{{ media }}/css/features.css?v={{ luciversion }}">
 	{% if (nodespec && nodespec.css): %}
 	<link rel="stylesheet" href="{{ resource }}/{{ nodespec.css }}">
 	{% endif -%}
 
 	<script src="{{ url('admin/translations', lang) }}"></script>
 	<script src="{{ resource }}/cbi.js"></script>
-	<script src="{{ resource }}/luci.js?v={{ cb }}"></script>
+	<script src="{{ resource }}/luci.js?v={{ luciversion }}"></script>
 	{% if (css): %}
 	<style title="text/css">
 		{{ css }}
@@ -160,30 +111,15 @@
 	</div>
 </header>
 
-{#- Step 104 (Round 22): bottom navbar upgraded to preview-parity design.
-    Each tab now has:
-      - SVG icon from icons.svg sprite (replaces 28-px PNG)
-      - Visible text label below the icon (10 px in preview spec)
-      - .navbar-tab-{home|proxy|network|stats|admin} class so CSS can
-        cross-match against body[data-page^="..."] for active state.
-    Icon ↔ section map (consistent with preview's iPhone mockup):
-      Overview  → i-home
-      OpenClash → i-globe  (preview's proxy slot)
-      Network   → i-network
-      Realtime  → i-bar-chart
-      Admin     → i-user
--#}
+{#- Step 104 (Round 22): bottom navbar — preview-parity tabs.
+    OpenClash tab dropped from ucode track per Step 171 hotfix (would
+    need dispatcher.lookup which is not exposed in ucode template scope).
+    Lua track keeps the conditional OpenClash tab. -#}
 <div class="navbar">
   <a class="navbar-tab navbar-tab-home" href="{{ url('admin/status/overview') }}">
     <svg class="navbar-tab-icon" aria-hidden="true"><use href="{{ media }}/icons.svg#i-home"/></svg>
     <span class="navbar-tab-label">{{ translate('Home') }}</span>
   </a>
-  {% if (dispatcher.lookup('admin/services/openclash')): %}
-  <a class="navbar-tab navbar-tab-proxy" href="{{ url('admin/services/openclash') }}">
-    <svg class="navbar-tab-icon" aria-hidden="true"><use href="{{ media }}/icons.svg#i-globe"/></svg>
-    <span class="navbar-tab-label">OpenClash</span>
-  </a>
-  {% endif %}
   <a class="navbar-tab navbar-tab-network" href="{{ url('admin/network/network') }}">
     <svg class="navbar-tab-icon" aria-hidden="true"><use href="{{ media }}/icons.svg#i-network"/></svg>
     <span class="navbar-tab-label">{{ translate('Network') }}</span>
@@ -208,13 +144,12 @@
 		<div class="darkMask"></div>
 		<div id="maincontent">
 			<div class="container">
-				{%- if (root_no_pw && path != "admin-system-admin-password"): -%}
-				<div class="alert-message warning">
-					<h4>{{ translate('No password set!') }}</h4>
-					<p>{{ translate('There is no password set on this router. Please configure a root password to protect the web interface.') }}</p>
-					<div class="right"><a class="btn cbi-button cbi-button-apply" href="{{ url('admin/system/admin') }}">{{ translate('Go to password configuration...') }}</a></div>
-				</div>
-				{%- endif -%}
+				{#- Root-no-password warning dropped from ucode track per
+				    Step 171 hotfix (needs fs.open(/etc/shadow) which
+				    ucode template scope doesn't reliably expose, AND
+				    /etc/shadow is 0600 root-owned so even with fs we
+				    can't read from rpcd's non-root context). Lua track
+				    at luasrc/view/themes/design-x/header.htm keeps it. -#}
 
 				<noscript>
 					<div class="alert-message warning">
@@ -224,4 +159,4 @@
 				</noscript>
 
 				<div id="tabmenu" style="display:none"></div>
-	<script src="{{ media }}/js/style.js?v={{ cb }}"></script>
+	<script src="{{ media }}/js/style.js?v={{ luciversion }}"></script>
