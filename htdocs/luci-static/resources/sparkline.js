@@ -253,7 +253,14 @@ function setTile(tileEl, opts) {
 
 	if (trendEl) {
 		if (opts.trend && opts.trend.dir !== 'flat') {
-			trendEl.textContent = (opts.trend.dir === 'up' ? '↑ ' : '↓ ') + opts.trend.text;
+			// Step 138 (Round 36): use ▲/▼ filled triangles + explicit sign
+			// instead of ↑/↓. The arrow shapes ↑/↓ conflict with the WAN
+			// tile's direction prefixes (↓ for download / ↑ for upload),
+			// where the same glyph means "direction of data flow" not
+			// "trend up/down vs previous sample". Filled triangles + signed
+			// number disambiguate at-a-glance: "▲ +50 Kbps" reads as
+			// "trend rising by 50", "↓ 837 Kbps" reads as "download rate".
+			trendEl.textContent = (opts.trend.dir === 'up' ? '▲ +' : '▼ -') + opts.trend.text;
 			trendEl.className   = 'design-tile-trend design-tile-trend-' + opts.trend.dir;
 		} else {
 			// Empty content + base class — CSS `:empty { display: none }` hides
