@@ -392,7 +392,17 @@ function fetchTempZones() {
 	return callTemp()
 		.then(function (data) {
 			if (!data || !Array.isArray(data.zones) || !data.zones.length) return null;
-			return data.zones;
+			// Round 43 Step 192 — Bug #6 (Chrome-Claude). On VMs (QEMU,
+			// container hosts) the ACPI thermal_zone* nodes exist but
+			// report 0 or fixed garbage. fetchTempZones used to return
+			// the array as-is, so the tile rendered with "—" forever.
+			// Sanity-filter to zones reporting a plausible temp (≥1°C
+			// and ≤200°C). If nothing survives, return null → tile hides.
+			var live = data.zones.filter(function (z) {
+				if (!z || typeof z.temp !== 'number') return false;
+				return z.temp >= 1 && z.temp <= 200;
+			});
+			return live.length ? live : null;
 		})
 		.catch(function () { return null; });
 }
@@ -506,9 +516,17 @@ return baseclass.extend({
 
 	startPolling: function () {
 		var self = this;
-		// Probe temp once to decide whether to show the temp tile
+		// Probe temp once to decide whether to show the temp tile.
+		// Round 43 Step 192 — Bug #6 (Chrome-Claude). Use data-design-hidden
+		// attribute (Step 188's universal CSS hides it) in ADDITION to
+		// inline style.display, so any later code that touches
+		// .style.display can't accidentally un-hide. Grid layout
+		// auto-reflows; the remaining 3 tiles flex-fill the row.
 		fetchTempZones().then(function (zones) {
-			if (!zones) self.tileTemp.style.display = 'none';
+			if (!zones && self.tileTemp) {
+				self.tileTemp.style.display = 'none';
+				self.tileTemp.dataset.designHidden = '1';
+			}
 		});
 
 		// Step 43: subscribe to the design-x.wan-stats singleton (Step 42). It polls
