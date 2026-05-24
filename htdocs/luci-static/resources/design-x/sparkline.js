@@ -77,7 +77,7 @@ MetricRing.prototype.avg = function () {
 	for (var i = 0; i < this.data.length; i++) sum += this.data[i];
 	return sum / this.data.length;
 };
-MetricRing.prototype.path = function (w, h, sharedHi) {
+MetricRing.prototype.path = function (w, h, sharedHi, minRange) {
 	if (this.data.length < 2) return '';
 	var lo = Infinity, hi = -Infinity;
 	for (var i = 0; i < this.data.length; i++) {
@@ -89,6 +89,19 @@ MetricRing.prototype.path = function (w, h, sharedHi) {
 	// passing sharedHi forces the upper bound to match across both lines
 	// so the secondary line's relative magnitude reads correctly.
 	if (sharedHi != null && sharedHi > hi) hi = sharedHi;
+	// Round 44 Step 197 — Bug #11 (Chrome-Claude). Pure auto-scale lets
+	// 0.5% noise on a stable metric (e.g. Memory at 20% ± 0.3%) fill the
+	// chart vertically — looks like big swings when nothing is actually
+	// happening. minRange enforces a floor on the visible Y-axis span:
+	// if observed (hi - lo) < minRange, expand outward symmetrically so
+	// the visible range is at least minRange. Pass minRange=10 for Memory
+	// (stable load metric); leave undefined for CPU (every spike matters)
+	// and Net throughput (intentionally compressed via sharedHi already).
+	if (minRange != null && (hi - lo) < minRange) {
+		var center = (hi + lo) / 2;
+		hi = center + minRange / 2;
+		lo = center - minRange / 2;
+	}
 	// Flat-data fix (e.g. CPU load 0.00 for several samples): without this
 	// guard the line plots at y=h (bottom of viewBox) and gets clipped /
 	// invisible. Center the line in the middle 60% of the box when range is
@@ -245,7 +258,7 @@ function makeTile(id, iconName, label, iconBase, hasProgress, dualValue) {
 	return E('div', { 'class': 'design-tile', 'id': id }, children);
 }
 
-function renderTileSpark(tileEl, ring, ringSecondary) {
+function renderTileSpark(tileEl, ring, ringSecondary, minRange) {
 	var lineEl = tileEl.querySelector('.design-tile-spark-line');
 	var fillEl = tileEl.querySelector('.design-tile-spark-fill');
 	var lineSecondaryEl = tileEl.querySelector('.design-tile-spark-line-secondary');
@@ -263,7 +276,7 @@ function renderTileSpark(tileEl, ring, ringSecondary) {
 		sharedHi = Math.max(rxHi, txHi);
 	}
 
-	var linePath = ring.path(SPARK_W, SPARK_H, sharedHi);
+	var linePath = ring.path(SPARK_W, SPARK_H, sharedHi, minRange);
 
 	// Step 57: when fewer than 2 samples have arrived (1st poll cycle),
 	// ring.path() returns ''. Instead of leaving the SVG empty (looks
@@ -303,7 +316,7 @@ function renderTileSpark(tileEl, ring, ringSecondary) {
 	// case clear the line attribute so a stale path from a prior render
 	// doesn't linger.
 	if (lineSecondaryEl) {
-		var secPath = ringSecondary ? ringSecondary.path(SPARK_W, SPARK_H, sharedHi) : '';
+		var secPath = ringSecondary ? ringSecondary.path(SPARK_W, SPARK_H, sharedHi, minRange) : '';
 		lineSecondaryEl.setAttribute('d', secPath || '');
 	}
 }
@@ -615,7 +628,9 @@ return baseclass.extend({
 				progress: pct,
 				meta:     formatBytes(used) + ' / ' + formatBytes(info.memory.total)
 			});
-			renderTileSpark(self.tileMem, self.rings.mem);
+			// Round 44 Step 197: Memory is a stable-load metric — pass
+			// minRange=10 so 0.5% noise doesn't amplify to full-height.
+			renderTileSpark(self.tileMem, self.rings.mem, null, 10);
 		}).catch(function () { /* keep stale display */ });
 
 		// ── CPU% (Step 90, Round 15): replaces the old loadavg-based display.
