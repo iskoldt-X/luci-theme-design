@@ -138,7 +138,10 @@ function formatLastSeen(lease) {
 	}
 	if (lease.expires > 0) {
 		// Time remaining on lease. Valid lease → not stale.
-		return { stale: false, text: relativeAge(lease.expires) + ' ' + _('left') };
+		// Step 148 (Round 40):minute precision via formatLeaseRemaining,
+		// matching the upstream DHCP Leases table resolution (which Step 149
+		// removes from Overview, this card is the new canonical view).
+		return { stale: false, text: formatLeaseRemaining(lease.expires) };
 	}
 	// expires < 0 means already expired (rare).
 	return { stale: true, text: _('Expired') };
@@ -149,6 +152,27 @@ function relativeAge(ageSec) {
 	if (ageSec < 3600)  return Math.floor(ageSec / 60)    + 'm';
 	if (ageSec < 86400) return Math.floor(ageSec / 3600)  + 'h';
 	return Math.floor(ageSec / 86400) + 'd';
+}
+
+// Step 148 (Round 40):minute-precision lease formatter. relativeAge() above
+// is single-unit ('10h') which is too coarse for lease remaining time —
+// users want to see "10h 33m" (matches the upstream DHCP Leases table
+// resolution we're replacing in Step 149). Sub-minute defaults to <1m
+// (no second-resolution to avoid every-second jitter in the UI).
+function formatLeaseRemaining(secs) {
+	if (secs < 60)    return '<1m';
+	if (secs < 3600) {
+		var m = Math.floor(secs / 60);
+		return m + 'm';
+	}
+	if (secs < 86400) {
+		var h  = Math.floor(secs / 3600);
+		var mm = Math.floor((secs % 3600) / 60);
+		return mm > 0 ? (h + 'h ' + mm + 'm') : (h + 'h');
+	}
+	var d  = Math.floor(secs / 86400);
+	var hh = Math.floor((secs % 86400) / 3600);
+	return hh > 0 ? (d + 'd ' + hh + 'h') : (d + 'd');
 }
 
 // ── Wi-Fi station data (Step 94, Round 17) ───────────────────────────────────
@@ -293,6 +317,10 @@ return baseclass.extend({
 					// .devices-col-name { grid-column: 1 / 3 })
 					E('span', { 'class': 'devices-col-name' }, _('Device')),
 					E('span', { 'class': 'devices-col-ip' },   _('IP')),
+					// Step 148 (Round 40):MAC column promoted from
+					// detail-only to main-row visibility (LAN Clients is
+					// now the canonical view, see Step 149).
+					E('span', { 'class': 'devices-col-mac' },  _('MAC')),
 					E('span', { 'class': 'devices-col-sig' },  _('Signal')),
 					E('span', { 'class': 'devices-col-seen' }, _('Lease')),
 					E('span', { 'class': 'devices-col-chev' }, '')
@@ -439,6 +467,8 @@ return baseclass.extend({
 				]),
 				E('span', { 'class': 'devices-row-name', 'data-mac': mac }, displayName),
 				E('span', { 'class': 'devices-row-ip' }, ipFull || '—'),
+				// Step 148 (Round 40):MAC in main row, mono/tabular like IP
+				E('span', { 'class': 'devices-row-mac' }, mac || '—'),
 				sigCell,
 				seenCell,
 				svgEl('svg', { 'class': 'svg-icon devices-row-chev', 'aria-hidden': 'true' },
@@ -452,15 +482,19 @@ return baseclass.extend({
 					self.detailCellsFor(l, mac, vendor, type, wifi)
 				),
 				E('div', { 'class': 'devices-actions' }, [
-					// Step 142 (Round 38):4-level stake hierarchy by color.
-					// Was 3× green + 1× red — flat 'all safe-looking' visual.
-					// Now: Rename ghost (no chrome) → Whitelist secondary (light
-					// border) → Limit warning (amber, changes bandwidth) →
-					// Block danger (red, disconnects device).
-					self.actionBtn('btn-ghost',     _('Rename'),    function () { self.actionRename(mac, displayName); }),
-					self.actionBtn('btn-secondary', _('Whitelist'), function () { toastSafe('info',    _('Whitelist is not yet implemented')); }),
-					self.actionBtn('btn-warning',   _('Limit'),     function () { toastSafe('info',    _('Rate limiting is not yet implemented')); }),
-					self.actionBtn('btn-danger',    _('Block'),     function () { toastSafe('warning', _('Blocking is not yet implemented')); })
+					// Step 142 (Round 38) + Step 148 (Round 40):5-level stake
+					// hierarchy by color, with new 'Set Static' button slotted
+					// between Whitelist and Limit (config-permanent but
+					// non-destructive). Set Static navigates to LuCI's DHCP
+					// configuration page — Overview was the wrong place to do
+					// inline static-lease config (too much chrome for a single
+					// MAC binding), but Overview IS the right place to launch
+					// from. The → suffix signals 'this leaves Overview'.
+					self.actionBtn('btn-ghost',     _('Rename'),       function () { self.actionRename(mac, displayName); }),
+					self.actionBtn('btn-secondary', _('Whitelist'),    function () { toastSafe('info',    _('Whitelist is not yet implemented')); }),
+					self.actionBtn('btn-secondary', _('Set Static') + ' →', function () { window.location.href = L.url('admin/network/dhcp'); }),
+					self.actionBtn('btn-warning',   _('Limit'),        function () { toastSafe('info',    _('Rate limiting is not yet implemented')); }),
+					self.actionBtn('btn-danger',    _('Block'),        function () { toastSafe('warning', _('Blocking is not yet implemented')); })
 				])
 			])
 		]);

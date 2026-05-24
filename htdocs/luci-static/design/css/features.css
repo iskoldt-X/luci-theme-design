@@ -1291,7 +1291,7 @@
 /* Column header strip — same grid as .devices-summary so labels align */
 .devices-thead {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1.4fr) minmax(90px, 1fr) 80px 70px 24px;
+    grid-template-columns: 32px minmax(0, 1.4fr) minmax(120px, 0.9fr) minmax(140px, 0.9fr) 90px 90px 24px;
     gap: var(--space-3);
     padding: var(--space-2) var(--space-4);
     background: var(--color-surface-1);
@@ -1332,7 +1332,7 @@
 /* Summary row — 6-col grid matching the header */
 .devices-summary {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1.4fr) minmax(90px, 1fr) 80px 70px 24px;
+    grid-template-columns: 32px minmax(0, 1.4fr) minmax(120px, 0.9fr) minmax(140px, 0.9fr) 90px 90px 24px;
     gap: var(--space-3);
     align-items: center;
     padding: var(--space-2) var(--space-4);
@@ -1377,11 +1377,18 @@
     white-space: nowrap;
 }
 
-.devices-row-ip {
+/* Step 148 (Round 40):.devices-row-mac shares the IP cell's mono/tabular
+ * presentation — both are network identifier strings that benefit from
+ * fixed-width digits + monospace alignment. */
+.devices-row-ip,
+.devices-row-mac {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     font-size: var(--text-xs);
     color: var(--color-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Signal column — flex container hosts either signal-bars + dBm text
