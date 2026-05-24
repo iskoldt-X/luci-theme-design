@@ -104,7 +104,7 @@ BYTES=$(echo "$RAW" | jsonfilter -e '@.nftables[*].counter.bytes')
 			# Skip zero-zero — host has counter but never transferred
 			if (t == 0 && r == 0) continue
 			if (!first) printf ","
-			printf "{\"ip\":\"%s\",\"tx_bytes\":%d,\"rx_bytes\":%d}", ip, t, r
+			printf "{\"ip\":\"%s\",\"tx_bytes\":%.0f,\"rx_bytes\":%.0f}", ip, t, r
 			first = 0
 		}
 		printf "]}\n"
