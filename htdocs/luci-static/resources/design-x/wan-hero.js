@@ -120,7 +120,7 @@ function pingOnce() {
 	var ctrl = new AbortController();
 	var to = setTimeout(function () { ctrl.abort(); }, PING_TIMEOUT_MS);
 	var t0 = performance.now();
-	return fetch('/cgi-bin/design/ping?t=' + Date.now(), {
+	return fetch('/cgi-bin/luci/admin/design-x/ping?t=' + Date.now(), {
 		signal: ctrl.signal, cache: 'no-store'
 	}).then(function (r) {
 		clearTimeout(to);

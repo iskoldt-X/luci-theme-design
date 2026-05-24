@@ -542,7 +542,7 @@ return baseclass.extend({
 				};
 			}
 			var t0 = performance.now();
-			return fetch('/cgi-bin/design/ping?t=' + Date.now(), { cache: 'no-store' })
+			return fetch('/cgi-bin/luci/admin/design-x/ping?t=' + Date.now(), { cache: 'no-store' })
 				.then(function (r) {
 					if (!r.ok) throw new Error('http ' + r.status);
 					samples.push(performance.now() - t0);
@@ -581,7 +581,7 @@ return baseclass.extend({
 		var ctrl = new AbortController();
 		var to = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
 
-		return fetch('/cgi-bin/design/download?bytes=' + bytes + '&t=' + Date.now(), {
+		return fetch('/cgi-bin/luci/admin/design-x/download?bytes=' + bytes + '&t=' + Date.now(), {
 			signal: ctrl.signal, cache: 'no-store'
 		}).then(function (r) {
 			if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -651,7 +651,7 @@ return baseclass.extend({
 			var peakMbps     = 0;
 			var done         = false;
 
-			xhr.open('POST', '/cgi-bin/design/upload', true);
+			xhr.open('POST', '/cgi-bin/luci/admin/design-x/upload', true);
 			xhr.timeout = TIMEOUT_MS;
 
 			xhr.upload.onprogress = function (ev) {

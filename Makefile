@@ -27,7 +27,7 @@ LUCI_DESCRIPTION:=Modern LuCI theme. Round 42 fork from luci-theme-design \
   to escape file-collisions with immortalwrt 24.10's luci-base. Installs \
   to /www/luci-static/design-x/, mutually exclusive with the legacy \
   luci-theme-design package via PKG_CONFLICTS.
-LUCI_DEPENDS:=+luci-base
+LUCI_DEPENDS:=+luci-base +luci-lua-runtime
 
 # Hook definitions MUST come BEFORE include luci.mk — luci.mk's trailing
 # `$(eval $(call BuildPackage,...))` materialises the package definition,
