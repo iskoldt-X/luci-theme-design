@@ -265,8 +265,8 @@ return baseclass.extend({
 
 	// Step 43: render live ↑/↓ throughput from the wan-stats singleton.
 	onWanStats: function (data) {
-		var d = fmtBpsSplit(data.rxBps);
-		var u = fmtBpsSplit(data.txBps);
+		var d = fmtBpsSplit(data.rxBitsPerSec);
+		var u = fmtBpsSplit(data.txBitsPerSec);
 		var setText = function (id, txt) {
 			var el = document.getElementById(id);
 			if (el) el.textContent = txt;

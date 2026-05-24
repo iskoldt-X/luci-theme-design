@@ -433,15 +433,15 @@ return baseclass.extend({
 		this.tileNet.style.display = '';
 
 		var prevRx = this.rings.net.last();
-		if (data.rxBps !== null) this.rings.net.push(data.rxBps);
+		if (data.rxBitsPerSec !== null) this.rings.net.push(data.rxBitsPerSec);
 
-		var d = fmtBpsSplit(data.rxBps);
-		var u = fmtBpsSplit(data.txBps);
+		var d = fmtBpsSplit(data.rxBitsPerSec);
+		var u = fmtBpsSplit(data.txBitsPerSec);
 
 		// Throughput trend pill: 50 Kbps threshold suppresses idle-link
 		// noise; format auto-picks Mbps/Kbps based on magnitude so the pill
 		// stays compact ("↓ 1.2 Mbps", not "↓ 1200000 bps").
-		var trend = deltaToTrend(data.rxBps, prevRx, {
+		var trend = deltaToTrend(data.rxBitsPerSec, prevRx, {
 			threshold: 50000,
 			format: function (abs) {
 				var f = fmtBpsSplit(abs);

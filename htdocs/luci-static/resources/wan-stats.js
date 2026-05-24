@@ -6,8 +6,18 @@
 // WAN throughput stats — shared singleton
 //
 // Polls a tiny shell CGI every 2 s that reads /sys/class/net/<dev>/statistics/
-// {rx,tx}_bytes, diffs counters from the last sample, and pushes
-// {rxBps, txBps, deviceName, online} to every subscriber.
+// {rx,tx}_bytes, diffs counters from the last sample, multiplies by 8 to
+// convert Bytes/sec → bits/sec, and pushes
+// {rxBitsPerSec, txBitsPerSec, deviceName, online} to every subscriber.
+//
+// Step 137 (Round 36):field renamed from {rxBps,txBps} to
+// {rxBitsPerSec,txBitsPerSec}. Old name was technically correct
+// (capital B = Bytes/sec, lowercase Bps would be bits) but every
+// consumer treated it as bits/sec — the Bytes/sec value got divided
+// by 1000 and labelled "Kbps", giving displays 8× too low (Chrome-Claude
+// Round-36 audit measured an 837 KB/s download displayed as "839.8 Kbps"
+// when the real rate was 6.7 Mbps). Renaming + ×8 at source closes the
+// unit-confusion landmine for any future consumer.
 //
 // Consumed by:
 //   - sparkline.js  → "Net" tile (4th tile, live throughput)
@@ -53,7 +63,7 @@ var state = {
 	timer:       null,
 	wanDevice:   null, // resolved name, e.g. 'eth0' / 'pppoe-wan'
 	lastSample:  null, // { t, rx, tx }
-	lastEmit:    { rxBps: null, txBps: null, deviceName: null, online: null }
+	lastEmit:    { rxBitsPerSec: null, txBitsPerSec: null, deviceName: null, online: null }
 };
 
 function detectWanDevice() {
@@ -91,10 +101,13 @@ function processStats(s) {
 		// Counter wrap or device reset → skip this delta, anchor again
 		if (dt > 0 && drx >= 0 && dtx >= 0) {
 			emit({
-				rxBps:      drx / dt,
-				txBps:      dtx / dt,
-				deviceName: state.wanDevice,
-				online:     s.up !== false
+				// × 8 converts Bytes/sec → bits/sec — the conventional
+				// network rate unit. Consumers can divide /1000 (Kbps),
+				// /1e6 (Mbps), /1e9 (Gbps) directly without further conv.
+				rxBitsPerSec: (drx * 8) / dt,
+				txBitsPerSec: (dtx * 8) / dt,
+				deviceName:   state.wanDevice,
+				online:       s.up !== false
 			});
 		}
 	}
@@ -111,7 +124,7 @@ function poll() {
 				// comparable with whatever we had before.
 				state.lastSample = null;
 			} else {
-				emit({ rxBps: null, txBps: null, deviceName: null, online: false });
+				emit({ rxBitsPerSec: null, txBitsPerSec: null, deviceName: null, online: false });
 			}
 		});
 	}
@@ -119,7 +132,7 @@ function poll() {
 	return fetchDevStats(state.wanDevice).then(function (data) {
 		if (!data || data.error) {
 			warn('devstats error', data);
-			emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: false });
+			emit({ rxBitsPerSec: null, txBitsPerSec: null, deviceName: state.wanDevice, online: false });
 			return;
 		}
 		// Convert the CGI's flat response into the shape processStats expects
@@ -130,7 +143,7 @@ function poll() {
 		});
 	}).catch(function (err) {
 		warn('devstats fetch failed', err);
-		emit({ rxBps: null, txBps: null, deviceName: state.wanDevice, online: null });
+		emit({ rxBitsPerSec: null, txBitsPerSec: null, deviceName: state.wanDevice, online: null });
 	});
 }
 
@@ -152,7 +165,7 @@ return baseclass.extend({
 	__init__: function () { /* lazy — actual work only starts on first subscribe() */ },
 
 	// Public — call once per consumer.
-	//   cb({ rxBps, txBps, deviceName, online })  — every 2 s while subscribed
+	//   cb({ rxBitsPerSec, txBitsPerSec, deviceName, online })  — every 2 s while subscribed
 	// Returns an unsubscribe function.
 	subscribe: function (cb) {
 		var sub = { cb: cb };
