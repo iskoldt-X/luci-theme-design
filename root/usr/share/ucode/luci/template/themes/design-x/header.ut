@@ -97,8 +97,20 @@
 	//   - "node-<path>"  → page-specific CSS (e.g. .node-admin-status-overview)
 	//                      Empty when no dispatch path (login form).
 	const reqpath = ctx?.request_path ?? [];
-	const node_class = length(reqpath) > 0 ? `node-${join('-', reqpath)}` : 'node-main-login';
-	const auth_class = (ctx?.authsession || !blank_page) ? 'logged-in' : '';
+	const authed  = (ctx?.authsession || !blank_page);
+	// Step 176 fix: `node-main-login` is the login-page styling hook
+	// (CSS at style.css §login hides header/navbar/main-left for it).
+	// LuCI dispatcher renders Overview at /cgi-bin/luci/ root URL for
+	// logged-in users — request_path is [] in that case. Without this
+	// guard, logged-in users staying at the root URL get the login-page
+	// CSS applied and have header + navbar hidden. Chrome-Claude caught
+	// this with body.className = "lang_en logged-in node-main-login" on
+	// the rendered Overview. Only emit `node-main-login` when actually
+	// NOT logged in (the original login-form scenario).
+	const node_class = length(reqpath) > 0
+		? `node-${join('-', reqpath)}`
+		: (authed ? '' : 'node-main-login');
+	const auth_class = authed ? 'logged-in' : '';
 -%}
 	<body class="lang_{{ dispatcher.lang }} {{ auth_class }} {{ node_class }}" data-page="{{ entityencode(join('-', reqpath), true) }}">
 <header>

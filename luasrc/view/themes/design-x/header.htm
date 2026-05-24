@@ -109,7 +109,22 @@
 	</style>
 	<% end -%>
 </head>
-	<body class="lang_<%=luci.i18n.context.lang%> <% if luci.dispatcher.context.authsession then %>logged-in<% end %> <% if not (path == "") then %>node-<%= path %><% else %>node-main-login<% end %>" data-page="<%= pcdata(path) %>">
+	<%-
+		-- Step 176 fix: only emit `node-main-login` when actually NOT
+		-- logged in. LuCI may render Overview at /cgi-bin/luci/ root for
+		-- logged-in users (path empty) — without this guard the
+		-- login-page CSS hides header + navbar on the real Overview.
+		local authed = luci.dispatcher.context.authsession and true or false
+		local node_class
+		if path ~= "" then
+			node_class = "node-" .. path
+		elseif authed then
+			node_class = ""
+		else
+			node_class = "node-main-login"
+		end
+	-%>
+	<body class="lang_<%=luci.i18n.context.lang%> <% if authed then %>logged-in<% end %> <%= node_class %>" data-page="<%= pcdata(path) %>">
 <header>
 	<div class="fill">
 		<div class="container">
