@@ -165,23 +165,31 @@ var getDHCPLeases = L.rpc.declare({
 	object: 'luci-rpc', method: 'getDHCPLeases', expect: { '': {} }
 });
 
+// Round 42 Step 165: nlbw + host-traffic data paths migrated from public
+// unauth /cgi-bin/design/* to auth-gated luci-theme-design-x ubus.
+// Backend handlers preserve the legacy CGI shapes verbatim — nlbw's
+// dual-shape tolerance ([{...}] OR {columns,data}) and host-traffic's
+// three-branch contract (no-acct-table / empty-output / hosts populated)
+// are intact. See /usr/libexec/rpcd/luci-theme-design-x.
+var callNlbw         = rpc.declare({ object: 'luci-theme-design-x', method: 'nlbw',         expect: { '': {} } });
+var callHostTraffic  = rpc.declare({ object: 'luci-theme-design-x', method: 'host-traffic', expect: { '': {} } });
+
 function fetchNlbwData() {
-	return fetch('/cgi-bin/design/nlbw', { cache: 'no-store' })
-		.then(function (r) { return r.ok ? r.json() : null; })
+	return callNlbw()
 		.then(function (raw) { return aggregateByMac(parseNlbwData(raw)); })
 		.catch(function () { return []; });
 }
 
 // Step 115 (Round 31): offload-proof per-host bandwidth source.
-// /cgi-bin/design/host-traffic reads nftables `netdev design_acct` table
-// (created by /etc/init.d/design-host-acct service) which uses ingress-hook
-// counters that fire BEFORE the nf_flowtable fastpath divergence. Returns
-// `{available, hosts: [{ip, tx_bytes, rx_bytes}, ...]}`. When the acct
-// service isn't installed yet or no traffic has been counted, available
-// is false / hosts is empty — caller falls back to nlbwmon.
+// Reads nftables `bridge design_acct` table (preferred) or legacy
+// `netdev design_acct` (fallback) via the design-host-acct service,
+// using ingress-hook counters that fire BEFORE the nf_flowtable
+// fastpath divergence. Returns `{available, hosts: [{ip, tx_bytes,
+// rx_bytes}, ...]}`. When the acct service isn't installed yet or
+// no traffic has been counted, available is false / hosts is empty —
+// caller falls back to nlbwmon.
 function fetchHostTraffic() {
-	return fetch('/cgi-bin/design/host-traffic', { cache: 'no-store' })
-		.then(function (r) { return r.ok ? r.json() : null; })
+	return callHostTraffic()
 		.catch(function () { return null; });
 }
 

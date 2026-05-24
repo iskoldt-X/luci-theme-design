@@ -1,6 +1,7 @@
 'use strict';
 'require baseclass';
 'require ui';
+'require rpc';
 'require design-x.wan-stats';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -379,9 +380,16 @@ function setTile(tileEl, opts) {
 // ── Data helpers ──────────────────────────────────────────────────────────────
 var sysInfo = L.rpc.declare({ object: 'system', method: 'info' });
 
+// Round 42 Step 165: temp + cpustat data paths migrated from public
+// unauth /cgi-bin/design/{temp,cpustat} to the auth-gated
+// luci-theme-design-x ubus methods. Backend impls preserve the legacy
+// CGI response shapes verbatim ({zones:[...]} for temp; full /proc/stat
+// counter object for cpustat). See /usr/libexec/rpcd/luci-theme-design-x.
+var callTemp    = rpc.declare({ object: 'luci-theme-design-x', method: 'temp',    expect: { '': {} } });
+var callCpustat = rpc.declare({ object: 'luci-theme-design-x', method: 'cpustat', expect: { '': {} } });
+
 function fetchTempZones() {
-	return fetch('/cgi-bin/design/temp', { cache: 'no-store' })
-		.then(function (r) { return r.ok ? r.json() : null; })
+	return callTemp()
 		.then(function (data) {
 			if (!data || !Array.isArray(data.zones) || !data.zones.length) return null;
 			return data.zones;
@@ -389,13 +397,12 @@ function fetchTempZones() {
 		.catch(function () { return null; });
 }
 
-// Step 90 (Round 15): raw cumulative CPU counters from /proc/stat (via
-// theme CGI). Browser-side computes delta-over-delta to get percentage
-// utilisation between two polls. Returns null on transport error so the
-// caller can skip this tick gracefully.
+// Step 90 (Round 15): raw cumulative CPU counters from /proc/stat (now
+// via ubus per Step 165). Browser-side computes delta-over-delta to get
+// percentage utilisation between two polls. Returns null on transport
+// error so the caller can skip this tick gracefully.
 function fetchCpuStat() {
-	return fetch('/cgi-bin/design/cpustat', { cache: 'no-store' })
-		.then(function (r) { return r.ok ? r.json() : null; })
+	return callCpustat()
 		.then(function (data) {
 			if (!data || typeof data.total !== 'number' || typeof data.busy !== 'number') return null;
 			if (data.total <= 0) return null;

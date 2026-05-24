@@ -1,6 +1,7 @@
 'use strict';
 'require baseclass';
 'require uci';
+'require rpc';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Capability detection — upgrade.md §0.5
@@ -38,6 +39,15 @@ function cached(key, fn) {
 	});
 }
 
+// Round 42 Step 165: temp probe migrated from /cgi-bin/design/temp to
+// luci-theme-design-x.temp ubus method. Backend impl preserves the
+// legacy {zones:[...]} shape verbatim.
+var callTemp = rpc.declare({
+	object: 'luci-theme-design-x',
+	method: 'temp',
+	expect: { '': {} }
+});
+
 return baseclass.extend({
 	// Netlink-based bandwidth accounting installed? Gates D2 traffic
 	// analysis full UI. We accept either:
@@ -63,18 +73,20 @@ return baseclass.extend({
 	// Box has at least one thermal_zone? (gates S3 temperature tile)
 	thermal: function () {
 		return cached('thermal', function () {
-			var to = withTimeout(800);
-			return fetch('/cgi-bin/design/temp', { signal: to.signal })
-				.then(function (r) {
-					to.clear();
-					if (!r.ok) return false;
-					return r.text().then(function (body) {
-						try {
-							var data = JSON.parse(body);
-							return Array.isArray(data.zones) && data.zones.length > 0;
-						} catch (e) { return false; }
-					});
-				}).catch(function () { return false; });
+			// Round 42 Step 165: rpc.declare doesn't accept AbortSignal
+			// like fetch does, so withTimeout's AbortController is no
+			// longer applicable. Use Promise.race for an 800 ms cutoff.
+			// The rpc call may keep running in background after the
+			// race rejects — that's fine, this is a one-shot cached
+			// capability probe so the extra cost is negligible.
+			var timeoutP = new Promise(function (_, reject) {
+				setTimeout(function () { reject(new Error('thermal-probe-timeout')); }, 800);
+			});
+			return Promise.race([ callTemp(), timeoutP ])
+				.then(function (data) {
+					return !!(data && Array.isArray(data.zones) && data.zones.length > 0);
+				})
+				.catch(function () { return false; });
 		});
 	},
 

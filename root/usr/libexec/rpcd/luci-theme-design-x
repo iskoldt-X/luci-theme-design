@@ -58,24 +58,146 @@ case "$1" in
 				fi
 				;;
 			cpustat)
-				# Step 165 will replace with /proc/stat first-line parse.
-				echo '{"method":"cpustat","step":163,"todo":"step-165","user":0,"nice":0,"system":0,"idle":0,"iowait":0,"irq":0,"softirq":0,"steal":0,"total":0,"busy":0}'
+				# /proc/stat first line — cumulative CPU time accounting in
+				# USER_HZ jiffies. Mirrors root/www/cgi-bin/design/cpustat:
+				# busy = total - idle - iowait (iowait counts as idle per
+				# kernel convention). Frontend computes deltas across polls.
+				read cpu user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+				: "${user:=0}"   "${nice:=0}"    "${system:=0}"  "${idle:=0}"
+				: "${iowait:=0}" "${irq:=0}"     "${softirq:=0}" "${steal:=0}"
+				total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+				busy=$((total - idle - iowait))
+				printf '{"user":%s,"nice":%s,"system":%s,"idle":%s,"iowait":%s,"irq":%s,"softirq":%s,"steal":%s,"total":%s,"busy":%s}\n' \
+					"$user" "$nice" "$system" "$idle" "$iowait" "$irq" "$softirq" "$steal" "$total" "$busy"
 				;;
 			temp)
-				# Step 165 will replace with thermal_zone*/temp scan.
-				echo '{"method":"temp","step":163,"todo":"step-165","zones":[]}'
+				# Thermal zone scan — kernel exposes millidegrees,
+				# convert to whole degrees C. Empty array when no
+				# sensors. Mirrors root/www/cgi-bin/design/temp.
+				TEMPS=""
+				for z in /sys/class/thermal/thermal_zone*/temp; do
+					[ -r "$z" ] || continue
+					T=$(cat "$z" 2>/dev/null) || continue
+					[ -n "$T" ] || continue
+					[ -n "$TEMPS" ] && TEMPS="$TEMPS,"
+					TEMPS="$TEMPS$((T / 1000))"
+				done
+				printf '{"zones":[%s]}\n' "$TEMPS"
 				;;
 			host-traffic)
-				# Step 165 will replace with nft list table bridge design_acct.
-				echo '{"method":"host-traffic","step":163,"todo":"step-165","available":false,"hosts":[],"reason":"skeleton"}'
+				# Per-host traffic counters from the design-host-acct
+				# nftables table (Step 115/117/118 history). Mirrors
+				# root/www/cgi-bin/design/host-traffic verbatim — same
+				# bridge-first / netdev-fallback probe, same awk zip,
+				# same three-way response branching:
+				#   service down  → available:false, no-acct-table
+				#   table empty   → available:true,  empty-output
+				#   data present  → available:true,  hosts:[...]
+				NFT_TABLE="design_acct"
+				NFT_FAMILY=""
+				if nft list table bridge "$NFT_TABLE" >/dev/null 2>&1; then
+					NFT_FAMILY="bridge"
+				elif nft list table netdev "$NFT_TABLE" >/dev/null 2>&1; then
+					NFT_FAMILY="netdev"
+				fi
+				if [ -z "$NFT_FAMILY" ]; then
+					echo '{"available":false,"hosts":[],"reason":"no-acct-table"}'
+				else
+					RAW=$(nft -j list table "$NFT_FAMILY" "$NFT_TABLE" 2>/dev/null)
+					if [ -z "$RAW" ]; then
+						echo '{"available":true,"hosts":[],"reason":"empty-output"}'
+					else
+						NAMES=$(echo "$RAW" | jsonfilter -e '@.nftables[*].counter.name')
+						BYTES=$(echo "$RAW" | jsonfilter -e '@.nftables[*].counter.bytes')
+						{
+							echo "$NAMES"
+							echo "---SEP---"
+							echo "$BYTES"
+						} | awk '
+							/^---SEP---$/ { phase = 1; idx = 0; next }
+							phase == 0 { names[++ncount] = $0; next }
+							phase == 1 { bytes[++idx] = $0 + 0 }
+							END {
+								for (i = 1; i <= ncount; i++) {
+									name = names[i]
+									b = bytes[i] + 0
+									if (name ~ /^host_tx_/) {
+										ip = substr(name, 9); gsub("_", ".", ip)
+										tx[ip] = b
+									} else if (name ~ /^host_rx_/) {
+										ip = substr(name, 9); gsub("_", ".", ip)
+										rx[ip] = b
+									}
+								}
+								for (ip in tx) seen[ip] = 1
+								for (ip in rx) seen[ip] = 1
+								printf "{\"available\":true,\"hosts\":["
+								first = 1
+								for (ip in seen) {
+									t = (ip in tx) ? tx[ip] : 0
+									r = (ip in rx) ? rx[ip] : 0
+									if (t == 0 && r == 0) continue
+									if (!first) printf ","
+									printf "{\"ip\":\"%s\",\"tx_bytes\":%d,\"rx_bytes\":%d}", ip, t, r
+									first = 0
+								}
+								printf "]}\n"
+							}
+						'
+					fi
+				fi
 				;;
 			wifi-stations)
-				# Step 165 will replace with ubus call iwinfo loop.
-				echo '{"method":"wifi-stations","step":163,"todo":"step-165","available":false,"interfaces":{}}'
+				# Wi-Fi assoclist via iwinfo ubus. Mirrors root/www/cgi-bin/
+				# design/wifi-stations verbatim — same probe order, same
+				# device-name allowlist, same per-interface stitching with
+				# ubus payloads passed through VERBATIM (no jsonfilter on
+				# the inner info/assoclist responses — preserves field
+				# order + number types that the JS consumer relies on).
+				if ! command -v ubus >/dev/null 2>&1; then
+					echo '{"available":false,"interfaces":{},"reason":"no-ubus"}'
+				else
+					DEVICES_JSON=$(ubus call iwinfo devices 2>/dev/null)
+					if [ -z "$DEVICES_JSON" ]; then
+						echo '{"available":false,"interfaces":{},"reason":"no-iwinfo"}'
+					else
+						DEVICES=$(echo "$DEVICES_JSON" | jsonfilter -e '@.devices[*]' 2>/dev/null)
+						if [ -z "$DEVICES" ]; then
+							echo '{"available":true,"interfaces":{}}'
+						else
+							printf '{"available":true,"interfaces":{'
+							FIRST=1
+							for dev in $DEVICES; do
+								case "$dev" in
+									*[!A-Za-z0-9_-]*) continue ;;
+								esac
+								INFO=$(ubus call iwinfo info "{\"device\":\"$dev\"}" 2>/dev/null)
+								ASSOC=$(ubus call iwinfo assoclist "{\"device\":\"$dev\"}" 2>/dev/null)
+								: "${INFO:={}}"
+								: "${ASSOC:={}}"
+								[ $FIRST -eq 0 ] && printf ','
+								printf '"%s":{"info":%s,"assoclist":%s}' "$dev" "$INFO" "$ASSOC"
+								FIRST=0
+							done
+							printf '}}\n'
+						fi
+					fi
+				fi
 				;;
 			nlbw)
-				# Step 165 will replace with `nlbw -c json -g mac` shim.
-				echo '[]'
+				# nlbwmon JSON dump. DUAL-SHAPE tolerance preserved per
+				# the legacy CGI: nlbw -c json -g mac may emit either
+				# [{...}] (array shape) or {"columns":[...], "data":[...]}
+				# (column shape) depending on nlbw build version. JS
+				# consumer (traffic.js parseNlbwData) handles both.
+				# Falls back to empty array on missing/failed nlbw.
+				if command -v nlbw >/dev/null 2>&1; then
+					nlbw -c json -g mac 2>/dev/null \
+						|| nlbw -c json 2>/dev/null \
+						|| echo '[]'
+				else
+					echo '[]'
+				fi
 				;;
 			*)
 				# Unknown method — rpcd will treat this as method not found

@@ -177,15 +177,23 @@ function formatLeaseRemaining(secs) {
 }
 
 // ── Wi-Fi station data (Step 94, Round 17) ───────────────────────────────────
-// Fetches the theme's /cgi-bin/design/wifi-stations CGI which shells out to
-// `ubus call iwinfo {devices,info,assoclist}` and returns:
-//   { available: true|false, interfaces: { wlanN: { info, assoclist } } }
-// On routers without Wi-Fi (the user's box is one) the CGI returns
-// {available:false} and we just treat everything as wired — current Step 93
-// behaviour, no regression.
+// Round 42 Step 165: wifi-stations data path migrated from /cgi-bin/design/
+// wifi-stations to the auth-gated luci-theme-design-x.wifi-stations ubus
+// method. Backend impl mirrors the legacy CGI verbatim — same
+// `ubus call iwinfo {devices,info,assoclist}` probe order with per-device
+// payloads passed through VERBATIM (no jsonfilter re-parse) so the JS
+// consumer sees the same {available, interfaces: { wlanN: { info,
+// assoclist } } } shape. On routers without Wi-Fi the response is
+// {available:false} and buildStationMap treats every client as wired —
+// Step 93 behaviour preserved.
+var callWifiStations = rpc.declare({
+	object: 'luci-theme-design-x',
+	method: 'wifi-stations',
+	expect: { '': {} }
+});
+
 function fetchWifiStations() {
-	return fetch('/cgi-bin/design/wifi-stations', { cache: 'no-store' })
-		.then(function (r) { return r.ok ? r.json() : null; })
+	return callWifiStations()
 		.catch(function () { return null; });
 }
 
