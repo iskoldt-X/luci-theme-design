@@ -292,44 +292,94 @@ return baseclass.extend({
 			setTimeout(L.bind(this.tryInject, this), 250);
 			return;
 		}
-		this.hideUpstreamDhcpSections();
+		this.startHideUpstreamDhcp();
 		this.injectCard();
 		this.refresh();
 		this._timer = setInterval(L.bind(this.refresh, this), 30000);
 	},
 
-	// Step 149 (Round 40):hide upstream LuCI 'Active DHCP Leases' and
-	// 'Active DHCPv6 Leases' sections on Overview only. The LAN Clients
-	// card is now the canonical device view (Steps 147-148 widen it to
-	// 1/1 and add MAC column + Set Static button), making those upstream
-	// sections redundant subsets.
+	// Step 149 (Round 40) + Step 150 (Round 40 patch):hide upstream LuCI
+	// 'Active DHCP Leases' / 'Active DHCPv6 Leases' sections on Overview.
 	//
-	// IMPORTANT — scope: this only fires when the LAN Clients card itself
-	// injects (devices.js __init__ already gates on node-admin-status-overview).
-	// The Network → DHCP/DNS configuration page (/admin/network/dhcp) is
-	// completely unaffected — that's where Set Static button (Step 148)
-	// navigates to for full DHCP config.
+	// Step 149 first attempt:scanned .cbi-section once at tryInject success.
+	// User reported sections STILL visible — most likely cause: LuCI 26.x
+	// overview view emits DHCP sections AFTER our initial scan(load.then()
+	// rendering is staged in chunks),OR the section wrapper isn't
+	// .cbi-section but something else (cbi-map / fieldset / bare div).
 	//
-	// Selector strategy: scan all .cbi-section in the view, look for child
-	// heading text matching /DHCP.*Leases/i (catches 'Active DHCP Leases',
-	// 'Active DHCPv6 Leases', and variant wording across LuCI versions).
-	// English-only matching by intent — for non-English LuCIs the upstream
-	// sections will remain visible, which is incomplete but not harmful;
-	// extension to localized strings is a future enhancement.
+	// Step 150 fix:
+	//   1. Broader heading selectors (legend, .cbi-section-title, etc)
+	//   2. Walk UP parentElement to find any plausible section container
+	//      (cbi-section / cbi-map / fieldset). Fallback: hide heading +
+	//      immediate next sibling (catches 'h2 + table' bare emission).
+	//   3. MutationObserver on #view for 10s to catch async section
+	//      additions.
+	//   4. console.debug + tag with data-design-hidden attribute so the
+	//      user can verify in DevTools.
+	startHideUpstreamDhcp: function () {
+		var self = this;
+		this.hideUpstreamDhcpSections();
+		var view = document.getElementById('view');
+		if (!view || typeof MutationObserver === 'undefined') return;
+		var observer = new MutationObserver(function () {
+			self.hideUpstreamDhcpSections();
+		});
+		observer.observe(view, { childList: true, subtree: true });
+		// Disconnect after 10s — by then LuCI has finished all staged renders.
+		setTimeout(function () { observer.disconnect(); }, 10000);
+	},
+
 	hideUpstreamDhcpSections: function () {
 		var view = document.getElementById('view');
 		if (!view) return;
-		var sections = view.querySelectorAll('.cbi-section');
-		for (var i = 0; i < sections.length; i++) {
-			var section = sections[i];
-			var headings = section.querySelectorAll('h2, h3, h4, .cbi-section-title');
-			for (var j = 0; j < headings.length; j++) {
-				var text = (headings[j].textContent || '').trim();
-				if (/DHCP.*Leases/i.test(text)) {
-					section.style.display = 'none';
+		// Broad heading-like selector — catches h1-h4, legend (fieldset
+		// title), .cbi-section-title, .cbi-section-descr (some LuCI builds
+		// put the title in a descr element).
+		var headings = view.querySelectorAll(
+			'h1, h2, h3, h4, legend, .cbi-section-title, .cbi-section-descr'
+		);
+		var matched = 0;
+		for (var i = 0; i < headings.length; i++) {
+			var h = headings[i];
+			if (h.dataset && h.dataset.designHidden) continue;   // already done
+			var text = (h.textContent || '').trim();
+			if (!/DHCP.*Leases/i.test(text)) continue;
+
+			// Walk up to find any section-like container.
+			var target = null;
+			var node = h;
+			while (node && node !== view && node !== document.body) {
+				if (node.classList && (
+					node.classList.contains('cbi-section') ||
+					node.classList.contains('cbi-map') ||
+					node.tagName === 'FIELDSET'
+				)) {
+					target = node;
 					break;
 				}
+				node = node.parentElement;
 			}
+
+			if (target) {
+				target.style.display = 'none';
+				target.dataset.designHidden = '1';
+				matched++;
+			} else {
+				// Fallback:hide the heading + the immediately following
+				// sibling (typical pattern:<h2>Active DHCP Leases</h2>
+				// <table>...</table> with no wrapper).
+				h.style.display = 'none';
+				h.dataset.designHidden = '1';
+				var next = h.nextElementSibling;
+				if (next) {
+					next.style.display = 'none';
+					next.dataset.designHidden = '1';
+				}
+				matched++;
+			}
+		}
+		if (matched && window.console && console.debug) {
+			console.debug('[design] hid ' + matched + ' upstream DHCP section(s)');
 		}
 	},
 
