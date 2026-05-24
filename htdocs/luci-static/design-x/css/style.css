@@ -3008,7 +3008,8 @@ div.cbi-value > .cbi-value-description {
 .cbi-progressbar > div {
     width: 0;
     height: 100% !important;
-    transition: width var(--motion-normal) var(--ease-out) !important;
+    transition: width var(--motion-normal) var(--ease-out),
+                background var(--motion-normal) var(--ease-out) !important;
     color: var(--color-text-onaccent) !important;
     background: var(--color-accent-500) !important;
     border-radius: inherit;
@@ -3019,6 +3020,30 @@ div.cbi-value > .cbi-value-description {
        failed to load" rather than "this metric is 0". A 2px minimum
        gives a thin emerald sliver that says "alive, just empty". */
     min-width: 2px;
+}
+
+/* Round 44 Step 199 — utilisation-tier coloring.
+ *
+ * style.js scans .cbi-progressbar > div inline width every poll, stamps
+ * data-tier="warn" at ≥90% and "danger" at ≥95% on the .cbi-progressbar
+ * parent. CSS swaps the fill background to amber/red so the user can
+ * see "concerning" without reading the percentage.
+ *
+ * Rationale on thresholds:
+ *   90% — yellow zone. Worth a heads-up but not panic. Common on
+ *         memory-pressured boxes that are still operational.
+ *   95% — red zone. Action probably needed (swap engaged, OOM near,
+ *         connection table near exhaustion).
+ *
+ * Why amber/red and not other colours: matches our existing semantic
+ * palette (--color-warning / --color-danger) used by Toast notifications,
+ * trend pills (Step 196 Bug #12), and Lease "expired" badge on LAN Clients.
+ * Site-wide semantics stay coherent. */
+.cbi-progressbar[data-tier="warn"] > div {
+    background: var(--color-warning) !important;
+}
+.cbi-progressbar[data-tier="danger"] > div {
+    background: var(--color-danger) !important;
 }
 
 .cbi-progressbar::after {
