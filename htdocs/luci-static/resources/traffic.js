@@ -239,7 +239,7 @@ function fetchLeasesRaw() {
 return baseclass.extend({
 	__init__: function () {
 		if (!document.body.classList.contains('node-admin-status-overview')) return;
-		this.iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design') + '/icons.svg';
+		this.iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design-x') + '/icons.svg';
 		this.tryInject();
 	},
 

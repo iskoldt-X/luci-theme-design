@@ -59,7 +59,7 @@ var MENU_ICON_MAP = {
 
 var ICON_BASE_URL = (typeof L !== 'undefined' && L.env && L.env.mediaurlbase
 	? L.env.mediaurlbase
-	: '/luci-static/design') + '/icons.svg';
+	: '/luci-static/design-x') + '/icons.svg';
 
 function iconForMenu(dataTitle, nodeName) {
 	var hit = MENU_ICON_MAP[dataTitle] || MENU_ICON_MAP[nodeName] || null;

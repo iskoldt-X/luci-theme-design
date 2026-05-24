@@ -56,7 +56,7 @@ var STORAGE_KEY = 'design-device-names-v1';
 // First match wins. Patterns are case-insensitive regex source strings.
 // Step 93 (Round 17): tightened icon mappings — iphone/ipad/android now map
 // to i-phone (was i-info), printer / nas / windows-pc added. Icons drawn
-// from the sprite at htdocs/luci-static/design/icons.svg.
+// from the sprite at htdocs/luci-static/design-x/icons.svg.
 var DEVICE_TYPES = [
 	{ re: /macbook|imac|mac-?mini/i,                          icon: 'i-monitor',     label: 'Computer' },
 	{ re: /printer|laserjet|brother|epson|canon|hp-laserjet/i, icon: 'i-server',      label: 'Printer' },
@@ -309,7 +309,7 @@ var getDHCPLeases = L.rpc.declare({
 return baseclass.extend({
 	__init__: function () {
 		if (!document.body.classList.contains('node-admin-status-overview')) return;
-		this.iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design') + '/icons.svg';
+		this.iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design-x') + '/icons.svg';
 		this.expanded     = {};                   // mac → bool
 		this.customNames  = loadCustomNames();    // mac → string
 		this.stations     = {};                   // mac → { iface, info, station } (Step 94)

@@ -330,7 +330,7 @@ header > .fill > .container > .brand {
 
 /* ═════════════════════════════════════════════════════════════════════════
  * §6 SVG ICON UTILITY
- * 用法：<svg class="svg-icon"><use href="/luci-static/design/icons.svg#i-sun"/></svg>
+ * 用法：<svg class="svg-icon"><use href="/luci-static/design-x/icons.svg#i-sun"/></svg>
  * 大小由 font-size 控制；颜色继承 currentColor
  * ═════════════════════════════════════════════════════════════════════════ */
 

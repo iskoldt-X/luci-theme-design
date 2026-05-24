@@ -37,7 +37,7 @@
 
 ## 安装注意
 
-本主题在首次安装时会通过 `root/etc/uci-defaults/30_luci-theme-design` 自动将 LuCI 当前主题切换为 Design（设置 `luci.main.mediaurlbase=/luci-static/design`）。这是 LuCI 主题包的常规行为，但请注意安装后会覆盖你原有的主题设置。如需切回，登录后到「系统 → 系统 → 语言和外观」选择其它主题即可。
+本主题在首次安装时会通过 `root/etc/uci-defaults/30_luci-theme-design-x` 自动将 LuCI 当前主题切换为 Design（设置 `luci.main.mediaurlbase=/luci-static/design-x`）。这是 LuCI 主题包的常规行为，但请注意安装后会覆盖你原有的主题设置。如需切回，登录后到「系统 → 系统 → 语言和外观」选择其它主题即可。
 
 ## 体验Webapp方法
 

@@ -89,7 +89,7 @@ function countPendingChangesAsync(cb) {
 
 return baseclass.extend({
 	__init__: function () {
-		this.iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design') + '/icons.svg';
+		this.iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design-x') + '/icons.svg';
 		this.mount();
 	},
 

@@ -173,7 +173,7 @@ return baseclass.extend({
 
 	// ── DOM construction ──────────────────────────────────────────────────────
 	mount: function() {
-		var iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design') + '/icons.svg';
+		var iconBase = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design-x') + '/icons.svg';
 
 		var overlay = E('div', {
 			'class':      'cmdk-overlay',

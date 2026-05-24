@@ -79,11 +79,11 @@ check_deps() {
 
 check_repo() {
     if [ ! -f "${PROJECT_ROOT}/Makefile" ] || \
-       [ ! -d "${PROJECT_ROOT}/htdocs/luci-static/design" ] || \
+       [ ! -d "${PROJECT_ROOT}/htdocs/luci-static/design-x" ] || \
        [ ! -d "${PROJECT_ROOT}/luasrc/view/themes/design" ]; then
         err "doesn't look like the luci-theme-design repo."
         err "  PROJECT_ROOT was resolved to: ${PROJECT_ROOT}"
-        err "  expected to find Makefile + htdocs/luci-static/design + luasrc/view/themes/design"
+        err "  expected to find Makefile + htdocs/luci-static/design-x + luasrc/view/themes/design-x"
         exit 1
     fi
 }
@@ -106,7 +106,7 @@ check_router() {
     local probe
     probe=$(ssh -o LogLevel=ERROR -o ConnectTimeout=5 -o BatchMode=yes "$ROUTER" "
         echo CONNECT_OK
-        test -d /www/luci-static/design && echo DESIGN_OK
+        test -d /www/luci-static/design-x && echo DESIGN_OK
         test -d /usr/lib/lua/luci/view/themes/design && echo VIEW_OK
         command -v rsync >/dev/null 2>&1 && echo RSYNC_OK
         true
@@ -130,7 +130,7 @@ check_router() {
     if ! printf '%s\n' "$probe" | grep -q '^DESIGN_OK$' || \
        ! printf '%s\n' "$probe" | grep -q '^VIEW_OK$'; then
         err "$ROUTER reachable, but theme dirs missing."
-        err "  /www/luci-static/design                OR"
+        err "  /www/luci-static/design-x              OR"
         err "  /usr/lib/lua/luci/view/themes/design"
         err "  do not exist. Install the theme ipk once before using dev-sync."
         err "  (see README.md — opkg install luci-theme-design_*.ipk)"
@@ -148,13 +148,13 @@ sync_all() {
     started=$(date +%s)
 
     # 1. Static theme assets (CSS, fonts, SVG, images)
-    #    LOCAL:  htdocs/luci-static/design/
-    #    REMOTE: /www/luci-static/design/
+    #    LOCAL:  htdocs/luci-static/design-x/
+    #    REMOTE: /www/luci-static/design-x/
     #    --delete is safe here: it's the theme's own subdirectory.
     rsync -az --delete \
         --exclude='.DS_Store' \
-        "${PROJECT_ROOT}/htdocs/luci-static/design/" \
-        "${ROUTER}:/www/luci-static/design/"
+        "${PROJECT_ROOT}/htdocs/luci-static/design-x/" \
+        "${ROUTER}:/www/luci-static/design-x/"
 
     # 2. LuCI module JS (theme-provided modules: wan-stats, cmdk, toast, etc.)
     #    LOCAL:  htdocs/luci-static/resources/

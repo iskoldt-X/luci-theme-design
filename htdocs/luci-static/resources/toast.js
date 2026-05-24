@@ -63,7 +63,7 @@ var ICONS = {
 return baseclass.extend({
 	__init__: function() {
 		this.idCounter = 0;
-		this.iconBase  = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design') + '/icons.svg';
+		this.iconBase  = (L.env && L.env.mediaurlbase ? L.env.mediaurlbase : '/luci-static/design-x') + '/icons.svg';
 
 		this.mount();
 		this.exposeGlobalAPI();
