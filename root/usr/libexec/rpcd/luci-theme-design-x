@@ -22,7 +22,7 @@ case "$1" in
 	list)
 		# Method declarations: name → expected args (type hint only).
 		# Empty {} = method takes no args.
-		echo '{ "devstats": {"dev":"string"}, "cpustat": {}, "temp": {}, "host-traffic": {}, "host-traffic-acct": {}, "wifi-stations": {}, "nlbw": {} }'
+		echo '{ "devstats": {"dev":"string"}, "cpustat": {}, "temp": {}, "host-traffic": {}, "host-traffic-acct": {}, "host-presence": {}, "wifi-stations": {}, "nlbw": {} }'
 		;;
 
 	call)
@@ -146,6 +146,96 @@ case "$1" in
 						'
 					fi
 				fi
+				;;
+			host-presence)
+				# Round 44 Step 218 — real "last seen" data source for
+				# LAN Clients. Combines:
+				#   /proc/net/arp           — wired host presence + ARP flag
+				#   iwinfo <iface> assoclist — wireless inactive_ms
+				#
+				# Replaces the misleading "lease remaining time" → "last
+				# seen" rename done in Round 38 Step 140 (which honestly
+				# admitted the data was wrong — DHCP lease validity says
+				# NOTHING about whether the device is currently active).
+				#
+				# Output shape (keyed by uppercase MAC, no colons):
+				#   { "AABBCCDDEEFF": {
+				#         "via": "wifi" | "arp",
+				#         "iface": "<dev>",
+				#         "state": "active" | "stale",
+				#         "inactive_ms": <int>     (wifi only)
+				#     },
+				#     ... }
+				#
+				# Hosts not in this map are absent from both arp and any
+				# iwinfo assoclist → caller treats as offline.
+
+				# Helper: walk all wifi devices, emit each station's
+				# `"MAC":{via:wifi, iface:N, inactive_ms:N, state:active|stale}`
+				# (active when inactive < 60_000 ms, else stale).
+				wifi_json=""
+				if command -v ubus >/dev/null 2>&1; then
+					iwinfo_devices=$(ubus call iwinfo devices 2>/dev/null | \
+						jsonfilter -e '@.devices[*]' 2>/dev/null)
+					for dev in $iwinfo_devices; do
+						case "$dev" in *[!A-Za-z0-9_-]*) continue ;; esac
+						stations=$(ubus call iwinfo assoclist "{\"device\":\"$dev\"}" 2>/dev/null)
+						[ -z "$stations" ] && continue
+						# Emit one "MAC":{...} entry per station. jsonfilter
+						# returns "MAC inactive" pairs newline-separated.
+						pairs=$(echo "$stations" | \
+							jsonfilter -e '@.results[@.mac, @.inactive]' 2>/dev/null)
+						mac=""
+						for line in $pairs; do
+							if [ -z "$mac" ]; then
+								mac="$line"
+							else
+								ms="$line"
+								state="active"
+								[ "$ms" -gt 60000 ] 2>/dev/null && state="stale"
+								mac_key=$(echo "$mac" | tr -d ':' | tr 'a-f' 'A-F')
+								[ -n "$wifi_json" ] && wifi_json="$wifi_json,"
+								wifi_json="$wifi_json\"$mac_key\":{\"via\":\"wifi\",\"iface\":\"$dev\",\"state\":\"$state\",\"inactive_ms\":$ms}"
+								mac=""
+							fi
+						done
+					done
+				fi
+
+				# Helper: walk /proc/net/arp, emit entries with flag 0x2
+				# (ATF_COM — kernel believes entry is valid). MACs already
+				# in wifi_json should NOT be re-emitted (wifi data is more
+				# specific).
+				arp_json=""
+				if [ -r /proc/net/arp ]; then
+					arp_json=$(awk -v wifi="$wifi_json" '
+						BEGIN { first = 1 }
+						# Skip header row
+						NR == 1 { next }
+						{
+							ip = $1; flags = $3; mac = toupper($4); iface = $6
+							# Skip incomplete entries (flag 0x0) and zero MAC
+							if (flags == "0x0") next
+							if (mac == "00:00:00:00:00:00" || mac == "") next
+							# Filter MACs already covered by wifi data —
+							# detect by presence of "MACKEY":  in wifi string
+							key = mac
+							gsub(":", "", key)
+							if (index(wifi, "\"" key "\":") > 0) next
+							if (!first) printf ","
+							printf "\"%s\":{\"via\":\"arp\",\"iface\":\"%s\",\"state\":\"active\"}", key, iface
+							first = 0
+						}
+					' /proc/net/arp)
+				fi
+
+				# Compose final JSON. wifi entries first (more specific),
+				# arp entries follow.
+				printf '{"hosts":{'
+				printf '%s' "$wifi_json"
+				if [ -n "$wifi_json" ] && [ -n "$arp_json" ]; then printf ','; fi
+				printf '%s' "$arp_json"
+				printf '}}\n'
 				;;
 			host-traffic-acct)
 				# Round 44 Step 212 — bandwidth Hybrid Tier 2 frontend

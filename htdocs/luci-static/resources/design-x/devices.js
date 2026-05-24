@@ -157,6 +157,43 @@ function formatLastSeen(lease) {
 	return { stale: true, text: _('Expired') };
 }
 
+// Round 44 Step 218 — presence-aware formatter for the LAN Clients
+// "Lease" column. When host-presence data is available, prefer real
+// activity (ARP presence + wifi inactive_ms) over DHCP lease validity.
+// Falls back to formatLastSeen(lease) when no presence info exists
+// (e.g. host-presence rpcd method returned null, or the MAC isn't in
+// the presence map at all).
+//
+// Semantic mapping:
+//   wifi active (inactive < 5s)     → "Active"  not stale
+//   wifi recent (inactive < 60s)    → "<Xs ago" not stale
+//   wifi staler (inactive < 3600s)  → "Xm ago"  stale
+//   wifi very stale                 → "Xh ago"  stale
+//   arp present (ATF_COM)           → "Active"  not stale
+//   no presence info available      → formatLastSeen(lease) (Round 38 path)
+//   presence map exists but MAC absent → "Offline" stale
+function formatPresence(presenceMap, mac, lease) {
+	if (!presenceMap || !mac) return formatLastSeen(lease);
+	var entry = presenceMap[mac];
+	if (!entry) {
+		// presence_map exists but no row for this MAC → genuinely offline
+		// (not in ARP, no wifi assoc). Override lease — even a valid
+		// DHCP lease doesn't mean the device is reachable right now.
+		return { stale: true, text: _('Offline') };
+	}
+	if (entry.via === 'wifi') {
+		var ms = entry.inactive_ms || 0;
+		if (ms < 5000)    return { stale: false, text: _('Active') };
+		if (ms < 60000)   return { stale: false, text: Math.floor(ms / 1000) + 's' };
+		if (ms < 3600000) return { stale: true,  text: Math.floor(ms / 60000) + 'm' };
+		return { stale: true, text: Math.floor(ms / 3600000) + 'h' };
+	}
+	// via === 'arp' → kernel ARP table has a complete entry, so the
+	// host responded to ARP recently (within ~5-15 min depending on
+	// arp_table_gc_thresh). Treat as active.
+	return { stale: false, text: _('Active') };
+}
+
 function relativeAge(ageSec) {
 	if (ageSec < 60)    return '<1m';
 	if (ageSec < 3600)  return Math.floor(ageSec / 60)    + 'm';
@@ -200,6 +237,22 @@ var callWifiStations = rpc.declare({
 	method: 'wifi-stations',
 	expect: { '': {} }
 });
+
+// Round 44 Step 218 — real "last seen" data source. host-presence rpcd
+// method (root/usr/libexec/rpcd/luci-theme-design-x) parses
+// /proc/net/arp for wired hosts and iwinfo assoclist.inactive for
+// wireless. Returns:
+//   { hosts: { "AABBCCDDEEFF": { via: "wifi"|"arp", iface, state, inactive_ms? } } }
+// Hosts absent from this map are offline (no ARP entry, no wifi assoc).
+var callHostPresence = rpc.declare({
+	object: 'luci-theme-design-x',
+	method: 'host-presence',
+	expect: { '': {} }
+});
+
+function fetchHostPresence() {
+	return callHostPresence().catch(function () { return null; });
+}
 
 function fetchWifiStations() {
 	return callWifiStations()
@@ -365,6 +418,7 @@ return baseclass.extend({
 		this.expanded     = {};                   // mac → bool
 		this.customNames  = loadCustomNames();    // mac → string
 		this.stations     = {};                   // mac → { iface, info, station } (Step 94)
+		this.presence     = {};                   // mac-nocolon → { via, iface, state, inactive_ms? } (Step 218)
 		// Round 44 Step 204: kick off Wireshark manuf OUI DB load + decompress
 		// as early as possible. ~332 KB gzip fetch + DecompressionStream
 		// runs in parallel with the rest of Overview rendering; by the
@@ -567,16 +621,20 @@ return baseclass.extend({
 
 	refresh: function () {
 		var self = this;
-		// Step 94 (Round 17): parallel fetch DHCP leases + Wi-Fi stations.
-		// Wi-Fi data is optional — its absence falls through to "Wired" pill
-		// rendering, so we wrap its fetch in .catch(null) so a missing CGI
-		// or network glitch doesn't blank the whole list.
+		// Step 94 (Round 17) + Step 218 (Round 44): parallel fetch DHCP
+		// leases + Wi-Fi stations + host presence map. All three are
+		// optional — missing data falls through to safer defaults:
+		//   - no leases → empty list with "Unable to read DHCP leases"
+		//   - no wifi   → "Wired" pill for all
+		//   - no presence → fall back to lease.expires (Round 38 path)
 		Promise.all([
 			getDHCPLeases().then(function (d) { return d; }, function () { return null; }),
-			fetchWifiStations()
+			fetchWifiStations(),
+			fetchHostPresence()
 		]).then(function (results) {
 			var leasesData = results[0];
 			var wifiData   = results[1];
+			var presence   = results[2];
 
 			if (!leasesData) {
 				var rowsEl = document.getElementById('devices-rows');
@@ -591,6 +649,10 @@ return baseclass.extend({
 			if (leasesData.dhcp6_leases) leases = leases.concat(leasesData.dhcp6_leases);
 
 			self.stations = buildStationMap(wifiData);
+			// host-presence returns { hosts: { "AABBCC...": {...} } } or
+			// null. Reduce to just the inner map so buildRow can look up
+			// by MAC directly. Null-safe: empty object if absent.
+			self.presence = (presence && presence.hosts) ? presence.hosts : {};
 			self.render(leases);
 		});
 	},
@@ -645,7 +707,12 @@ return baseclass.extend({
 		// networks with multiple LAN segments (double NAT, /16 LAN, etc.)
 		var ipFull = l.ipaddr || '';
 		var isOpen  = self.expanded[mac] === true;
-		var seen    = formatLastSeen(l);
+		// Round 44 Step 218: presence-aware seen text. Looks up MAC
+		// (uppercase, no colons) in the host-presence map (filled by
+		// refresh() from rpcd host-presence). Falls through to lease-
+		// based formatLastSeen when no presence info is available.
+		var macKey  = mac.replace(/:/g, '');
+		var seen    = formatPresence(self.presence, macKey, l);
 
 		// Resolve display name: user override (Step 44) > DHCP hostname >
 		// vendor "device" > "Unknown device".
