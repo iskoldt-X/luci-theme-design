@@ -1984,6 +1984,22 @@ td > table > tbody > tr > td,
     color: #fff;
 }
 
+/* —— Warning（中度破坏性操作）—— amber, between safe(ghost/secondary) and
+ *    danger(red). Round 38 Step 142 introduced it for the LAN Clients card's
+ *    "Limit" button (changes bandwidth — destructive but not catastrophic).
+ *    Use for any action that modifies system state without being undoable
+ *    or destroying data. */
+.btn-warning {
+    background-color: var(--color-warning);
+    color: var(--color-text-onaccent);
+    border-color: transparent;
+}
+.btn-warning:hover {
+    background-color: #d97706;       /* amber-600 — one notch darker */
+    border-color: transparent;
+    color: var(--color-text-onaccent);
+}
+
 /* —— Link（文字链接式）—— accent text, no chrome, underline on hover.
        Distinct from LuCI's .cbi-button-link which is rendered as a
        solid blue action button (see line ~1659 above). Different name

@@ -452,10 +452,15 @@ return baseclass.extend({
 					self.detailCellsFor(l, mac, vendor, type, wifi)
 				),
 				E('div', { 'class': 'devices-actions' }, [
-					self.actionBtn('action',   _('Rename'),    function () { self.actionRename(mac, displayName); }),
-					self.actionBtn('action',   _('Whitelist'), function () { toastSafe('info',    _('Whitelist is not yet implemented')); }),
-					self.actionBtn('action',   _('Limit'),     function () { toastSafe('info',    _('Rate limiting is not yet implemented')); }),
-					self.actionBtn('negative', _('Block'),     function () { toastSafe('warning', _('Blocking is not yet implemented')); })
+					// Step 142 (Round 38):4-level stake hierarchy by color.
+					// Was 3× green + 1× red — flat 'all safe-looking' visual.
+					// Now: Rename ghost (no chrome) → Whitelist secondary (light
+					// border) → Limit warning (amber, changes bandwidth) →
+					// Block danger (red, disconnects device).
+					self.actionBtn('btn-ghost',     _('Rename'),    function () { self.actionRename(mac, displayName); }),
+					self.actionBtn('btn-secondary', _('Whitelist'), function () { toastSafe('info',    _('Whitelist is not yet implemented')); }),
+					self.actionBtn('btn-warning',   _('Limit'),     function () { toastSafe('info',    _('Rate limiting is not yet implemented')); }),
+					self.actionBtn('btn-danger',    _('Block'),     function () { toastSafe('warning', _('Blocking is not yet implemented')); })
 				])
 			])
 		]);
@@ -511,14 +516,17 @@ return baseclass.extend({
 		return cells;
 	},
 
-	// Step 93: tiny button factory — keeps the verb (Rename / Limit / …)
-	// next to its handler in buildRow without 30 lines of E() boilerplate
-	// per button. `kind` is the LuCI button modifier class suffix
-	// ('action' for neutral, 'negative' for danger red).
-	actionBtn: function (kind, label, onClick) {
+	// Step 93 → Step 142 (Round 38):button factory.
+	// `variantClass` is one of the project's .btn-* design-system classes
+	// (.btn-ghost / .btn-secondary / .btn-warning / .btn-danger / etc.) —
+	// changed from the old LuCI .cbi-button-{kind} convention so the LAN
+	// Clients card can express a 4-level stake hierarchy (ghost → danger)
+	// using the canonical button vocabulary, not LuCI's old action/negative
+	// binary.
+	actionBtn: function (variantClass, label, onClick) {
 		return E('button', {
 			'type':  'button',
-			'class': 'cbi-button cbi-button-' + kind + ' devices-action',
+			'class': 'btn ' + variantClass + ' devices-action',
 			'click': function (e) {
 				e.stopPropagation();
 				onClick();
