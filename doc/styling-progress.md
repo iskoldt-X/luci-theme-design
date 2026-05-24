@@ -3243,6 +3243,122 @@ Step 139 实质上是给 design-tile 组件加了 **"dual-value variant"** —�
 
 ---
 
+## 🐛 第三十八轮(Step 140-142):LAN Clients 数据 + 布局两层 bug 修复
+
+> 触发:Chrome-Claude "猎巫" audit LAN Clients 卡,实测发现**每个设备 "Last Seen" 显示 20596 天 / "Lease expires" 显示 1970-01-01 / 所有 row 全标 offline**。同时**主机名列宽 0px**,卡看起来像一张"IP 末位列表"。
+>
+> 数据 bug 跟视觉 bug 同源:一个 wrong unit interpretation 让数字算错(数据层),CSS `1fr` 没用 `minmax(0,1fr)` 让 Name 列在窄卡上 collapse(视觉层)。3 个 Step 把这张几乎不可用的卡修回来。
+
+### Step 140 — `lease.expires` Unix epoch 误解(数据层)
+
+luci-rpc.getDHCPLeases 返回的 `lease.expires` 是 **剩余秒数**(distance to lease expiry),不是 Unix epoch。例如 `expires=39345` = ~10.9 小时剩余。这是 OpenWrt / dnsmasq / odhcpd 一贯习惯。
+
+Step 93(Round 17)写的时候**当成 Unix epoch** 处理:
+```js
+// formatLastSeen (L119-128, Step 93)
+var nowSec = Math.floor(Date.now() / 1000);
+var age = nowSec - lease.expires;        // 1.78e9 - 39345 ≈ 1.78B sec
+return relativeAge(age);                  // floor(1.78B / 86400) = 20596 天
+
+// detailCellsFor 'Lease expires' (L482-484)
+new Date(lease.expires * 1000).toLocaleString();
+// = new Date(39345000) = 1970-01-01 11:55:45
+```
+
+下游副作用:`formatLastSeen` 返回 `stale: true` for ALL leases(因为 `expires < nowSec` 永远成立),全部 row 加 `.devices-row-offline` class → 全卡 dimmed。
+
+修法:**正确解读 expires + 重新设计语义**:
+- `expires > 0` → "Xh / Xm left"(lease 有效,设备认为在线),`.devices-row-offline` 不加
+- `expires == 0` → "Static"(管理员 pin 的地址)
+- `expires < 0` → "Expired"(理论上 dnsmasq 会清掉,极少见),加 offline class
+
+同时:**列名 "Last seen" → "Lease"**。 "Last Seen" 这个语义本身**不应该**来自 DHCP lease(设备关机但 lease 没过期时,"Last Seen" 应该是数小时前而不是"now")。真实"last seen"需要 `/proc/net/arp` REACHABLE 状态或 `iwinfo.assoclist.inactive`,这是 Round 39+ 数据层增强。"Lease" 是**对当前数据来源最诚实的描述**。
+
+`detailCellsFor` "Lease expires" 改算绝对时间:`Date.now() + lease.expires * 1000`。10.9 小时剩余的 lease 现在显示 "5/24/2026, 19:38 PM" 而不是 1970。
+
+这是**第四次"单位混淆 bug"**记录:Step 120(mix-blend 数学崩)→ Step 134(right-anchor 方向错)→ Step 137(Bytes vs bits)→ **Step 140(epoch vs relative seconds)**。模式继续:**assumption 隐式编码,字段名不显式承担单位语义**。
+
+### Step 141 — `grid-template-columns` 在窄卡上 `1fr` collapse
+
+CSS L1320:
+```css
+grid-template-columns: 32px 1fr 60px 130px 80px 24px;
+                       icon NAME ip   sig   seen chev
+```
+
+源码上 `1fr` 看起来对的。但在 Round 30 把 LAN Clients 放进 auto-fit 3-up 后,卡宽 ~360-380px:
+```
+Fixed total: 32 + 60 + 130 + 80 + 24      = 326px
++ 5 gaps × 12px                            = 60px
++ card padding-x × 2                       = 32px
+= 418px MINIMUM before 1fr gets ANY space
+```
+
+380px 卡 < 418px MINIMUM → `1fr` 实际坍缩。**而且**:`1fr` 在 CSS Grid 隐含 `minmax(auto, 1fr)`,`auto` = `min-content`。长 hostname 如 "Qingping-Air-Monitor" 的 min-content 就是整串文字宽度(无空格无法分行)。grid 试图给 1fr column min-content 空间 → 要么 overflow grid 要么 clip 到 0。
+
+**Chrome-Claude 实测 Name 列 width = 0px** 是后者:column 让 0 宽度过去,hostname span 在 DOM 里但渲染区为 0,不可见。
+
+修法:**`32px 1fr 60px 130px 80px 24px` → `32px minmax(0, 1.4fr) minmax(90px, 1fr) 80px 70px 24px`**
+
+- `minmax(0, 1.4fr)` Name:**0 下限**让 column 允许 shrink 到 0 以下,触发 ellipsis(`.devices-row-name { overflow:hidden; text-overflow:ellipsis }` 已有);1.4fr 让 Name 获得最多剩余空间
+- `minmax(90px, 1fr)` IP:90px 容下 `192.168.45.100` 全 IP
+- Sig 130→80,Lease 80→70(数据 Step 140 改后 `10h left` 7 字符就够)
+
+`devices.js` L382: `var ipShort = (l.ipaddr || '').split('.').pop()` → `var ipFull = l.ipaddr || ''`;L437 render: `'.' + ipShort` → `ipFull`。**显示全 IP 不再只 ".100"**,在多 LAN 段网络(双 NAT / /16)能 disambiguate。
+
+### Step 142 — 4 个 action button 的 4-level stake hierarchy
+
+L455-458 expanded row 的 4 个 button:
+```js
+self.actionBtn('action',   _('Rename'),    ...),  // accent green
+self.actionBtn('action',   _('Whitelist'), ...),  // accent green
+self.actionBtn('action',   _('Limit'),     ...),  // accent green
+self.actionBtn('negative', _('Block'),     ...)   // danger red
+```
+
+3 个 green + 1 red。Chrome-Claude 指出 **"Limit"(限速)是中度破坏性动作**(改变带宽),跟纯安全的 Rename / Whitelist 同色误导用户"4 个里 3 个都安全"。
+
+修法:**4-level stake hierarchy** 用项目的 `.btn-*` 设计系统:
+
+| Action | 之前 | 之后 | Stake |
+|---|---|---|---|
+| Rename | `cbi-button-action`(绿填充) | `btn-ghost`(透明,hover 才出 chrome) | 极低(改个 label) |
+| Whitelist | `cbi-button-action`(绿填充) | `btn-secondary`(浅 border) | 低(no-op 还没实现) |
+| Limit | `cbi-button-action`(绿填充) | `btn-warning`(琥珀填充) | 中(改设备带宽) |
+| Block | `cbi-button-negative`(红填充) | `btn-danger`(红填充,不变) | 高(断设备网) |
+
+ghost → secondary → warning → danger 是**视觉权重递增**,用户扫一眼能感知"stake 从左到右递增"。
+
+这是 Linear / Stripe / Notion / shadcn 用的 canonical 4-tier。
+
+**`actionBtn()` 工厂改造**:从 LuCI `.cbi-button-{kind}` convention 改用项目 `.btn-*` 设计系统(Round 22 Step 106 引入但 LAN Clients 一直没用上)。
+
+**`.btn-warning` 是 Round 22 Step 106 漏缺的变体**,Step 142 补上。Hover 用 `#d97706`(amber-600 一档暗色)。
+
+### 📊 第三十八轮(Step 140-142)累计
+
+| 指标 | 第三十七轮后 | 第三十八轮后 |
+|---|---|---|
+| LAN Clients Last Seen / Lease 列显示 | ❌ 全部 "20596d"(自 1970 起天数) | ✅ "10h left" / "Static" 真实剩余 |
+| Lease expires 详情 | ❌ "1/1/1970, 11:55 AM" | ✅ "5/24/2026, 19:38 PM" 真未来时间 |
+| `.devices-row-offline` 误触发 | ❌ 全部 row 加,卡 dimmed | ✅ 只有真过期 row 加(罕见) |
+| Name 列实际宽度 | ❌ 0px,主机名不可见 | ✅ minmax(0, 1.4fr) 1fr 优先 + ellipsis |
+| IP 列内容 | ❌ 只 ".100"(末位) | ✅ "192.168.45.100" 全显示 |
+| 4 个 action button 颜色 | 3 绿 + 1 红 | ghost / secondary / warning / danger 4 级 |
+| `.btn-warning` 变体 | 不存在(Step 106 漏) | 添加 |
+
+### 关键教训
+
+**第四次"单位混淆"模式**:Step 120(mix-blend math)→ Step 134(right-anchor 方向)→ Step 137(Bytes/bits)→ Step 140(epoch/relative)。**模式越来越清晰**:任何"数字字段没显式标注单位/语义/方向"的代码,都是潜在的此类 bug。**最强对策**:**field name 显式承担语义**(rxBps → rxBitsPerSec;Step 140 没改 `expires` field name 因为它来自 LuCI 上游,但**详注释**了 "remaining seconds, NOT Unix epoch")。
+
+**CSS `1fr` 隐含的 `auto` 是窄容器陷阱**:`grid-template-columns: ... 1fr ...` 看起来对,但在长内容 + 窄容器组合下 `auto = min-content` 会扯掉 column。**defensive 写法是用 `minmax(0, 1fr)`**,允许 shrink 到 0 + 让子元素 ellipsis 接管。**应该把这个写进项目 CSS conventions 文档**。
+
+**Chrome-Claude 即使经过 calibration 也会错报**:Round 35 之后他 token 名 100% 正确,但 Round 38 报告把 SVG chevron 当成 text ↑↓ 字符。可能 DevTools 显示 rotated SVG 时给了不直观的 textual 表示。**对策**:别 100% 信他的"具体实现细节"声明,即使他在该领域已经 calibrated。**现象 + 数值实测 100% 信**(他测的 `20596d` 跟我数学验证完全吻合);**根因 / 实现具体** 70% 信,要 grep 实证。
+
+**`.btn-*` 设计系统 vs `.cbi-button-*` LuCI 系统的并存**:Round 22 Step 106 引入项目自己的 `.btn-*` 设计系统但**没全面切换**老 LuCI cbi-button-*。Step 142 在 LAN Clients 一处切换。**未来类似场景应该顺手切**:任何新建/重写的 button 用 `.btn-*`,只有 LuCI 原生模板出来的 button 用 `.cbi-button-*`(我们没法控制)。
+
+---
+
 ## 📊 第三轮（Step 21 + 22）累计变化（更新）
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
