@@ -3359,6 +3359,149 @@ ghost → secondary → warning → danger 是**视觉权重递增**,用户扫�
 
 ---
 
+## 🚀 第三十九轮(Step 143-146):WAN Link Test 真·实时仪表盘 + 自适应量程
+
+> 触发:Chrome-Claude 写了个 100ms polling recorder,跑完整 10 秒 speedtest 录下每帧 gauge 状态。结论震撼:**整个 2.3 秒 download 阶段 needle 完全静止,最后一帧才跳到终值**。"汽车仪表盘"视觉隐喻**完全失效**,gauge 退化成"延迟显示的数字"。
+>
+> 同时报告了 `SCALE_MBPS = 1000` 写死 → 2.5GbE / 10GbE 线缆 needle 直接撞到 100% 墙、显示数字 vs 视觉进度脱钩。
+>
+> 4 个 Step,P0 + P0 + P1 + P2 优先级递减,**1 整轮专注 speedtest UX**。
+
+### 实测的"gauge 一直静止"数据(Chrome-Claude 100ms recorder)
+
+| 时间 | 按钮文字 | DL gauge | UL gauge |
+|---|---|---|---|
+| 0.1s | Run test(待机) | 191.0(上次结果) | 542.9 |
+| 0.4s | Testing latency… | **— 清零** | **— 清零** |
+| 0.7s | Testing download… | **— 仍空** | **— 仍空** |
+| 3.0s | Testing upload… | **184.2 ← 一次性跳终值** | — |
+| 3.4s | Run test(完成) | 184.2 | **497.2 ← 一次性跳终值** |
+
+DL 跑 2.3 秒,gauge 全程空白,最后一帧跳值。**用户什么都看不见**。
+
+### Step 143 — testDownload 流式读取(`r.blob()` → ReadableStream)
+
+L460-477 原代码:
+```js
+fetch(url).then(r => r.blob()).then(blob => mbps);
+```
+
+`r.blob()` 是 promise,**等整个响应体收完才 resolve**。期间 JS 端**完全没有 visibility** —— 即使 CGI 是流式的(Chrome-Claude 实测 21 chunks × 5-10KB × 3-7ms),客户端代码主动放弃了流式读取。
+
+修法:`r.body.getReader()` chunk-by-chunk 读取:
+
+```js
+function pump() {
+    return reader.read().then(chunk => {
+        if (chunk.done) { /* final avg + return */ }
+        received += chunk.value.length;
+        samples.push({ t: now, bytes: received });
+        while (samples[0].t < now - WINDOW_MS) samples.shift();
+        if (now - lastUiUpdate > FPS_MS) {
+            var mbps = (windowBytes * 8) / (windowMs / 1000) / 1e6;
+            self.setGauge('download', mbps);
+        }
+        return pump();
+    });
+}
+```
+
+**三个调好的常数**:
+- `WINDOW_MS = 500` — 滑动窗口算瞬时速率。**Per-chunk 速率太抖动**(5ms 间隔 × 5-10KB chunk → 锯齿 needle);**累计平均太迟钝**(无法响应网络变化)。500ms 是甜区。
+- `FPS_MS = 100` — UI 节流 10fps。50 MB 测试有 ~230 chunks/sec → setGauge 调 230 次/秒会打 layout/paint 太狠。10fps 是 needle 视觉流畅的下限。
+- **最终 mbps = 整测平均**(不是最后窗口),让 history 记录稳定。
+
+`peakMbps` 在 sliding window 期间记录,缓存到 `self._lastTestPeak.download` 给 Step 146 用。
+
+### Step 144 — testUpload XMLHttpRequest 救场(fetch 无 upload progress)
+
+`fetch()` API 至今**没有 request body 上传进度事件** —— 这是社区 10+ 年请求未补的窟窿。**`XMLHttpRequest.upload.onprogress` 是唯一标准化的 upload-bytes-sent 监听 API**。
+
+```js
+xhr.upload.onprogress = function (ev) {
+    if (!ev.lengthComputable) return;
+    // 同 Step 143 的 sliding window + 10fps 节流
+    self.setGauge('upload', windowedMbps);
+};
+```
+
+包装在 `new Promise()` 里,`xhr.onload/onerror/ontimeout/onabort` 全 resolve(null 或 avgMbps),无 reject —— 调用方 .then(mbps => ...) 单分支处理,跟 Step 143 testDownload 行为对称。
+
+`done` flag 防 onload 后 onprogress 还在 fire 导致重复 resolve(race condition)。
+
+### Step 145 — `SCALE_MBPS = 1000` → 自适应量程 + monotone-up ratchet
+
+Chrome-Claude 从 SVG `stroke-dasharray=251 stroke-dashoffset=203.1` 反推:`(251-203.1)/251 = 0.191`,显示 `191 / 0.191 = 1000 Mbps` 满量程。**确认 SCALE_MBPS=1000 写死**。
+
+后果:
+- 2.5GbE 网线测出 2300 Mbps → `Math.min(1, 2300/1000) = 1.0` → needle 钉在 100% 墙,显示数字 "2300.0 Mbps" 跟 needle 位置脱钩
+- 50 Mbps 慢 Wi-Fi → 5% 表盘填充 → 看起来"什么都没发生"
+
+修法:**阶梯式量程数组 + 20% headroom + 单测内 monotone-up**:
+
+```js
+var SCALES_MBPS = [100, 250, 500, 1000, 2500, 5000, 10000];
+// 选最小满足 mbps * 1.2 <= scale 的档位
+// monotone-up: 一个测试内 ratchet 只上不下
+```
+
+**monotone-up 的视觉理由**:Step 143/144 每 100ms 调一次 setGauge,TCP slow-start 期间 `50 → 200 → 800 Mbps`:
+- 不 ratchet:`50/100=50%` → `200/250=80%` → `800/1000=80%`,**needle 在 250→1000 切换时往回跳到 80%**,锯齿
+- ratchet:scale 只上,needle 只前
+
+`runTest()` 起点调 `resetGaugeScale()` 把 ratchet 归 100,**保证不同测之间不残留**(避免 2.5 Gbps 测试后接 50 Mbps 显示 2%)。
+
+HTML 加 `<div class="speedtest-gauge-scale" id="st-scale-{kind}">max 1 Gbps</div>` 在 gauge 数字下方 —— 用户看到"73% of bar"知道**那是 73% of WHAT**。
+
+### Step 146 — 按钮 progress text + history 加 peak tooltip
+
+**Button 文字 live update**:
+- 旧:`'Testing download (50 MB)…'` —— 静态 2.3 秒
+- 新:`'Downloading… 12.4 / 50 MB (25%)'` → `'23.7 / 50 MB (47%)'` → `'38.1 / 50 MB (76%)'` —— **每 100ms 更新**
+
+实现:testDownload/testUpload 加可选 `onProgress(received, total)` 第二参数,runTest 传一个 callback `progressText(verb, received, total)` 拼字符串。verb 用 i18n `_('Downloading…')` / `_('Uploading…')`,数字部分不翻译(SI 单位无 i18n 需求)。
+
+**第二个 alive signal** —— 如果 gauge needle 卡死或视觉滚出屏幕,按钮文字仍然在变,用户知道测试还活着。
+
+**Peak 入 history(tooltip 路)**:Step 143/144 已经在采 peakMbps 存 `self._lastTestPeak`。runTest 在每个 promise resolve 后读出来:
+```js
+if (self._lastTestPeak && isFinite(self._lastTestPeak.download))
+    result.peakDownload = self._lastTestPeak.download;
+```
+
+`pushHistory(result)` 持久化,`renderHistory` 在 metric span 加 `title` 属性:
+```html
+<span title="Avg 184.2 Mbps · Peak 220.5 Mbps">↓ 184 Mbps</span>
+```
+
+**为什么 tooltip 不 inline**:history row 已经有 label / when / ↓ / ↑ / ms 五列,inline 加 peak 会拥挤。tooltip 是**数据保留不增视觉噪声**的妥协。用户想看 peak hover 即得。
+
+### 📊 第三十九轮(Step 143-146)累计
+
+| 指标 | 第三十八轮后 | 第三十九轮后 |
+|---|---|---|
+| Gauge 在测试期间表现 | 全程空白 + 终值瞬跳 | **needle 平滑舞动**,~10fps 实时跟踪 |
+| Upload 期间 gauge | 完全不动(fetch 无 progress) | XHR.upload.onprogress 驱动同样实时 |
+| 2.5/10 GbE 大流量 | needle 钉满 100% 墙 | 自适应升档 → 2500 / 5000 / 10000 量程,needle 在 80% 中段活跃 |
+| 慢链路(50 Mbps Wi-Fi) | 5% 填充看起来废了 | 100 Mbps 量程 → 50% 填充清晰 |
+| 按钮文字 alive signal | "Testing… (50 MB)" 静态 | "Downloading… 23.7 / 50 MB (47%)" 实时 |
+| History 记录字段 | avg only | avg(可见)+ peak(tooltip) |
+| Gauge 知道自己量程 | ❌ 无标签 | "max 2.5 Gbps" label 实时 |
+
+### 关键模式
+
+**`fetch() vs XMLHttpRequest` API gap**:fetch 是现代 API 但**至今没补 upload-progress**。XHR 是老 API 但**仅它有标准化 upload.onprogress**。任何需要 upload 进度的场景,XHR 仍是唯一路。**值得记**:fetch 不是 XHR 的全替代,upload progress 是反例。
+
+**Sliding window + UI throttle 是流式 metric 的通用模板**:Step 143 download stream + Step 144 upload XHR + 未来任何 streaming metric 都套同样的 (500ms window for instant rate / 10fps cap for UI smoothness)。模板可抽出 helper 工具,但目前两份各自一份足够,不抽。
+
+**Adaptive scale + monotone-up 是变量范围 UI 的通用解**:不是 speedtest 专有。任何"实际值范围 1 order of magnitude" 的 metric 都该这么做(e.g. 温度 -20°~80°、电压 100mV-300V、bandwidth 1Mbps-10Gbps)。**单 measurement 内 monotone-up** 保证 needle 视觉前进性。
+
+**Tooltip vs inline for ancillary stats**:Step 146 用 tooltip 而非 inline 显示 peak 是个反直觉但正确的选择。**Inline 增信息密度 = 增视觉噪声**;**tooltip 是 data preservation 但 zero visual cost**,前提是用户知道 hover 可以看(常识)。**未来类似 secondary metric 的展示先考虑 tooltip path**。
+
+**Round 39 是项目第一次接触流式 API**:`ReadableStream.getReader()`(Step 143)+ `XMLHttpRequest.upload.onprogress`(Step 144)。**两个 API 一次写对没翻车**,部分得益于现代浏览器 spec 稳定。这两套技术在以后任何"实时进度反馈"场景都可复用。
+
+---
+
 ## 📊 第三轮（Step 21 + 22）累计变化（更新）
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
