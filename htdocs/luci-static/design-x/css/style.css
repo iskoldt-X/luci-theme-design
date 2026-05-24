@@ -5122,6 +5122,33 @@ td.cbi-button, .cbi-button-apply,
     font-feature-settings: 'tnum';
 }
 
+/* Round 43 Step 186 — Mono font on technical / structured values in
+   the System card. Per Principle 9 (claude_style.md): KV cards stay
+   KV-shaped, but tech strings (versions, datetime, load numbers)
+   render in mono so the eye can scan them as structured data instead
+   of prose.
+   Chrome-Claude designation (Round 43 audit Part 3):
+     mono : Firmware Version, Kernel Version, Local Time,
+            Load Average, CPU usage (%)
+     sans : Hostname, Model, Architecture, Target Platform, Uptime
+   Selector targets value cells by row position within the FIRST
+   .cbi-section on Overview, which LuCI 24.10 emits as the System
+   block. Position is fragile to upstream row reordering — current
+   row order observed on ImmortalWrt 24.10:
+     1=Hostname  2=Model  3=Architecture  4=Target Platform
+     5=Firmware  6=Kernel 7=Local Time    8=Uptime
+     9=Load Avg  10=CPU usage
+   If upstream rearranges, switch to JS class injection by label
+   text match (sparkline.js or a new tiny module). */
+.node-admin-status-overview #view .cbi-section.fade-in:first-child table:first-child > tbody > tr:nth-child(5) > td:nth-child(2),
+.node-admin-status-overview #view .cbi-section.fade-in:first-child table:first-child > tbody > tr:nth-child(6) > td:nth-child(2),
+.node-admin-status-overview #view .cbi-section.fade-in:first-child table:first-child > tbody > tr:nth-child(7) > td:nth-child(2),
+.node-admin-status-overview #view .cbi-section.fade-in:first-child table:first-child > tbody > tr:nth-child(9) > td:nth-child(2),
+.node-admin-status-overview #view .cbi-section.fade-in:first-child table:first-child > tbody > tr:nth-child(10) > td:nth-child(2) {
+    font-family: var(--font-mono);
+    letter-spacing: -0.01em;
+}
+
 /* Step 81/82/84 (Round 13): broad overflow protection for Overview
    cbi-section text content.
    - Step 81: started with overflow-wrap:anywhere — too aggressive,
