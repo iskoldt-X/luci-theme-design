@@ -164,27 +164,49 @@ function getChangesPromise() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Round 42 Step 167: LuCI version whitelist for monkey-patching
-// L.ui.changes.{displayChanges,apply}. The patch points are LuCI
-// INTERNAL API (not documented stable), so any LuCI release can move
-// or rename them. We only patch on major versions we've actually
-// verified the patch works against; outside the range, skip silently
-// and let LuCI's native Save&Apply modal handle the flow. Codex P2-10.
+// Round 42 Step 167 + Step 174 (fix) — LuCI version gate for the
+// monkey-patches on L.ui.changes.{displayChanges,apply}.
 //
-// Verified range (as of Round 42, 2026-05-24):
+// Step 167 originally checked "is L.env.luciversion in [18, 27]?"
+// as a positive whitelist. Chrome-Claude verified on ImmortalWrt
+// 24.10 ucode track that `L.env.luciversion` is UNDEFINED — the
+// ucode template runtime doesn't propagate the version global the
+// way Lua dispatch does. The whitelist false-positive'd EVERY ucode
+// install ("unknown → bail"), which silently disabled Save&Apply +
+// toast wrap on every modern build of LuCI we ship for.
+//
+// Step 174 inverts the logic: known-INCOMPATIBLE list. Unknown or
+// parseable-in-range = TRUST + proceed. The inner feature-detect
+// (`typeof L.ui.changes.displayChanges === 'function'` etc.) is
+// still the last-line safety net — if the actual API surface is
+// gone, the patcher bails gracefully there.
+//
+// Defense layers:
+//   1. (this) Outer version-range check — catches known-incompatible
+//      LuCI majors at first principles (pre-18 / post-27).
+//   2. (in _tryPatch) Feature-detect on L.ui.changes.* methods —
+//      catches API surface changes WITHIN known versions.
+// Both bail to LuCI's native Save&Apply modal — degraded but unbroken.
+//
+// Verified band rationale (Round 42, 2026-05-24):
 //   18.06 — Lean lede secondary target
 //   19.07 — Lean lede legacy
 //   21.02 — OpenWrt mainstream
-//   23.05 — coolsnowwolf luci current
-//   24.10 — immortalwrt + openwrt current
-//   25.xx — buffer (assume same internal shape)
+//   23.05 — coolsnowwolf luci current + openwrt 23.05
+//   24.10 — immortalwrt + openwrt current (primary)
+//   25.xx — buffer
 //   26.xx — immortalwrt snapshot (verified live)
 //   27.xx — buffer
-// Outside this band (17.xx and older, 28.xx and newer), degrade to native.
-function isSupportedLuciVersion() {
+function isKnownIncompatibleLuciVersion() {
+	// If we can't read the version at all, TRUST — modern ucode track
+	// doesn't expose luciversion the same way Lua track does, and the
+	// inner feature-detect will catch any real incompatibility.
 	if (!window.L || !L.env || typeof L.env.luciversion !== 'string') return false;
 	var major = parseInt(L.env.luciversion.split('.')[0], 10);
-	return !isNaN(major) && major >= 18 && major <= 27;
+	// Unparseable major (weird string) → trust + proceed.
+	if (isNaN(major)) return false;
+	// Outside known-good band → bail to native.
+	return major < 18 || major > 27;
 }
 
 return baseclass.extend({
@@ -212,13 +234,12 @@ return baseclass.extend({
 
 	_tryPatch: function () {
 		var self = this;
-		// Round 42 Step 167: version pin. L.ui.changes.{apply,
-		// displayChanges} are LuCI internal API — patch only on
-		// versions we've verified. Outside the whitelist, leave LuCI
-		// alone and let its native modal handle Save&Apply.
-		if (!isSupportedLuciVersion()) {
+		// Round 42 Step 174: bail ONLY on known-incompatible LuCI majors
+		// (pre-18, post-27). Unknown/unparseable luciversion = trust +
+		// patch; the feature-detect below is the inner safety net.
+		if (isKnownIncompatibleLuciVersion()) {
 			if (console && console.log) {
-				console.log('apply-modal: LuCI version outside whitelist; using native flow', {
+				console.log('apply-modal: LuCI version in known-incompatible range; using native flow', {
 					luciversion: (window.L && L.env && L.env.luciversion) || '<unknown>'
 				});
 			}
