@@ -4112,9 +4112,76 @@ $ scp htdocs/luci-static/design-x/css/style.css luci-router:/www/luci-static/des
 
 **一锅炖 Phase 1+2+3 的风险**:speedtest gauge 改完发现用户不喜欢 → 浪费 2-3 小时。这条教训 Round 38 Step 141(rebalance LAN Clients columns)+ Round 43 Step 181-184(LAN header alignment 拉锯战)都吃过:**「方向不确定时,不要预提交多步」**。
 
-## 🎯 Round 44 横向观察(Step 195 ship 后再补)
+### Phase 2 — Chrome-Claude bug catalog 大批 polish(Step 196-200, 6 个 commit)
 
-Round 44 处于「布局重构 ship 等用户视觉反馈」阶段。横向观察 + 累计表等用户测过 Phase 1 之后再写。
+Step 195 ship 完用户接受了 Phase 1 视觉(没要求继续 hero 内容增强)。Chrome-Claude 同时也跑了一次 Overview 全扫,产出 14 个 bug 目录。Round 44 Phase 2 就是 catalog 修复:
+
+- **Step 196** — 三个 CSS small fixes 一锅:Bug #9(progressbar 0% min-width 2px,避免「bar 加载失败」错觉)+ Bug #10(WAN hero ↑↓ 单位 min-width 3ch 防对齐抖动)+ Bug #12(design-tile-trend min-width 50px + visibility:hidden 替代 display:none,防 layout shift)
+- **Step 197** — Bug #11 Memory sparkline minRange=10。auto-scale 把 0.6% 噪声放大成全图振幅,改用 minRange floor 让微变化看起来微小。CPU/Net/Temp 不受影响(它们不传 minRange)
+- **Step 198** — Bug #5 audit。LAN Clients「全员 Wired」在 QEMU 是正确语义(没真 wifi)。Audit 出两个 latent fix:`assoclist.results || assoclist.clients` 容老 iwinfo build,`window.designDebug` gate 诊断 log
+- **Step 199** — progressbar JS tier 着色(从 Step 187 deferred 项)。MutationObserver 监听 .cbi-progressbar 的 inline width,过 90%/95% 阈值时 setAttribute('data-tier', 'warn|danger')。CSS rule 接管染色
+- **Step 200** — Bug Network 卡 ifacebox 升级到 design-x 语言。`.ifacebox-head` 改左对齐 + uppercase + tracking,跟 LAN Clients thead 对齐;`.ifacebox` 加 hover lift + shadow-sm transition,跟 cbi-section 一致
+
+### Phase 3 — Round 42 CGI 遗留清理 + MAC vendor Phase 2B(Step 201-204, 208)
+
+- **Step 201** — Round 42 sub-D 留的 9 个 `/cgi-bin/design/*` CGI 文件清理。所有 endpoint 早就迁到 rpcd ubus(Round 42 Step 163-167)+ Lua controller(Step 166),CGI 副本是 rollback fallback。Round 43 跑了 15 个 Step 没人 touch → 确认 dead。`git rm` 9 文件 + Makefile chmod 行 + lint.yml additional_files 列 + capability.cgi() 死代码。`-450 lines / +37 lines`
+
+**MAC vendor lookup Phase 2B 完整三段串(Step 202-204 + 208)**:
+
+- **Step 202** — Build CI 拉 Wireshark `manuf` 数据 + awk transform + gzip。每次 build 重生成 `htdocs/luci-static/design-x/data/oui.json.gz`(`.gitignore` 排除)。实测大小 332 KB / 39 223 条目(doc 原估 150 KB 偏乐观)。floor 250 KB / ceiling 450 KB sanity rails
+- **Step 203** — vendor.js 模块(~150 LOC)+ NOTICE 文件。`lookup(mac, hostHintVendor?) → Promise<string>` 三层:multicast(0x01)/ LAA(0x02 → "Private (randomized)")/ UAA(查 DB)。GPL-2.0 manuf 数据 + Apache-2.0 theme 用 "Mere Aggregation" license coexistence
+- **Step 204** — devices.js 接入 vendor.js。Overview mount 时 vendor.preload() 启动 DB 解压;detail panel 渲染时 vendor.lookup() 异步填 Vendor cell。bit detection 100% 集中在 vendor.js(`doc/macvendor.md` §七 #10 规定)
+- **Step 208 紧急 fix** — LuCI 26.x `window.Response` global hijack。Step 204 ship 完用户实机测发现所有 UAA MAC 都显示 "Unknown vendor",DevTools console 抓到 `TypeError: xhr.getAllResponseHeaders is not a function`。LuCI 26 patches `window.Response` 成 Class.extend 子类,`new Response(stream)` 在 L.require'd module 上下文里造的是 LuCI Response 不是 fetch Response。**fix**:vendor.js 用 XMLHttpRequest + DecompressionStream writer/reader 完全绕开 Response wrapper。memory file `luci-26-response-class-hijack.md` 沉淀
+
+### Phase 4 — WAN tile 双向 sparkline 三连修(Step 205-206 + 209)
+
+`doc/wan_traffic.md` audit 出来的 ~33 LOC 跨 3 文件修复:
+
+- **Step 205** — Fix-1 P0: 删 `sharedHi` cross-ring quantum compression。Step 139(Round 37)的 shared-Y-axis 设计意图让上下行 ratio 视觉可见,实际副作用是任何方向的历史 peak 把另一方向压到 viewBox 底部 ~10%。每条线改 auto-scale 到自己的 ring max
+- **Step 206** — Fix-2 + Fix-3:secondary line stroke-width 1.5→2 / opacity 0.55→0.85 / dasharray "3 2"→"5 3",对比度提高;meta 行从 `Peak X Mbps`(只 rx)改 `Peak ↓X Mbps ↑Y Mbps`(双向)
+- **Step 209 hue separation** — Chrome-Claude 实机测后发现 ↑↓ 同色 + dasharray + opacity 仍 indistinguishable when ↑↓ 同步(home LAN 常见)。secondary line 颜色从 `--color-accent-500`(emerald 绿)改 `--color-info`(蓝)。色相 + texture 双轴区分
+
+### Phase 5 — bandwidth Hybrid 主轴(Step 207, 210→219, 211, 212)
+
+`doc/bandwith.md` 的 Hybrid Tier 2 架构(DESTROY listener + 5s CT_GET dump)。Round 31 nft-bridge 在 HW offload 路径下读 0 字节 → 完全失败。Round 44 整建。
+
+- **Step 207** — sysctl bootstrap。`/etc/sysctl.d/11-design-conntrack-acct.conf` 设 `net.netfilter.nf_conntrack_acct=1` + uci-defaults 立即生效(默认 OFF,只对 NEW connections 生效,必须在 WAN 起来前设)。**整个 Hybrid 路径的硬前置**。memory `[[netlink-conntrack-acct-sysctl-default-off]]`
+- **Step 210** — ucode DESTROY listener daemon。AF_NETLINK + NETLINK_NETFILTER 多播组 3,binary TLV parser,~337 LOC ucode + ~50 LOC procd init.d
+- **Step 211** — CT_GET dump + CTA_ID-keyed reconciliation。加 5s `NFNL_MSG_CT_GET` 请求,完整 Hybrid 架构,in-flight long stream 也能算
+- **Step 212** — rpcd `host-traffic-acct` method + traffic.js 三层 fallback chain(Tier 1 acct → Tier 2 Round 31 nft → Tier 3 nlbwmon)。endpoint 自动检测 `available:true` 即用,否则降级
+- **Step 210/211 部署即崩** — Chrome-Claude 验证后发现 ucode-mod-socket 不导出 AF_NETLINK 且不接受 family=16 → 整个 netlink 路径在 ucode 内**结构性不可达**。memory `ucode-socket-no-netlink.md` 沉淀
+- **Step 219 大转向** — pivot 到 `doc/bandwith.md` §5 Tier 3。daemon 从 ucode 重写为 shell + `conntrack-tools`(50 KB pack)。同样 Hybrid 架构:`conntrack -E -e destroy -o extended` background 事件流 + `conntrack -L -o extended` 5s 定期 dump,merge 到一个 awk accumulator。同样 JSON shape — rpcd/traffic.js 不动。**Round 31 nft init.d 同时 stop+disable**(Tier 3 取代)+ cron 删
+
+### Phase 6 — ARP-based Last Seen + 加固(Step 218, 220)
+
+- **Step 218** — LAN Clients "Lease" 列改用真 last-seen。新 rpcd 方法 `host-presence` 读 `/proc/net/arp`(wired,ATF_COM flag)+ `iwinfo assoclist.inactive_ms`(wireless)。devices.js 加 `formatPresence(presenceMap, mac, lease)`:wifi inactive < 5s → "Active",< 60s → "<Xs",< 1h → "<Xm" stale,no presence + no map → fall back to lease.expires。Round 38 留的语义不准确 bug 彻底关闭
+- **Step 220** — vendor.js singleton 加固。Chrome-Claude 观察 `oui.json.gz` 被请求 10 次。根因:Step 204→208 之间 Response hijack 让 fetch 失败 → catch 释放 `_mapPromise = null` → 下一个 detail panel 渲染重 fetch → 循环。fix:catch 不立刻 null,setTimeout(30000)。worst-case rate bounded at 2/minute under repeated failure。同时加 `window.designDebug` 三处 console.debug 诊断 log
+
+### Round 44 累计
+
+| 指标 | Round 43 后 | Round 44 后 |
+|---|---|---|
+| Overview 第一行布局 | 全宽 hero / 底部 1:1 speedtest+traffic | **2/3 hero + 1/3 speedtest 同一行** |
+| Chrome-Claude bug catalog 已修 | 8 个(Round 43 Phase 6) | + **6 个** (#9 #10 #11 #12 + ifacebox + Step 199 tier) |
+| Round 42 遗留 CGI 文件数 | 9(留 rollback) | **0**(删干净) |
+| MAC vendor lookup 状态 | "Unknown" placeholder | **real vendor names 13/14 UAA + 3/3 LAA detected** |
+| LuCI 26.x quirk memory 数 | 4 | **6**(+Response hijack +ucode-socket no NETLINK) |
+| WAN tile sparkline 双向区分 | 同色 + 对比度低 | **不同 hue + 双向 Peak meta + 更高对比度** |
+| Bandwidth daemon 实现 | Round 31 nft-bridge (HW offload 下 ~0% accuracy) | **conntrack-tools Tier 3**(架构准了,等装包验证) |
+| LAN Clients Last Seen 数据源 | lease.expires (Round 38 honest rename) | **/proc/net/arp + iwinfo.assoclist** |
+| 一锅 ship 的 Step 数 | n/a | **25**(Round 44 是项目第一次「攒批量 + 一次性 Chrome-Claude 验证」工作流) |
+
+## 🎯 Round 44 横向观察
+
+**「攒批量 + 一锅验证」作为新工作流定型**。Round 0-43 是 ship-one-Step-then-verify 节奏 —— 用户测每个 Step 后再推下一个。Round 44 中段用户主动定型新流程:**「一口气工作多个 step,然后写一个 prompt 给 Claude chrome 验证。得到验证结果后,更新通过的部分到 journal,同时开始 debug 和修复,再次最快验证」**。这个工作流在 Round 44 走通 — Step 196-220 共 25 个 Step 攒成 ~3-4 个 "batch" 验证。**lesson**:**code-Claude 跟 Chrome-Claude 之间的 latency 是双方各自工作的瓶颈**。让两边各自批量推进,在 ship-quanta 之间同步,比同步式 ping-pong 高效得多。这也是 Round 41 「文档轮 every 5-7 rounds」家族的工作流元规则。
+
+**LuCI 26.x quirk 家族继续扩大**。Round 42 起已经记录了 4 个 LuCI 26 quirk(`uci-changes-promise` / `network-device-status-acl` / `save-apply-routes` / `resource-version-from-script-src`)。Round 44 又加 2 个:`luci-26-response-class-hijack`(window.Response hooked to LuCI Class)+ `ucode-socket-no-netlink`(ucode-mod-socket 无 AF_NETLINK)。**lesson**:**LuCI 26 不是「LuCI 24 + 一些 bug 修复」,是个隐式的 platform shift**。任何用 fetch / Response / netlink / 任何标准 web/Linux API 的 module 都要在 L.require 上下文里先验。**memory 沉淀这一系列**:跨 round 调用「LuCI 26 上跑什么 / 什么不跑」时,直接搜 memory 比 google 快 10×。
+
+**「降级路径设计」的价值再次被验证**。Step 212 的三层 fallback chain(host-traffic-acct → host-traffic → nlbw)在 Step 210/211 daemon 死透时**让 widget 仍然显示数据**(降级到 Round 31 nft 或 nlbwmon)。如果当时硬切 Tier 1 endpoint,widget 整个 4 小时空着。**lesson**:**重要 surface 切数据源时,旧数据源至少留 1 个 Round 作 fallback**。bandwith.md §8 step 197 的 "Old CGI retained as fallback" 这条架构师选择在 Step 210/211 大崩时直接救场。这是软件工程意义上的「parachute / 降落伞」—— Round 44 实战验证了它的价值。
+
+**Tier 2 → Tier 3 pivot 的成本**。Step 210/211 写了 ~500 LOC ucode netlink TLV parser → Step 219 大砍重写成 ~325 LOC shell + awk + conntrack-tools。**总成本**:~3-4 小时 ucode 开发 + 1 小时部署 debug + 1 小时验证 + ~2 小时 shell 重写 = ~7-8 小时。**架构没浪费** —— 同样的 Hybrid 设计(DESTROY listener + 5s dump),同样的 in_flight + per_mac state model,同样的 JSON 输出 shape,**只换了 binary TLV → text format parser**。**lesson**:**doc/bandwith.md §5 tier matrix 是真有价值的 design tool**。bandwith.md 提前列了 6 个 tier 的对照表(zero deps → ntopng);Step 219 不需要重新设计,只需「按 §5 切到 Tier 3」。**未来任何系统级工程之前,先列 tier matrix,即使不选最简单 tier,知道有哪条退路也救命**。
+
+**Chrome-Claude 角色稳定下来 — verification gateway + bug bug catalog producer**。Round 43 phase 6 已经用过一次 Chrome-Claude full overview scan;Round 44 整个走完依赖 Chrome-Claude 6-7 次实机 + browser DOM 验证。**lesson**:**code-Claude(我)做生成 / 改代码,Chrome-Claude 做 runtime verification + bug catalog production**。这种「双 Claude 分工」工作流比单一 Claude 全做高效得多 —— 每个 Claude 的 context window 各有用途,不互相干扰。**memory 留的 `chrome-claude-briefing.md`(Round 41 Step 155)是这套工作流的契约文件**,Round 44 加深了它的实战价值。
 
 ---
 
