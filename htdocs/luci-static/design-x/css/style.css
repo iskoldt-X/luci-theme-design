@@ -5268,6 +5268,65 @@ td.cbi-button, .cbi-button-apply,
     letter-spacing: -0.01em;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * Round 43 Step 187 — KV-with-bar form classification (Principle 9)
+ *
+ * doc/claude_style.md Principle 9:
+ *   "形态适配信息(节奏感) —— 同一个 overview 上有'表格'/'key-value
+ *    列表'/'带进度条的 KV'/'卡片'等多种信息形态。每种形态都有它最佳
+ *    表达,不强求统一。"
+ *
+ * The System Information card on Overview mixes two form factors in
+ * one table:
+ *
+ *   Plain KV rows       Hostname / Model / Kernel / Time / Uptime
+ *                       label + short text value
+ *
+ *   KV-with-bar rows    Memory / Buffered / Cached / Swap
+ *                       label + .cbi-progressbar gauge (24px pill)
+ *
+ * The same chrome elsewhere on the site:
+ *   - Status > Realtime > Connections      Active Connections bar
+ *   - Status > Wireless > Associated       (per-station signal bar)
+ *
+ * Step 185's uniform table chrome was for the table FORM; this step
+ * gives the BAR FORM its own rhythm without breaking the host table.
+ *
+ * Treatment:
+ *  1. Bar rows stay middle-aligned (bar height 24px > text — spelling
+ *     it out so future refactors don't drift)
+ *  2. Stacked bar rows tighten their inter-row gap (group as one
+ *     utilization cluster, not 4 unrelated facts)
+ *  3. Bar-row label cell weight bumped to semibold — the bar adds
+ *     visual mass, the label needs equal anchor to not vanish
+ *
+ * NOT in scope (would need JS):
+ *   - Utilization-tier color (>90% amber, >95% red). LuCI sets bar
+ *     width via inline style; CSS can't read width as a value.
+ *     Deferred — would need sparkline.js to read width and stamp a
+ *     data-tier attribute.
+ *
+ * Browser: :has() since Chrome 105 / Safari 15.4 / Firefox 121.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+.node-admin-status-overview tr:has(.cbi-progressbar) > td,
+.node-admin-status-overview .tr:has(.cbi-progressbar) > .td {
+    vertical-align: middle;
+}
+
+.node-admin-status-overview tr:has(.cbi-progressbar) + tr:has(.cbi-progressbar) > td,
+.node-admin-status-overview .tr:has(.cbi-progressbar) + .tr:has(.cbi-progressbar) > .td {
+    padding-top: 4px;
+}
+
+.node-admin-status-overview tr:has(.cbi-progressbar) > td:first-child,
+.node-admin-status-overview .tr:has(.cbi-progressbar) > .td:first-child {
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+}
+
+/* ═══════════ End Round 43 Step 187 KV+bar classification ═══════════ */
+
 /* Step 81/82/84 (Round 13): broad overflow protection for Overview
    cbi-section text content.
    - Step 81: started with overflow-wrap:anywhere — too aggressive,

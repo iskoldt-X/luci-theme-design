@@ -555,6 +555,19 @@
 /* 把百分比文字移到外部，不要叠在条上 */
 ```
 
+**Round 43 Step 187 — KV-with-bar 形态分类（Principle 9 落实）**：当
+`.cbi-progressbar` 出现在表格 row 的 value cell 里（System 卡的
+Memory/Buffered/Cached/Swap、Active Connections、Wireless Stations），
+那一行不应被当成普通 KV 行。给它专属节奏：
+
+- 标签列 `font-weight: semibold` + 正常文本色（不再 muted）—— 因为
+  bar 加了视觉重量，label 必须有同等锚定感
+- 相邻 bar-row 之间 `padding-top: 4px`，比普通行紧 —— 让 4 条
+  Memory/Buffered/Cached/Swap 视觉上聚类成"利用率组"，不是 4 条独立 KV
+- 用 `tr:has(.cbi-progressbar)` 父级选择（现代浏览器全支持）
+- 颜色分级（>90% amber, >95% red）需要 JS 读 inline width，
+  CSS-only 做不到，留给后续 Step
+
 ### 5.8 Toggle 开关（新增）
 
 LuCI 原生用 checkbox，UI 上没有 toggle。我们覆盖 `input[type="checkbox"].cbi-input-checkbox` 重做成药丸开关：
