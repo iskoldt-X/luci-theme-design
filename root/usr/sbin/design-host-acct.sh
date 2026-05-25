@@ -331,8 +331,8 @@ mode == "poll" {
     #   - dnsmasq <-> LAN device protocol exchange
     # Crediting these inflates host totals 4x relative to WAN counter
     # (Step 228 measured 32x tx over-count from intra-LAN being
-    # attributed as the src device's outgoing traffic). For "who is
-    # using my internet" widget purpose, intra-LAN is noise — skip it.
+    # attributed as the src side outgoing traffic). For the
+    # who-is-using-my-internet widget purpose, intra-LAN is noise.
     src_is_lan = is_lan(orig_src)
     dst_is_lan = is_lan(orig_dst)
     if (src_is_lan && dst_is_lan) {
