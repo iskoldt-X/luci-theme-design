@@ -1011,13 +1011,17 @@ return baseclass.extend({
 					self.actionBtn('btn-ghost',     _('Rename'),       function () { self.actionRename(mac, displayName); }),
 					self.actionBtn('btn-secondary', _('Whitelist'),    function () { toastSafe('info',    _('Whitelist is not yet implemented')); }),
 					self.actionBtn('btn-secondary', _('Set Static') + ' →', function () { window.location.href = L.url('admin/network/dhcp'); }),
-					// Step 243 (Round 46): Limit message updated. Round 46
-					// verification confirmed tc is not in IW24.10's default
-					// install, and nft `limit rate` is policing-not-shaping
-					// (TCP retransmit-heavy UX). Limit was permanently
-					// removed from Round 46 scope; toast now honestly
-					// points users at sqm-scripts as the proper path.
-					self.actionBtn('btn-warning',   _('Limit'),        function () { toastSafe('info',    _('Per-device rate limiting requires sqm-scripts; install it from the package manager to shape bandwidth.')); }),
+					// Step 244 (Round 46): Limit button removed entirely.
+					// Round 46 verification confirmed tc is not in IW24.10's
+					// default install + nft `limit rate` is policing-not-
+					// shaping (TCP retransmit-heavy UX). The feature has no
+					// shippable path within this theme. Users who want
+					// per-device shaping should install sqm-scripts; that's
+					// a separate concern handled by its own LuCI page, not
+					// something this theme should fake. Earlier Step 243
+					// kept a Limit button with a redirect toast; user
+					// feedback after Block landed was "去掉吧" — the toast
+					// itself was creating noise without value.
 					// Step 243: Block is now a real two-state button.
 					// - Not blocked → btn-danger, label "Block", modal confirm
 					//   then block-mac RPC, refresh on success

@@ -5484,6 +5484,72 @@ scp htdocs/luci-static/design-x/css/features.css     luci-router:/www/luci-stati
 2. **乐观更新 + refresh fallback** 是个简单但有效的 pattern:RPC 之前先改本地 state(UI 立即响应),RPC 完了 refresh()(校对真实状态),错了用户最多看到 30s 不一致。**比手动 rollback 逻辑简单 + 鲁棒**。
 3. **Whitelist 留 placeholder 是对的**:用户后期可能改主意要做。**deferred 不等于 deleted**,UI 保留按钮 + 诚实 toast 让 future-self 有锚点。
 
+### Step 244 — Limit 按钮整个移除(Round 46 收官)
+
+**时间**:2026-05-25(Step 243 实测 PASS 后用户即时反馈 "limit 按钮可以去掉")
+**文件**:
+- `htdocs/luci-static/resources/design-x/devices.js`(删 1 行 actionBtn,改为 explanatory comment block 替代)
+- `doc/backlog.md`(Round 46 candidates 状态全更新成 close-out)
+
+**做了什么**:`buildRow()` 里 Limit `actionBtn(...)` 那一行删掉,留一段 8 行注释解释为什么没有 Limit 按钮(verification 找的不可行 + Step 243 toast 是临时方案 + 用户主动要去掉)。Whitelist + Set Static + Block/Unblock 不动。
+
+**事件起源**:Step 243 实测后用户反馈:
+
+> "block 了之后虽然还连着 Wi-Fi,但是上不了网了。解了之后就能继续上网了。厉害。limit 按钮可以去掉。"
+
+第一句确认 Block 端到端工作正常(实测设备 Wi-Fi 显示连接 + 互联网不通,这正是 nft drop @ forward+input+output 三个 hook 的精确语义)。第二句是 UX 反馈 — Step 243 留的 Limit toast(redirect 用户去装 sqm-scripts)被认为是 noise,**直接删按钮比留一个 redirect 按钮干净**。
+
+#### 为什么删 button 比留 toast 好(教训沉淀)
+
+| 选项 | UX |
+|---|---|
+| (A) Step 243 现状:Limit 按钮 + toast "install sqm-scripts" | 给用户暗示 "可能装了 sqm 之后会有效",但**theme 实际不会消费 sqm 信号**,留 button = 留承诺,实质 = **承诺空头** |
+| (B) Step 244 删按钮 | UI surface 干净;不暗示"将来会有";如果某天真做 sqm 集成,**那时候再加按钮**,按需付出 |
+
+(B) 是 **YAGNI 原则的标准应用**。Round 44 daemon-track 失败的元教训之一就是"为想象中的需求设计基础设施";Step 244 是这个教训在 UI 层的反射 — **不为可能-永-远-不-存-在 的 feature 留 placeholder button**。
+
+#### Whitelist 为什么保留(对比 Limit)
+
+Whitelist UI placeholder 留着的原因跟 Limit 不同:
+- Whitelist **semantic 模糊但实现路径有多个备选**(wireless.macfilter / nftables / dhcp host whitelist),未来更可能落地
+- Limit **structural 不可行**(IW24.10 默认无 tc,nft 替代不能 shape only police,SFO 风险)
+- 用户主动 defer Whitelist("decide later"),主动 remove Limit("可以去掉")
+
+**Memory 不沉淀这一条**:这是 product decision-making,不是 LuCI/OpenWrt quirk,memory 文件留给后者。
+
+#### 验证
+
+```bash
+$ node --check devices.js          ✅
+$ grep "_('Limit')" devices.js     ✅ 0 hits(只 comment 里有历史 ref)
+```
+
+scp + 刷新 Overview,展开 Clients 行 → action 行现在 4 个按钮:Rename / Whitelist / Set Static → / Block(或 Unblock)。
+
+#### Break change
+
+- Clients 卡 expand row Limit 按钮 **消失**。Round 44 → Round 45 → Round 46 三轮以来的"5-button action 行"压缩到 4-button
+- toast 数量减 1 个(原 Limit toast 不再触发)
+
+#### Round 46 close-out
+
+| Step | 内容 |
+|---|---|
+| 242 | Block backend(nft 表 + rpcd write methods + ACL) |
+| 242a | hotfix:design_x.nft 移到 ruleset-post/(原 table-post/ 触发 fw4 syntax error) |
+| 242b | hotfix:atomic-replace prelude(防 fw4 reload rule 翻倍) |
+| 242c | hotfix:paste → 纯 shell loop(BusyBox 没 GNU paste) |
+| 243 | Block UI(devices.js 按钮 + 红点 + Blocked badge + 模态确认 + 实测 PASS) |
+| 244 | Limit 按钮整个移除(本 step,Round 46 close-out) |
+
+**Round 46 = 6 steps,跨 backend 验证 → 3 个 hotfix → UI ship → 实测 → 收尾**。**Verify-first 工作流第一次完整 saga**,4-5h 总成本,Block 端到端 work,Limit 优雅 defer。
+
+**Round 47 候选**:Whitelist? 还是新一波 UI 打磨?**等用户开 Round 47 时再决**。
+
+#### Memory 沉淀
+
+`verify-first-implement-second` 已在 Step 242c 加了 Round 46 3 个 sub-lessons。Step 244 不补 memory — 删按钮是 product decision,非 technical quirk。
+
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 
