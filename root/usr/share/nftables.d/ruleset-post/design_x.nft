@@ -19,6 +19,17 @@
 #     offloading kicks in — Round 44's SFO ghost can't undermine
 #     this. Verified: SFO only affects established flows; dropped
 #     packets never establish a flow.
+#
+# Step 242b: atomic-replace prelude. Without the `delete table` line,
+# fw4 reload (which incrementally applies includes via `nft -f`)
+# would APPEND our chain definitions to the already-existing table,
+# doubling each rule on every reload. The 3-line idiom below
+# guarantees the table is wiped + recreated as a single atomic
+# transaction inside one `nft -f` invocation — no rules-missing
+# window, no rule duplication.
+
+table inet design_x
+delete table inet design_x
 
 table inet design_x {
 	set blocked_macs {

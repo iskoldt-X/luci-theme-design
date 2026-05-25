@@ -5268,6 +5268,63 @@ ssh luci-router '
 - **Verify-first 第二层教训**:**verify 不只是跑 query,还要读 query 返回值的 fine print**。Round 46 我跑了 A2 query 看到 zerotier 用 `table-post/`,但没读它的 .nft 文件内容,假设了 syntax 形式。**纠正:看到一个引用就把引用对象本身读了**。Step 242a hotfix 是这条教训的具体落地。
 - **fw4 README 是真相之源**:`/usr/share/nftables.d/README` 一开始就把 4 个 include 位置讲得清楚,跑 A2 时**应该一起 cat 出来**。Step 242a 之后这条加进 Round 46 verification batch:**任何 hook directory 探索都顺便 cat README**。
 
+### Step 242b — hotfix: nft include 重复 append 致 rules 翻倍
+
+**时间**:2026-05-25(Step 242a 同日重测发现)
+**文件**:
+- `root/usr/share/nftables.d/ruleset-post/design_x.nft`(加 3 行 atomic-replace prelude)
+- `root/usr/libexec/rpcd/luci-theme-design-x` 的 `regenerate_state_file()`(同步加同样 3 行)
+
+**事件起源**:Step 242a deploy 之后用户重测,fw4 reload 干净无 syntax error,但 `nft list table inet design_x` 显示**每条 rule 出现两次**:
+
+```
+chain block_forward {
+    type filter hook forward priority filter; policy accept;
+    ether saddr @blocked_macs counter packets 0 bytes 0 drop  ← 1
+    ether daddr @blocked_macs counter packets 0 bytes 0 drop
+    ether saddr @blocked_macs counter packets 0 bytes 0 drop  ← 2 (dup)
+    ether daddr @blocked_macs counter packets 0 bytes 0 drop
+}
+```
+
+**根因**:nft 文件用 `chain block_forward { ... rules ... }` 这种"chain block"语法,在 `nft -f` 上下文里语义是 **APPEND rules**,不是 replace。fw4 reload 每次都 `nft -f` 一次 include 文件,table 第一次创建好之后,第二次 include 时:
+- `table inet design_x { ... }` 块在 nft 里是幂等:add 已存在的 table 不报错
+- 但 `chain block_forward { type ... ; ether saddr ... drop }` 块**追加规则到已存在的 chain**(不清空)
+- 第二次 reload → rule 翻倍。第三次 → 翻三倍。
+
+Step 242 ship 时:rpcd 的 `ensure_table()` 看到 table 缺(fw4 reload 前 fw4 reload 错位)→ rpcd 用 `nft -f` 加载文件 → table 创建,chain 含 rule 各 1 份(无 dup)。
+Step 242a deploy 时:fw4 reload 成功 include 新位置文件 → 但 table 已经存在(rpcd 创建过)→ chain rules **再加一份** → 翻倍。
+未来每次 fw4 reload(Save&Apply 等)→ 再翻一倍。
+
+**功能上 work**(drop 2 次跟 drop 1 次效果一样),但 counter 翻倍 + 内存无限堆积。**必须修**。
+
+#### 修法:nftables 标准 atomic-replace idiom
+
+文件开头加 3 行:
+
+```nft
+table inet design_x          # 幂等 add(table 不存在则创建,已存在则无操作)
+delete table inet design_x   # 整 table 删除(chain + set 全清)
+
+table inet design_x {        # 重新完整定义
+    set blocked_macs { ... }
+    chain block_forward { ... }
+    ...
+}
+```
+
+这 3 行在**同一个 `nft -f` 调用内**形成 atomic transaction。删 + 重建对外不可见(没有"无规则窗口"中间态),每次 reload 总是从 clean 状态重建。
+
+#### 验证
+
+scp + 用户重跑 #3 应该看到每个 chain 里 rule 恰好 1 份(不再翻倍)。**多次 fw4 reload 也应该保持 1 份**。
+
+#### 教训
+
+**Verify-first 第三层教训**:`nft -f` 的 include 语义是 incremental append,不是 replace。我之前默认假设"include 一个完整 table block 是 replace"。**错**。生产 nftables 配置文件**永远应该用 atomic-replace prelude**,以备 reload 多次。
+
+**这条值得 memory 沉淀吗**?可能值得 — 第一次看到这个 quirk 就掉坑了。但是 fw4 reload incremental append 是 nft 的标准行为,**Memory 沉淀过的人**会知道 — 加进**已经存在的** `verify-first-implement-second` memory 文件作为示例就够了。下一个 step(243 verify pass 之后)顺手补一下 memory。
+
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 
