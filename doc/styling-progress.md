@@ -4762,6 +4762,161 @@ $ git diff --stat HEAD~1  → 2 docs only (backlog.md + macvendor.md)
 
 **Round 45 quick-win pass 全部 done**:Step 232 / 233 / 234 / 235 / 236 / 237 / 238 = 7 个 step,跟原计划"Round 45 终态 6-8 step"对齐。**Round 46 是真正的下一个 round 起点,Block + Limit + Whitelist 全是新工**。
 
+## Step 239 — Step 232 注释错位 hotfix(CSS parser silent-swallow incident)
+
+**时间**:2026-05-25(Step 238 同 session 后,Chrome-Claude 投诉 Overview 布局触发的连锁诊断)
+**文件**:`htdocs/luci-static/design-x/css/style.css`(3 行改动,移动注释 close 位置)
+
+#### 事件起源
+
+用户报告 Overview "卡片挨得太近"。Chrome-Claude 详细审查:
+- 卡片间距 0px(除了 wan-hero/devices/speedtest 自带 margin-bottom 的)
+- `getComputedStyle('#view').display === 'block'`(应该是 grid)
+- CSS `order:` directives 全部无效 — Step 233 的 `.devices-card { order: -1 }` 没把 Clients 卡顶到 cbi-section 之上
+
+Chrome-Claude 误诊为"`#view` 没设 grid",但源码 `style.css:5231` 明明写了 `display: grid`。
+
+#### 诊断过程(浪费了用户耐心)
+
+连环 console query 排除:
+1. body class 有没有 `node-admin-status-overview` → ✓
+2. `#view` 是不是直接父容器 → ✓(13 个卡片全是直接子)
+3. 浏览器 stylesheet list 里 `#view {display:grid}` 在不在 → **不在**
+4. 是不是浏览器 cache → 硬刷后仍 block,**不是 cache**
+5. `fetch('/luci-static/design-x/css/style.css?nocache=' + Date.now())` 拉 fresh 文件,`gridRulePresent: true` — **文件有规则但浏览器解析后没有**
+6. 是不是 MIME / CORS / @media 包裹 → 都不是,508 rules accessible
+7. **brace + comment balance 检查**:`awk` 报 depth +1(假报,被 content 字符串里的 `{` 误算),`python3` strip 注释后 683/683 ✓ — 但**实际上注释 strip 之前文件有问题**
+8. 最终目视检查 `style.css:5219-5230`:**发现 Step 232 改注释时 `*/` 关错位置**
+
+#### 真正根因(Step 232 引入的 latent bug)
+
+Step 232 我给 §Grid 容器注释加了一段 Round 45 备注:
+
+```css
+/* Grid 容器：所有 .cbi-section 兄弟节点
+   Step 114 (Round 30): minmax floor bumped 360 → 440 ...
+   responsive breakpoints:
+   Step 232 (Round 45): traffic card removed; comment now reflects
+   the 2-extra layout. */                                      ← 我在这里 close
+     main < 880 px        → 1 track  (cards stack)             ← 现在变裸 CSS!
+     880 ≤ main < 1320 px → 2 tracks (2-up + wrap)
+     main ≥ 1320 px       → 3 tracks (full 3-up row) */         ← 原始 */ 变 stray
+.node-admin-status-overview #view {                            ← 这个 block 被 swallow
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+    gap: var(--space-4);
+    align-items: start;
+}
+```
+
+CSS parser 看到 `main < 880 px ...` 这种非合法 token,进入 error-recovery 模式,**会 swallow 紧接的整个 selector-block** 直到找到下一个 well-formed rule。我们的 `#view { display: grid }` 在 swallow 范围内,**整个被 parser 丢弃**。
+
+`#view` 没有 grid → 退回 default `display: block` → `order:` 全失效 → 后续 5 个 Round 45 layout 改动(Step 233 `devices-card order: -1` 等)**全部静默无效**。
+
+#### 修复
+
+把 3 行 responsive-breakpoint 文字+ Step 232 备注合并回单个 `/* ... */` block,close `*/` 移到最末尾。3 行改动:
+
+```diff
+-   responsive breakpoints:
+-   Step 232 (Round 45): traffic card removed; comment now reflects
+-   the 2-extra layout. */
+-     main < 880 px        → 1 track  (cards stack)
+-     880 ≤ main < 1320 px → 2 tracks (2-up + wrap)
+-     main ≥ 1320 px       → 3 tracks (full 3-up row) */
++   responsive breakpoints:
++     main < 880 px        → 1 track  (cards stack)
++     880 ≤ main < 1320 px → 2 tracks (2-up + wrap)
++     main ≥ 1320 px       → 3 tracks (full 3-up row)
++   Step 232 (Round 45): traffic card removed; comment now reflects
++   the 2-extra layout. */
+```
+
+#### 验证
+
+```bash
+$ python3 -c "..."  # strip comments + strings → 683 opens / 683 closes / 0 stray */
+```
+
+预期 scp + 硬刷后:
+- `getComputedStyle('#view').display === 'grid'`
+- 卡片间 16px row-gap
+- Clients 卡上移到 cbi-section 之上(Step 233 order: -1 终于生效)
+
+#### 教训(给自己的)
+
+1. **Chrome-Claude 报告现象时优先信他的现象观察**。它说"`display: block`",我应该立即查 CSS parse 状态,而不是去想"是不是 cache / MIME / 选择器特异性"。**症状观察 = data,我的因果分析 = hypothesis,先验证 data 是 hypothesis 的前提**。
+2. **CSS 注释改动是 latent bug 高发区**。Step 232 我同时改 6 个文件,CSS 那个 hunk 我用 Edit tool 但**没用大 old_string 把整段 `/* ... */` 包进去**,只改了 middle 部分,留下 close `*/` 不动。最后变成 2 个 `*/` + 一段悬空文字。
+3. **CSS parser 的 error recovery 是 silent swallow**:不报错、不警告、不日志、`node --check` 不抓、brace balance 不动。**唯一可靠检测**是 `document.styleSheets[i].cssRules` 里看不到本该有的规则。这是个反直觉的 failure mode。
+4. **stray `*/` 的可靠检测**:strip 完所有 `/* ... */` 配对后,如果还剩 `*/`,说明有 unmatched terminator。Python 一行可以做:
+   ```python
+   re.findall(r'\*/', re.sub(r'/\*.*?\*/', '', src, flags=re.DOTALL))
+   ```
+   **应该作为所有 CSS edit 的 pre-commit gate**。
+
+## Step 240 — Memory 沉淀 + Step 232-237 CSS 改动 audit
+
+**时间**:2026-05-25(Step 239 同 session 后,关闭事件)
+**文件**:
+- `~/.claude/.../memory/css-comment-truncate-swallows-rule.md`(新 memory entry)
+- `~/.claude/.../memory/MEMORY.md`(index 加一行 link)
+- 本 journal 文件(Step 239 + Step 240 双 entry)
+
+#### Memory 沉淀
+
+第 9 条入册:`css-comment-truncate-swallows-rule`,详细记录 Step 239 incident。重点章节:
+- **症状识别**:CSS-only 改动 ship 后 layout 没动 + `getComputedStyle()` 返回默认值 + `order` / `grid-column` 失效 → **优先查 brace+comment balance**,不要先查 cache / MIME / 特异性
+- **检测脚本**:Python strip 注释后数 brace + 数 stray `*/`,作为 pre-commit gate
+- **诊断 confirmation**:`document.styleSheets[i].cssRules` 看不到本该有的规则 = parser 丢了它
+- **关联 memory**:[[luci-26-resource-version-from-script-src]] — 都是"CSS-only 改动看似没生效"的潜在原因,但根因不同(parse error vs cache),诊断路径分开走
+
+#### Step 232-237 CSS 改动全 audit
+
+用 Python script 跑 brace+stray `*/` check on `style.css` + `features.css`(Round 45 CSS edits 都在这两个文件):
+
+```
+style.css:    braces 683/683 ✓  stray */ 0 ✓
+features.css: braces 305/305 ✓  stray */ 0 ✓
+```
+
+逐 step 复查:
+
+| Step | CSS 改动 | latent bug 风险 | 现状 |
+|---|---|---|---|
+| 232 | features.css §17 删除(sed `1970,2273d`)+ §111 selector list 短化 + style.css §Grid 注释改 + §195 注释改 | **高** — 多 hunk 多注释 | **§Grid 注释 BUG**(Step 239 已修);其他 hunks audit clean |
+| 233 | style.css `.devices-card { order: 10 → -1 }` | 低 | clean |
+| 234 | features.css 加 `.devices-detail-cell-ipv6` + `.devices-detail-ipv6-line` + mobile breakpoint | 低(additive) | clean |
+| 235 | features.css 加 `.devices-col-sortable` + `.devices-col-arrow` + hover/focus/active states | 低(additive) | clean |
+| 236 | 无 CSS 改动 | — | n/a |
+| 237 | 无 CSS 改动 | — | n/a |
+
+**结论**:**Round 45 只有 Step 232 §Grid 注释 hunk 出问题**,Step 239 已修。Step 233/234/235 的 CSS 改动结构干净,visible bug 0。Audit 通过。
+
+#### 后续候选(propose-then-reject 留痕)
+
+- **`scripts/check-css.sh` pre-commit gate**:把 Python strip + brace + stray `*/` check 包成脚本,加到 `.github/workflows/lint.yml` 或 git pre-commit hook。**Step 241 候选**。**不在 Step 240 scope** — Step 240 是 sediment + audit,不引入新工具。**等用户决定是否要 ship**。
+- **CSS parse 错误的运行时检测**:`L.require('design-x.something')` 启动时验证一些关键 rule 是否在 `document.styleSheets` 里,缺失就 console warn。**propose-then-reject** — 噪声大、价值低,Memory 第 9 条 + audit 脚本已经够防御。
+
+#### 没动的东西
+
+- Step 232 的 Makefile / rpcd / footer / capability 改动 — 跟 CSS 无关,本 audit 不涉及
+- features.css §17 已删除,无需重检
+- Round 44 之前的 CSS edits — 历史代码,在产品上跑了多个 Round,假设稳定
+
+#### 验证
+
+```bash
+$ cat ~/.claude/.../memory/MEMORY.md  → 9 条 entry ✓
+$ cat ~/.claude/.../memory/css-comment-truncate-swallows-rule.md  → 完整文件 ✓
+$ python3 brace-check.py  → both files clean ✓
+```
+
+#### 教训(已沉淀到 memory,这里只记一句话)
+
+**Round 45 的真·meta-lesson**:Step 232 一锅 ship 6 个文件改动,**我没做 CSS-side syntax check 就 commit**。Round 44 daemon-track 之后我对"小心 awk 注释引号"这类教训已经写进 memory,但**还没 internalize 到"多 hunk commit 必须 syntactic verify each file"**这个原则。Step 240 把它沉淀。**下一个跨多文件 commit 之前,跑 `python3 brace check`(JS 跑 `node --check`,CSS 跑 brace+stray-`*/` 检查)是 mandatory pre-commit gate**。
+
+| 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
+
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 |---|---|---|---|
 | 现代 rgb()/hsl() | 50 处 | **0** | 0 |
