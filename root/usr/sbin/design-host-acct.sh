@@ -234,14 +234,14 @@ mode == "poll" {
         delta_orig = 0
         delta_repl = 0
     } else {
-        # Round 44 Step 227: subsequent polls — a flow_id we haven't
-        # seen before is almost certainly a NEW flow created between
+        # Round 44 Step 227: subsequent polls. A flow_id we did NOT
+        # see before is almost certainly a NEW flow created between
         # last poll and now. Credit its current bytes (which all
-        # accrued during the gap). Modern web is short-connection-heavy
-        # — many flows appear and disappear within 1-2 polls and would
-        # otherwise be lost completely. Step 226's baseline-only policy
-        # ate 5681 such flows in 60 polls (~95/poll, the silent_evictions
-        # counter). Step 227 credits them.
+        # accrued during the gap). Modern web is short-connection
+        # heavy. Many flows appear and disappear within 1-2 polls and
+        # would otherwise be lost completely. Step 226 baseline-only
+        # ate 5681 such flows in 60 polls (95/poll on the user box,
+        # measured as silent_evictions). Step 227 credits them.
         delta_orig = orig_b
         delta_repl = repl_b
     }
