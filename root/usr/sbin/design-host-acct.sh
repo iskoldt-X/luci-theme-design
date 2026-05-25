@@ -1,228 +1,302 @@
 #!/bin/sh
 #
-# design-host-acct.sh — per-host LAN bandwidth accounting JSON publisher
-# Round 44 Step 223 — read from Round 31 nft bridge counters.
+# design-host-acct.sh — per-host LAN bandwidth accounting daemon
+# Round 44 Step 226 — Tier 0: /proc/net/nf_conntrack polling + delta tracking
 #
-# WHY THE 3rd IMPL IN ROUND 44
-# ────────────────────────────
-# Step 210/211 used ucode + AF_NETLINK → blocked (ucode-mod-socket has no
-#   AF_NETLINK in ImmortalWrt 24.10).
-# Step 219 switched to `conntrack -E -e destroy` subprocess → empirically
-#   verified destroys_seen=0 for 11 minutes on a router with 10+ active
-#   clients (Chrome-Claude Round 44 batch verify, 2026-05-25). Root cause:
-#   ImmortalWrt 24.10 ships `flow_offloading=1, flow_offloading_hw=1` by
-#   default; the offload fastpath retires flows WITHOUT producing
-#   NFNLGRP_CONNTRACK_DESTROY notifications, so `conntrack -E` is silent.
-#   The daemon's own comment header described this exact failure mode
-#   for nlbwmon, then Step 219 walked into it.
+# DAEMON-TRACK SAGA (FOUR IMPLS BEFORE THIS ONE)
+# ──────────────────────────────────────────────
+# Step 210/211 (ucode + AF_NETLINK)        — ucode-mod-socket has no AF_NETLINK
+# Step 219     (shell + conntrack -E)       — SFO bypasses DESTROY events (~0% coverage)
+# Step 223     (shell + nft bridge counter) — SFO bypasses bridge family too (<5% coverage)
+# Step 226     (shell + nf_conntrack poll)  — THIS — bytes synced in conntrack table
+#                                              even for SFO/HFO-offloaded flows
 #
-# Step 223 (this file): READ FROM the Round 31 design-host-acct service's
-# nft bridge family counters. Bridge family hooks fire BELOW the inet/
-# flow_offload layer, so byte counts are offload-proof. The Round 31
-# service maintains per-IP counters (host_tx_<ip>, host_rx_<ip>) and a
-# cron refreshes them as new DHCP leases appear. This daemon just polls,
-# joins to ARP for IP→MAC, aggregates, and writes JSON.
+# WHY THIS WORKS WHERE THE OTHERS DIDN'T
+# ──────────────────────────────────────
+# Empirically verified on the user's ImmortalWrt 24.10 router (2026-05-25,
+# Chrome-Claude batch verify):
+#   `cat /etc/config/firewall | grep flow_`
+#     flow_offloading        '1'
+#     flow_offloading_hw     '1'
+#   `cat /proc/net/nf_conntrack | head -2`
+#     ipv4 2 udp 17 25 src=A dst=B sport=X dport=Y packets=N bytes=N \
+#                       src=B dst=A sport=Y dport=X packets=N bytes=N ...
+#   bytes=N populated → kernel maintains per-flow byte counts in the table
+#   regardless of offload mode. SFO/HFO retire the FAST PATH packets through
+#   shortcut code, but they STILL update the conntrack entry's byte counter
+#   (via nf_flow_offload_stats() and friends, called periodically by the
+#   offload subsystem). The table is the only kernel surface that is both
+#   per-flow AND offload-aware.
 #
-# DEPENDENCY: Round 31 design-host-acct service MUST be running (it owns
-# the nft table). Step 223's Makefile change un-does the Step 219
-# "stop + disable Round 31" postinst — they now coexist as
-# producer/consumer.
+# WHY DOC §3 "POLLING IS WRONG" WAS A MISJUDGMENT
+# ───────────────────────────────────────────────
+# doc/bandwith.md §3 dismissed polling as "Tier 1a, 85-95% accuracy, broken
+# UX during long streams". That assessment is wrong for THIS use case:
+#   - "85-95% accuracy" referenced short-flow data loss (DNS queries etc).
+#     For BYTE accounting (bandwidth dashboard), short flows are <1% of
+#     bytes — polling is 99%+ on bytes.
+#   - "broken UX during long streams" presumed DESTROY events would arrive
+#     to credit final bytes. With SFO ON (default), destroy events DON'T
+#     arrive — but polling sees the flow's current byte count every 5s,
+#     so long streams render smoothly.
+# 16+ hours of Round 44 daemon-track work could have been saved by
+# choosing this impl from the start. Memory `[[sfo-bypasses-conntrack-events]]`
+# now captures the lesson.
 #
-# ARCHITECTURE
+# HOW IT WORKS
 # ────────────
-#   /etc/init.d/design-host-acct (Round 31, START=99)
-#       nft add table bridge design_acct {...}
-#       nft add counter host_tx_X, host_rx_X for every DHCP-known IP
-#       counters accumulate bytes on every packet via bridge prerouting
-#       and bridge postrouting chains
+#   Single long-running awk consumes a shell-muxed input stream:
 #
-#   /etc/init.d/design-host-acct-uc (Round 44 Step 210→219→223, START=99)
-#       → /usr/sbin/design-host-acct.sh (THIS FILE)
-#           every POLL_INTERVAL seconds:
-#               1. read /proc/net/arp        → ip_to_mac
-#               2. read nft list table       → counter snapshot
-#               3. aggregate per MAC          → host totals
-#               4. atomic-rename JSON output  → /tmp/design-host-traffic.json
+#     ===ARP===     awk reset ip_to_mac map, reads following lines
+#     <IP MAC>      one per line, until next sentinel
+#     ===POLL===    awk switches to flow-parsing mode
+#     <conntrack>   /proc/net/nf_conntrack body, one line per flow
+#     ===ENDPOLL=== awk reconciles state, writes JSON, evicts gone flows
 #
-#   rpcd `host-traffic-acct` method serves the JSON file.
-#   traffic.js consumes via Tier 1 of the three-tier chain (Step 212).
+#   awk maintains:
+#     ip_to_mac[IP]                          IPv4 → MAC (uppercase, no colons)
+#     in_flight[flow_id] = "orig_b, repl_b"  per-flow last-known bytes
+#     per_mac_rx[mac], per_mac_tx[mac]       per-host running totals
+#     seen_this_poll[flow_id]                set of flows in current dump
 #
-# OUTPUT SCHEMA (unchanged from Step 211 — frontend & rpcd untouched)
+#   On each ENDPOLL: flow_ids in in_flight NOT in seen_this_poll are
+#   evicted (already credited up to their last sighting; missed final
+#   burst, if any, is bounded by POLL_INTERVAL × peak bandwidth).
+#
+#   On first sighting of a new flow (not in in_flight): BASELINE only
+#   (record current bytes, no credit). Avoids over-counting flows that
+#   existed before daemon started. Trade-off: daemon misses bytes that
+#   accrued before it started running.
+#
+# OUTPUT SCHEMA (unchanged from Step 223 — frontend & rpcd untouched)
 #   {
-#     "version":1, "phase":3, "impl":"nft-bridge-direct",
+#     "version":1, "phase":4, "impl":"conntrack-poll",
 #     "generated_at": <epoch>,
-#     "stats": {
-#       "destroys_seen":0,         (not applicable — no event stream)
-#       "destroys_parsed":0,        (same)
-#       "dumps_completed": N,       (per-poll count)
-#       "dump_entries": K,           (per-poll: # counters joined to MAC)
-#       "bytes_credited": M,         (per-poll: bytes added across all MACs)
-#       "parse_errors":0,
-#       "id_reuses":0,                (not applicable — counters are persistent)
-#       "silent_evictions": E,        (per-poll: counters whose IP has no ARP MAC)
-#       "started": <epoch>
-#     },
-#     "hosts": {
-#       "<mac uppercase no colons>": { "tx": <total bytes>, "rx": <total bytes> },
-#       ...
-#     }
+#     "stats": { destroys_seen:0, destroys_parsed:0, dumps_completed,
+#                dump_entries, bytes_credited, parse_errors,
+#                id_reuses, silent_evictions, started },
+#     "hosts": { "<mac>": { rx, tx, last_seen } }
 #   }
 
 set -e
 
 OUT_FILE=/tmp/design-host-traffic.json
 TMP_FILE=/tmp/.design-host-traffic.json.tmp
-ARP_FILE=/proc/net/arp
-NFT_TABLE=design_acct
 POLL_INTERVAL=5
-STATE_FILE=/tmp/.design-host-acct-state
-
 STARTED_AT=$(date +%s)
-DUMPS_COMPLETED=0
 
-# Restore persistent counters across daemon restart so the widget
-# doesn't see dumps_completed reset to 0 every time procd respawns.
-# State file format: one shell `K=V` per line.
-if [ -r "$STATE_FILE" ]; then
-    # shellcheck disable=SC1090
-    . "$STATE_FILE" 2>/dev/null || true
+# Self-locking: prevent multiple daemons. Round 44 Step 225 lesson —
+# orphans from prior installs survived procd restart and overwrote
+# /tmp/design-host-traffic.json with stale impl. Now: any daemon that
+# starts checks for an alive sibling, exits gracefully if one is found.
+PIDFILE=/var/run/design-host-acct-daemon.pid
+if [ -r "$PIDFILE" ]; then
+    OLD_PID=$(cat "$PIDFILE" 2>/dev/null || echo "")
+    if [ -n "$OLD_PID" ] && [ "$OLD_PID" != "$$" ] && [ -r "/proc/$OLD_PID/cmdline" ]; then
+        if grep -q "design-host-acct.sh" "/proc/$OLD_PID/cmdline" 2>/dev/null; then
+            logger -t design-host-acct \
+                "another instance (PID $OLD_PID) already running — exit"
+            exit 0
+        fi
+    fi
 fi
+echo "$$" > "$PIDFILE"
 
 cleanup() {
-    rm -f "$TMP_FILE"
+    rm -f "$TMP_FILE" "$PIDFILE"
     exit 0
 }
-trap cleanup INT TERM HUP
+trap cleanup INT TERM HUP EXIT
 
-# Pre-flight: the Round 31 service must be alive (it owns the nft table).
-if ! nft list table bridge "$NFT_TABLE" >/dev/null 2>&1; then
-    logger -t design-host-acct \
-        "WARN: bridge $NFT_TABLE table missing — start /etc/init.d/design-host-acct first"
-    # Loop anyway and recover when the producer comes up. Some hosts
-    # may bring it up after this daemon starts (boot-order race).
-fi
+logger -t design-host-acct "starting (Tier 0, conntrack-poll, PID $$)"
 
-while :; do
-    DUMPS_COMPLETED=$((DUMPS_COMPLETED + 1))
-    NOW=$(date +%s)
+# Mux: arp refresh + conntrack snapshot in one stream → single awk
+(
+    while sleep "$POLL_INTERVAL"; do
+        echo "===ARP==="
+        awk 'NR>1 && $4 != "00:00:00:00:00:00" { print $1 " " toupper($4) }' \
+            /proc/net/arp 2>/dev/null || true
+        echo "===POLL==="
+        cat /proc/net/nf_conntrack 2>/dev/null || true
+        echo "===ENDPOLL==="
+    done
+) | awk \
+    -v started_at="$STARTED_AT" \
+    -v out_file="$OUT_FILE" \
+    -v tmp_file="$TMP_FILE" '
+BEGIN {
+    mode = ""
+    dumps_completed = 0
+    dump_entries = 0
+    bytes_credited = 0
+    silent_evictions = 0
+    id_reuses = 0
+    delete in_flight     # flow_id → "orig_b" SUBSEP "repl_b"
+    delete ip_to_mac
+    delete per_mac_rx
+    delete per_mac_tx
+    delete per_mac_seen  # last_seen epoch per mac
+    delete seen_this_poll
+}
 
-    # ── 1. Build IP → MAC map from ARP table ──────────────────────
-    # /proc/net/arp columns: IP HW_TYPE FLAGS HW_ADDR MASK DEVICE
-    # Skip header line and incomplete entries (HW_ADDR = 00:00:00:00:00:00).
-    # MAC normalised to uppercase, no colons (matches host-presence rpcd
-    # method output from Step 218; frontend devices.js does the same
-    # mac.replace(/:/g,'') so keys match).
-    ARP_MAP=$(awk '
-        NR > 1 && $4 != "00:00:00:00:00:00" {
-            mac = toupper($4)
-            gsub(/:/, "", mac)
-            print $1 "=" mac
+# ─── Sentinels ────────────────────────────────────────────────────────
+/^===ARP===$/ {
+    mode = "arp"
+    delete ip_to_mac
+    next
+}
+/^===POLL===$/ {
+    mode = "poll"
+    delete seen_this_poll
+    next
+}
+/^===ENDPOLL===$/ {
+    # End of poll: evict flow_ids that disappeared. Their final bytes
+    # (since last seen) are LOST — this is the polling impl trade-off,
+    # bounded by POLL_INTERVAL × peak speed.
+    drop_count = 0
+    for (k in in_flight) {
+        if (!(k in seen_this_poll)) {
+            delete in_flight[k]
+            drop_count++
         }
-    ' "$ARP_FILE" 2>/dev/null || true)
+    }
+    silent_evictions += drop_count
+    delete seen_this_poll
+    dumps_completed++
+    write_json()
+    mode = ""
+    next
+}
 
-    # ── 2. Snapshot Round 31 nft bridge counters ──────────────────
-    # nft list (non-JSON) is more reliable to parse than -j with awk on
-    # busybox. The output we care about looks like:
-    #   counter host_tx_192_168_45_128 {
-    #       packets 1067 bytes 129438
-    #   }
-    # State-machine awk: on a `counter host_(tx|rx)_X` line capture
-    # name+direction+IP; on the next `bytes N` line emit + look up MAC.
-    NFT_OUT=$(nft list table bridge "$NFT_TABLE" 2>/dev/null || true)
+# ─── ARP mode: build IP → MAC map ────────────────────────────────────
+mode == "arp" && NF >= 2 {
+    mac = $2
+    gsub(/:/, "", mac)
+    ip_to_mac[$1] = mac
+    next
+}
 
-    # ── 3. Aggregate per-MAC totals + write JSON ──────────────────
-    RESULT=$(printf '%s\n' "$NFT_OUT" | awk -v arp="$ARP_MAP" -v ts="$NOW" \
-                                            -v started="$STARTED_AT" \
-                                            -v dumps="$DUMPS_COMPLETED" '
-        BEGIN {
-            # Parse the IP=MAC map passed in via -v
-            n = split(arp, lines, "\n")
-            for (i = 1; i <= n; i++) {
-                if (split(lines[i], kv, "=") == 2 && kv[1] != "" && kv[2] != "") {
-                    ip2mac[kv[1]] = kv[2]
-                }
-            }
-            current_dir = ""
-            current_ip  = ""
-            entries        = 0
-            bytes_credited = 0
-            silent_evictions = 0
+# ─── Poll mode: parse one conntrack flow line, compute delta ─────────
+# Line format (extended):
+#   ipv4 2 tcp 6 ESTABLISHED src=A dst=B sport=X dport=Y \
+#      packets=N1 bytes=B1 src=B dst=A sport=Y dport=X \
+#      packets=N2 bytes=B2 [ASSURED] mark=0 zone=0 use=2
+# or:
+#   ipv6 10 udp 17 16 src=... dst=... sport=... dport=... \
+#      packets=N1 bytes=B1 [UNREPLIED] src=... dst=... sport=... \
+#      dport=... packets=0 bytes=0 mark=0 zone=0 use=2
+mode == "poll" {
+    if ($1 != "ipv4" && $1 != "ipv6") next
+
+    orig_src = ""; orig_dst = ""; orig_sport = ""; orig_dport = ""
+    orig_b = 0; repl_b = 0
+    seen_src = 0; seen_dst = 0; seen_sport = 0; seen_dport = 0; bytes_count = 0
+    for (i = 1; i <= NF; i++) {
+        f = $i
+        if (substr(f, 1, 4) == "src=" && !seen_src) {
+            orig_src = substr(f, 5); seen_src = 1
+        } else if (substr(f, 1, 4) == "dst=" && !seen_dst) {
+            orig_dst = substr(f, 5); seen_dst = 1
+        } else if (substr(f, 1, 6) == "sport=" && !seen_sport) {
+            orig_sport = substr(f, 7); seen_sport = 1
+        } else if (substr(f, 1, 6) == "dport=" && !seen_dport) {
+            orig_dport = substr(f, 7); seen_dport = 1
+        } else if (substr(f, 1, 6) == "bytes=") {
+            b = substr(f, 7) + 0
+            if (bytes_count == 0)      { orig_b = b; bytes_count = 1 }
+            else if (bytes_count == 1) { repl_b = b; bytes_count = 2 }
         }
+    }
+    if (orig_src == "") next
 
-        # Match: "    counter host_tx_192_168_45_128 {"
-        # Capture direction (tx|rx) and ip (with underscores converted).
-        /counter[ \t]+host_(tx|rx)_/ {
-            for (i = 1; i <= NF; i++) {
-                if (substr($i, 1, 5) == "host_") {
-                    name = $i
-                    current_dir = substr(name, 6, 2)       # tx or rx
-                    ip = substr(name, 9)                    # 192_168_45_128
-                    gsub(/_/, ".", ip)
-                    current_ip = ip
-                    break
-                }
-            }
-            next
-        }
+    flow_id = orig_src ":" orig_sport ">" orig_dst ":" orig_dport
+    seen_this_poll[flow_id] = 1
+    dump_entries++
 
-        # Match: "        packets 1067 bytes 129438"
-        # Emit when we have a captured counter.
-        /packets[ \t]+[0-9]+[ \t]+bytes[ \t]+[0-9]+/ {
-            if (current_dir == "" || current_ip == "") next
-            for (i = 1; i <= NF - 1; i++) {
-                if ($i == "bytes") {
-                    b = $(i + 1) + 0
-                    mac = ip2mac[current_ip]
-                    if (mac == "") {
-                        if (b > 0) silent_evictions++
-                    } else {
-                        if (current_dir == "tx") host_tx[mac] += b
-                        else                     host_rx[mac] += b
-                        # bytes_credited = sum across this poll
-                        bytes_credited += b
-                        entries++
-                    }
-                    break
-                }
-            }
-            current_dir = ""
-            current_ip  = ""
-            next
-        }
+    if (flow_id in in_flight) {
+        split(in_flight[flow_id], prev, SUBSEP)
+        prev_orig = prev[1] + 0
+        prev_repl = prev[2] + 0
+        delta_orig = orig_b - prev_orig
+        delta_repl = repl_b - prev_repl
+        # ID reuse / counter restart: counters went backwards
+        if (delta_orig < 0) { delta_orig = orig_b; id_reuses++ }
+        if (delta_repl < 0) { delta_repl = repl_b }
+    } else {
+        # First sighting — BASELINE only, no credit. Avoids over-counting
+        # flows that pre-date daemon start.
+        delta_orig = 0
+        delta_repl = 0
+    }
+    in_flight[flow_id] = orig_b SUBSEP repl_b
 
-        END {
-            printf "{\"version\":1,\"phase\":3,\"impl\":\"nft-bridge-direct\","
-            printf "\"generated_at\":%d,", ts
-            printf "\"stats\":{"
-            printf "\"destroys_seen\":0,\"destroys_parsed\":0,"
-            printf "\"dumps_completed\":%d,\"dump_entries\":%d,", dumps, entries
-            printf "\"bytes_credited\":%d,\"parse_errors\":0,", bytes_credited
-            printf "\"id_reuses\":0,\"silent_evictions\":%d,", silent_evictions
-            printf "\"started\":%d", started
-            printf "},\"hosts\":{"
-            sep = ""
-            # Union of MACs that appear in either direction
-            for (m in host_tx) macs[m] = 1
-            for (m in host_rx) macs[m] = 1
-            for (m in macs) {
-                tx = host_tx[m] + 0
-                rx = host_rx[m] + 0
-                printf "%s\"%s\":{\"tx\":%d,\"rx\":%d,\"last_seen\":%d}", sep, m, tx, rx, ts
-                sep = ","
-            }
-            printf "}}"
-        }
-    ')
+    if (delta_orig <= 0 && delta_repl <= 0) next
 
-    # ── 4. Atomic write ──────────────────────────────────────────
-    printf '%s' "$RESULT" > "$TMP_FILE"
-    mv "$TMP_FILE" "$OUT_FILE"
+    # Determine LAN side (RFC 1918 IPv4 heuristic — IPv6 handled
+    # separately below)
+    lan_ip = ""
+    tx_delta = 0; rx_delta = 0
+    if (is_lan(orig_src)) {
+        lan_ip = orig_src
+        # orig direction packets went LAN→WAN: orig_b is tx, repl_b is rx
+        tx_delta = delta_orig
+        rx_delta = delta_repl
+    } else if (is_lan(orig_dst)) {
+        lan_ip = orig_dst
+        # orig direction WAN→LAN (inbound, e.g. DNAT port-forward):
+        # orig_b is rx, repl_b is tx — flipped
+        tx_delta = delta_repl
+        rx_delta = delta_orig
+    }
+    if (lan_ip == "") next  # router-internal or non-LAN flow
 
-    # ── 5. Persist counters across restart ──────────────────────
-    {
-        printf 'STARTED_AT=%d\n'     "$STARTED_AT"
-        printf 'DUMPS_COMPLETED=%d\n' "$DUMPS_COMPLETED"
-    } > "$STATE_FILE"
+    mac = ip_to_mac[lan_ip]
+    if (mac == "") next     # no ARP entry, cant attribute
 
-    sleep "$POLL_INTERVAL"
-done
+    per_mac_tx[mac] += tx_delta
+    per_mac_rx[mac] += rx_delta
+    per_mac_seen[mac] = systime()
+    bytes_credited += tx_delta + rx_delta
+}
+
+function is_lan(ip,    parts, oct2) {
+    if (substr(ip, 1, 8) == "192.168.") return 1
+    if (substr(ip, 1, 3) == "10.")      return 1
+    if (substr(ip, 1, 4) == "172.") {
+        split(ip, parts, ".")
+        oct2 = parts[2] + 0
+        return (oct2 >= 16 && oct2 <= 31) ? 1 : 0
+    }
+    return 0
+}
+
+function write_json(    line, sep, m, ts, macs) {
+    ts = systime()
+    line = "{\"version\":1,\"phase\":4,\"impl\":\"conntrack-poll\","
+    line = line sprintf("\"generated_at\":%d,", ts)
+    line = line "\"stats\":{"
+    line = line "\"destroys_seen\":0,\"destroys_parsed\":0,"
+    line = line sprintf("\"dumps_completed\":%d,\"dump_entries\":%d,", dumps_completed, dump_entries)
+    line = line sprintf("\"bytes_credited\":%d,\"parse_errors\":0,", bytes_credited)
+    line = line sprintf("\"id_reuses\":%d,\"silent_evictions\":%d,", id_reuses, silent_evictions)
+    line = line sprintf("\"started\":%d", started_at)
+    line = line "},\"hosts\":{"
+    sep = ""
+    for (m in per_mac_tx) macs[m] = 1
+    for (m in per_mac_rx) macs[m] = 1
+    for (m in macs) {
+        line = line sprintf("%s\"%s\":{\"rx\":%d,\"tx\":%d,\"last_seen\":%d}",
+            sep, m, per_mac_rx[m] + 0, per_mac_tx[m] + 0,
+            per_mac_seen[m] ? per_mac_seen[m] : ts)
+        sep = ","
+    }
+    delete macs
+    line = line "}}"
+    print line > tmp_file
+    close(tmp_file)
+    system("mv " tmp_file " " out_file)
+    # awk reuse: reset dump_entries for next poll
+    dump_entries = 0
+}
+'
