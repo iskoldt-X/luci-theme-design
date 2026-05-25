@@ -4368,6 +4368,96 @@ CSS 没 lint 工具上手,但 keyframe 名 + selector 都是无歧义。Chrome-C
 2. `recent_rx`/`recent_tx` 在 daemon 0 流量 poll 下 = 0,但 `last_seen` 仍更新 → consumers 列表里仍出现 mac,bar 全 idle。这是**对的行为**(用户能看到设备存在但不活跃)。
 3. 3s poll + 4 个 rpc 并发(acct/host-traffic/nlbw/leases)→ rpcd 上仍 ≤ 1.3 req/s/method。Round 44 测过 5s 没掉,3s 也应该撑得住。如果 rpcd 抖,降到 4s 就行,不需要 architecture 改动。
 
+## Step 232 — Live Competition + daemon-track 全拆(Round 45 真·FREEZE)
+
+**时间**:2026-05-25(Step 231 后同日)
+**触发**:用户实测前直接 reframe — "Live Competition 模块去掉吧,我不想要了"。Step 231 没等 Chrome-Claude 实机验证就被 cancel。
+
+**做了什么**:Live Competition widget + 整个 bandwidth daemon track 一锅端。Round 31 起到 Round 44 累积的 16-18 小时 daemon 设计全部归零(git history 保留)。Overview 不再有 traffic card,nlbwmon 用户改去原插件页。
+
+#### 删除清单(7 个文件 + 5 个引用点)
+
+**File deletes:**
+- `htdocs/luci-static/resources/design-x/traffic.js`(Step 231 podium + Step 212 fallback chain + Round 13 Step 83 原始 card)
+- `root/usr/sbin/design-host-acct.sh`(Round 44 Step 226-230 conntrack-poll daemon)
+- `root/etc/init.d/design-host-acct-uc`(Round 44 daemon procd 入口)
+- `root/etc/init.d/design-host-acct`(Round 31 Step 115 nft-bridge daemon — 一直作为 Tier 2 fallback 保留,Round 44 Step 223 还专门反转过 Step 219 的 disable)
+- `root/etc/uci-defaults/40_design-host-acct`(Round 31 daemon 首装触发)
+- `root/etc/uci-defaults/45_design-conntrack-acct`(Round 44 Step 207 sysctl 引导)
+- `root/etc/sysctl.d/11-design-conntrack-acct.conf`(Round 44 `net.netfilter.nf_conntrack_acct=1`)
+
+**File edits(去引用):**
+- `htdocs/luci-static/design-x/css/features.css` — 删除 §17 整段(304 行 .traffic-* selector + Step 231 medal/podium 配色 + rank-pulse keyframes)+ §111 unified hover-lift selector 去 `.traffic-card`
+- `htdocs/luci-static/design-x/css/style.css` — 删除 `.traffic-card { order: 12 }` + 1280px+ 全宽覆盖 + 注释里的 traffic 引用
+- `luasrc/view/themes/design-x/footer.htm` + `root/usr/share/ucode/luci/template/themes/design-x/footer.ut` — 删除 `L.require('design-x.traffic')`
+- `root/usr/libexec/rpcd/luci-theme-design-x` — 删除 3 个 method(`host-traffic` / `host-traffic-acct` / `nlbw`)+ 同步更新 .list 输出(8 个 method → 5 个:devstats / cpustat / temp / host-presence / wifi-stations)
+- `root/usr/share/rpcd/acl.d/luci-theme-design-x.json` — 从 read 白名单删除同 3 个 method
+- `Makefile` — postinst 删 daemon chmod/enable/start 块;prerm 改成 "upgrade-cleanup hook"(stop+disable+rm 任何残留 Round 31/44 daemon 文件,clean 掉 cron 行)— **关键**:这一步保证从 pre-Step-232 install 升级时把 daemon 残骸扫干净,不留僵尸 procd 服务
+- `htdocs/luci-static/resources/design-x/capability.js` — 删除 `nlbw()` probe 方法(只有 traffic.js 在用,现在没了)+ thermal()/wireless() 不动
+
+#### 没动的东西
+
+- **Round 31 doc**(`doc/bandwith.md` / `doc/OpenWrtFlowOffloadAccounting Challenge.md`)保留 — 历史 design discovery,未来真要重做有参考
+- **Memory 8 条都留**(`sfo-bypasses-conntrack-events` / `ucode-socket-no-netlink` / `awk-comment-apostrophe-trap` / `luci-26-response-class-hijack` 等)— 这是 Round 31-44 跨年知识沉淀,**绝对不删**;任何未来开发者动 conntrack / netlink / awk-in-shell 都先撞上这些 memory
+- **Round 44 journal** 一字不改 — Step 195-230 + Phase 6/7/8 全保留,**daemon-track 灾难史是反面教材**,删了下次还会重蹈
+- **`doc/styling-progress.md` Round 44 真·终结** 段 — 留作 "为什么不要再追准确量" 的 readme
+- **devices.js / sparkline.js / wan-stats.js / 其他 widget** — 完全不动,跟 traffic 无依赖
+
+#### Break change(可见)
+
+- Overview 少一个卡(原 Traffic Analysis / Step 231 Live Competition)
+- 流量分析用户改去原 `/cgi-bin/luci/admin/nlbw` 全功能页
+- ipk 减重约 5-6 KB(traffic.js ~10 KB + daemon shell ~12 KB + CSS §17 ~6 KB - 注释 = net ~5-6 KB)
+- rpcd surface: 8 method → 5 method(host-traffic / host-traffic-acct / nlbw 撤掉)
+
+#### 升级路径
+
+```
+pre-Step-232 装机 → 装 Step 232 ipk →
+  Makefile prerm 触发(opkg 升级会跑老 prerm) → 但 prerm 是新的(Step 232 版本)→ 跑新逻辑
+  → stop+disable design-host-acct 和 design-host-acct-uc
+  → rm 掉 /etc/init.d/design-host-acct* + /usr/sbin/design-host-acct.{sh,uc}
+  → rm 掉 uci-defaults/40_design-host-acct + 45_design-conntrack-acct
+  → rm 掉 sysctl.d/11-design-conntrack-acct.conf
+  → 清理 /etc/crontabs/root 的 design-host-acct 行
+  → cron restart
+→ 装新 ipk → postinst 只剩 rpcd 重载
+→ 结果:旧 daemon 完全消失,nft table design_acct 残留(用户手动 nft delete table 即可,不影响功能,不强制清)
+```
+
+**手动验证**:升级后 `ls /etc/init.d/ | grep design-host-acct` 应该空,`service procd status` 不应有 design-host-acct* 进程。
+
+#### 验证
+
+```bash
+$ sh -n root/usr/libexec/rpcd/luci-theme-design-x                ✅
+$ node --check htdocs/luci-static/resources/design-x/capability.js ✅
+$ python3 -c "import json; json.load(open('.../acl.d/luci-theme-design-x.json'))" ✅
+$ grep -r "design-x.traffic\|traffic\.js\|design-host-acct" \
+       htdocs/ luasrc/ root/ Makefile (live refs)  ✅ 全部是 Step 232 audit-trail 注释 / Makefile 清理 hook
+```
+
+#### 教训(也是 reframe-after-reframe 的元教训)
+
+1. **Step 230 → Step 231 → Step 232 是一周内**两次大方向反转**。Step 230 reframe 后 Step 231 写了 podium widget,Step 231 还没 ship 验证用户又 reframe 第二次说"算了不要这个 widget 了"。**这是健康的**:用户在 daemon-track 16-18 小时之后已经看穿"这玩意儿做出来也不会真用",果断止损。
+2. **Step 231 没造成实际损害** — commit `249e47f` 在 history 里,如果未来想重做 podium 用 `git show 249e47f` 一秒还原所有代码逻辑。**Round 31-44 整 daemon-track 也一样**:不删 git history 不删 memory,只是把 active surface 拿掉。
+3. **"未 ship → 取消"的成本几乎为零**(只是一个 revert commit),"已 ship → 取消"成本就是这个 Step 232(必须改 6 个文件 + 写 prerm 清理 hook + 写 journal)。**ship 前的 reframe 永远比 ship 后便宜**。Step 231 user 来不及实机测就说不要,**是最理想的取消时机**。
+4. **daemon-track 真正的 ROI** ≈ 0 hours of bandwidth UI value(widget 拿掉了)+ 8 条 memory + Round 44 journal(反面教材资产)。**资产价值在 memory 沉淀,不在 daemon code**。这强化了 Round 41 "doc 是真正的 ROI" 元规则。
+
+#### Round 45 真·起点(Step 232 后)
+
+Round 45 主轴**重排**为:
+1. ~~Live Competition widget~~ — **CANCEL**(本 step)
+2. Clients rename + reorder above UPnP(Step 233,本批次同期)
+3. WAN sparkline P0+P1 fix(`doc/wan_traffic.md` 已有 3-step 方案,Round 44 漏掉,~2.5h)
+4. ARP-based real Last Seen(rpcd 新方法 + devices.js,~1-2h)
+5. IPv6 in expand detail(~10min)
+6. Column header click-to-sort(~30min)
+7. MAC vendor lookup(`doc/macvendor.md` Phase 2B,~4-5h,Round 45 原本的 main work)
+8. Round 46 起 — action buttons(Block + Limit,Whitelist 暂缓)
+
+Round 45 终态预计 6-8 个 step,**纯加法 + 小修小补**,跟 Round 44 全 daemon-track 形成对比。
+
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 |---|---|---|---|

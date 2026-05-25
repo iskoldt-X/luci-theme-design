@@ -5217,12 +5217,14 @@ td.cbi-button, .cbi-button-apply,
 }
 
 /* Grid 容器：所有 .cbi-section 兄弟节点
-   Step 114 (Round 30): minmax floor bumped 360 → 440 so the 3 non-
-   spanning custom cards (devices / speedtest / traffic) get enough
-   room for their internal layouts when auto-fit places them 3-up
+   Step 114 (Round 30): minmax floor bumped 360 → 440 so the 2 non-
+   spanning custom cards (devices / speedtest) get enough room for
+   their internal layouts when auto-fit places them side-by-side
    on wide screens. Devices card especially needs ≥440 px (its
    6-column grid sums to 326 + 1fr for hostname). Floor decides the
    responsive breakpoints:
+   Step 232 (Round 45): traffic card removed; comment now reflects
+   the 2-extra layout. */
      main < 880 px        → 1 track  (cards stack)
      880 ≤ main < 1320 px → 2 tracks (2-up + wrap)
      main ≥ 1320 px       → 3 tracks (full 3-up row) */
@@ -5259,15 +5261,12 @@ td.cbi-button, .cbi-button-apply,
 
 /* Theme-injected feature cards. WAN Hero + the sparkline tile band
    are visual anchors and stay full-width. Step 114 (Round 30):
-   devices / speedtest / traffic NO LONGER force full-width — they
-   auto-fit into the parent's grid tracks. On wide screens (main ≥
-   1320 px) the 3 cards land in a single 3-up row; on medium they
-   become 2 + wrap; on narrow they stack. User explicitly requested
-   the "putting LAN clients / Wi-Fi test / Traffic Analysis together
-   1/3" arrangement; this is the auto-degrading variant of that.
-   `order` still arranges visual sequence regardless of DOM
-   insertion timing (multiple L.require modules race to inject;
-   load order isn't guaranteed). */
+   devices / speedtest NO LONGER force full-width — they auto-fit
+   into the parent's grid tracks. On wide screens they land
+   side-by-side, on narrow they stack. `order` arranges visual
+   sequence regardless of DOM insertion timing (multiple L.require
+   modules race to inject; load order isn't guaranteed).
+   Step 232 (Round 45): .traffic-card removed from the extras band. */
 .node-admin-status-overview #view > .wan-hero,
 .node-admin-status-overview #view > .design-tile-grid {
     grid-column: 1 / -1;
@@ -5275,13 +5274,9 @@ td.cbi-button, .cbi-button-apply,
 .node-admin-status-overview #view > .wan-hero         { order: -3; }
 .node-admin-status-overview #view > .design-tile-grid { order: -2; }
 /* LuCI's .cbi-section elements default to order: 0 — they fall between
-   our hero/tiles and our extras (devices/speedtest/traffic).
-   The 3 extras (10/11/12) all share a positive order, so they land
-   adjacent at the bottom of the grid and lay out together in a row
-   when auto-fit gives ≥3 tracks. */
+   our hero/tiles and our extras (devices/speedtest). */
 .node-admin-status-overview #view > .devices-card     { order: 10; }
 .node-admin-status-overview #view > .speedtest-card   { order: 11; }
-.node-admin-status-overview #view > .traffic-card     { order: 12; }
 
 /* ═══════════════════════════════════════════════════════════════════════
  * Round 44 Step 195 — first-row "2/3 hero + 1/3 speedtest" layout
@@ -5310,10 +5305,8 @@ td.cbi-button, .cbi-button-apply,
  * comfortable). Below that, the original auto-fit (1 or 2 tracks)
  * layout applies — speedtest falls back to its old position.
  *
- * Traffic-card promoted to full-width inside this media query — without
- * speedtest's company at the bottom row, traffic alone in a 1-col slot
- * would look orphaned, and it benefits from the extra horizontal room
- * anyway (more consumers per row).
+ * Step 232 (Round 45): .traffic-card pull — the full-width override
+ * that used to sit at the bottom of this media query is gone with it.
  * ═══════════════════════════════════════════════════════════════════════ */
 @media (min-width: 1280px) {
     .node-admin-status-overview #view {
@@ -5339,17 +5332,12 @@ td.cbi-button, .cbi-button-apply,
         grid-row: 1;
         align-self: stretch;
     }
-
-    .node-admin-status-overview #view > .traffic-card {
-        grid-column: 1 / -1;
-    }
 }
 
-/* Step 147 (Round 40):LAN Clients was put into auto-fit 3-up in Round 30
-   Step 114 with Wi-Fi test + Traffic Analysis. But once Round 40 promotes
-   it to "the canonical device list" (subsuming the upstream Active DHCP
-   Leases table, see Step 149), it deserves the full row width. Speedtest
-   + Traffic remain in auto-fit since they're still 1/3-wide-friendly. */
+/* Step 147 (Round 40): LAN Clients (Clients in Step 233) deserves the
+   full row width since Round 40 made it the canonical device list
+   (subsuming upstream Active DHCP Leases, Step 149). Speedtest
+   remains auto-fit since it's still 1/3-wide-friendly. */
 .node-admin-status-overview #view > .devices-card { grid-column: 1 / -1; }
 
 /* cbi-section 卡片本身（基础 token 已应用，这里仅微调） */

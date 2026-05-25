@@ -7,7 +7,7 @@
 #   $1 = "list"  → emit JSON describing available methods + arg types
 #   $1 = "call"  $2 = <method>  → read JSON args from stdin, emit JSON result
 #
-# Auth: LuCI's authenticated session is granted "read" access to all 6
+# Auth: LuCI's authenticated session is granted "read" access to all
 # methods via /usr/share/rpcd/acl.d/luci-theme-design-x.json. Anonymous
 # callers get rpcd's standard "Access denied" — the unauthenticated
 # public exposure that the old CGIs had is now closed.
@@ -17,12 +17,15 @@
 # transport in a smoke-test mode before real implementation lands.
 # Step 164 fills in `devstats` (canonical pattern) + frontend switch.
 # Step 165 fills in the remaining 5.
+# Step 232 (Round 45): host-traffic / host-traffic-acct / nlbw methods
+# removed alongside the traffic.js widget. Active surface is now 5:
+# devstats / cpustat / temp / host-presence / wifi-stations.
 
 case "$1" in
 	list)
 		# Method declarations: name → expected args (type hint only).
 		# Empty {} = method takes no args.
-		echo '{ "devstats": {"dev":"string"}, "cpustat": {}, "temp": {}, "host-traffic": {}, "host-traffic-acct": {}, "host-presence": {}, "wifi-stations": {}, "nlbw": {} }'
+		echo '{ "devstats": {"dev":"string"}, "cpustat": {}, "temp": {}, "host-presence": {}, "wifi-stations": {} }'
 		;;
 
 	call)
@@ -83,69 +86,6 @@ case "$1" in
 					TEMPS="$TEMPS$((T / 1000))"
 				done
 				printf '{"zones":[%s]}\n' "$TEMPS"
-				;;
-			host-traffic)
-				# Per-host traffic counters from the design-host-acct
-				# nftables table (Step 115/117/118 history). Mirrors
-				# root/www/cgi-bin/design/host-traffic verbatim — same
-				# bridge-first / netdev-fallback probe, same awk zip,
-				# same three-way response branching:
-				#   service down  → available:false, no-acct-table
-				#   table empty   → available:true,  empty-output
-				#   data present  → available:true,  hosts:[...]
-				NFT_TABLE="design_acct"
-				NFT_FAMILY=""
-				if nft list table bridge "$NFT_TABLE" >/dev/null 2>&1; then
-					NFT_FAMILY="bridge"
-				elif nft list table netdev "$NFT_TABLE" >/dev/null 2>&1; then
-					NFT_FAMILY="netdev"
-				fi
-				if [ -z "$NFT_FAMILY" ]; then
-					echo '{"available":false,"hosts":[],"reason":"no-acct-table"}'
-				else
-					RAW=$(nft -j list table "$NFT_FAMILY" "$NFT_TABLE" 2>/dev/null)
-					if [ -z "$RAW" ]; then
-						echo '{"available":true,"hosts":[],"reason":"empty-output"}'
-					else
-						NAMES=$(echo "$RAW" | jsonfilter -e '@.nftables[*].counter.name')
-						BYTES=$(echo "$RAW" | jsonfilter -e '@.nftables[*].counter.bytes')
-						{
-							echo "$NAMES"
-							echo "---SEP---"
-							echo "$BYTES"
-						} | awk '
-							/^---SEP---$/ { phase = 1; idx = 0; next }
-							phase == 0 { names[++ncount] = $0; next }
-							phase == 1 { bytes[++idx] = $0 + 0 }
-							END {
-								for (i = 1; i <= ncount; i++) {
-									name = names[i]
-									b = bytes[i] + 0
-									if (name ~ /^host_tx_/) {
-										ip = substr(name, 9); gsub("_", ".", ip)
-										tx[ip] = b
-									} else if (name ~ /^host_rx_/) {
-										ip = substr(name, 9); gsub("_", ".", ip)
-										rx[ip] = b
-									}
-								}
-								for (ip in tx) seen[ip] = 1
-								for (ip in rx) seen[ip] = 1
-								printf "{\"available\":true,\"hosts\":["
-								first = 1
-								for (ip in seen) {
-									t = (ip in tx) ? tx[ip] : 0
-									r = (ip in rx) ? rx[ip] : 0
-									if (t == 0 && r == 0) continue
-									if (!first) printf ","
-									printf "{\"ip\":\"%s\",\"tx_bytes\":%.0f,\"rx_bytes\":%.0f}", ip, t, r
-									first = 0
-								}
-								printf "]}\n"
-							}
-						'
-					fi
-				fi
 				;;
 			host-presence)
 				# Round 44 Step 218 — real "last seen" data source for
@@ -237,40 +177,6 @@ case "$1" in
 				printf '%s' "$arp_json"
 				printf '}}\n'
 				;;
-			host-traffic-acct)
-				# Round 44 Step 212 — bandwidth Hybrid Tier 2 frontend
-				# endpoint (doc/bandwith.md §8 step 197).
-				#
-				# Reads /tmp/design-host-traffic.json verbatim — the
-				# atomic-rename output of the design-host-acct-uc ucode
-				# daemon (Step 210 + 211). Daemon writes the file every
-				# 5 s with shape:
-				#   {"version":1, "phase":2, "generated_at":<epoch>,
-				#    "stats":{...counters...},
-				#    "hosts":{"<MAC>":{"rx":N,"tx":N,"last_seen":N}, ...}}
-				#
-				# Wraps in {"available":<bool>} so the frontend
-				# (traffic.js fetchHostTrafficAcct) can distinguish:
-				#   available=false → daemon not running yet, fall
-				#                     back to legacy host-traffic / nlbw
-				#   available=true  → consume hosts map
-				#
-				# Conservative cat (no parsing — daemon owns the JSON
-				# schema). If file missing or unreadable, emit a
-				# well-formed unavailable response so jsonfilter doesn't
-				# break on a stale read.
-				ACCT_FILE="/tmp/design-host-traffic.json"
-				if [ -r "$ACCT_FILE" ]; then
-					# File exists and readable. Wrap in available:true.
-					# The daemon's payload is a JSON OBJECT, so we splice
-					# it into the wrapper.
-					printf '{"available":true,"data":'
-					cat "$ACCT_FILE"
-					printf '}\n'
-				else
-					echo '{"available":false,"reason":"daemon-not-running"}'
-				fi
-				;;
 			wifi-stations)
 				# Wi-Fi assoclist via iwinfo ubus. Mirrors root/www/cgi-bin/
 				# design/wifi-stations verbatim — same probe order, same
@@ -306,21 +212,6 @@ case "$1" in
 							printf '}}\n'
 						fi
 					fi
-				fi
-				;;
-			nlbw)
-				# nlbwmon JSON dump. DUAL-SHAPE tolerance preserved per
-				# the legacy CGI: nlbw -c json -g mac may emit either
-				# [{...}] (array shape) or {"columns":[...], "data":[...]}
-				# (column shape) depending on nlbw build version. JS
-				# consumer (traffic.js parseNlbwData) handles both.
-				# Falls back to empty array on missing/failed nlbw.
-				if command -v nlbw >/dev/null 2>&1; then
-					nlbw -c json -g mac 2>/dev/null \
-						|| nlbw -c json 2>/dev/null \
-						|| echo '[]'
-				else
-					echo '[]'
 				fi
 				;;
 			*)

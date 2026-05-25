@@ -1967,310 +1967,6 @@
     margin: 2px 0;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * §17 TRAFFIC ANALYSIS CARD — upgrade.md §5.D2
- * Progressive-enhancement: detect luci-app-nlbw. Installed → link to its
- * full view. Missing → styled install-prompt card.
- * ═══════════════════════════════════════════════════════════════════════════ */
-
-.traffic-card {
-    background: var(--color-surface-0);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
-    padding: var(--space-5);
-    margin-bottom: var(--space-4);
-}
-
-.traffic-head {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin-bottom: var(--space-3);
-}
-
-.traffic-icon {
-    width: 18px;
-    height: 18px;
-    color: var(--color-accent-500);
-}
-
-.traffic-title {
-    font-size: var(--text-base);
-    font-weight: var(--weight-semibold);
-    color: var(--color-text);
-}
-
-.traffic-loading {
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    padding: var(--space-3) 0;
-}
-
-.traffic-placeholder-msg,
-.traffic-installed-msg {
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    margin: 0 0 var(--space-3);
-    line-height: var(--leading-normal);
-}
-
-.traffic-placeholder-list {
-    list-style: disc;
-    margin: 0 0 var(--space-4);
-    padding-left: var(--space-5);
-    color: var(--color-text);
-    font-size: var(--text-sm);
-    line-height: var(--leading-relaxed);
-}
-
-.traffic-cta {
-    display: inline-block;
-    text-decoration: none;
-}
-
-/* Inline nlbwmon top-consumers chart (rendered when nlbwmon is installed
-   and `nlbw -c json` proxy CGI returns data). Per-device horizontal bars
-   sized relative to the top consumer. */
-.traffic-meta {
-    margin-left: auto;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-}
-
-.traffic-empty {
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    padding: var(--space-3) 0;
-}
-
-/* Step 99 (Round 18): secondary diagnostic hint under the empty-state
-   message. One size smaller + more muted than the main line so it
-   reads as "by the way, here's what's usually wrong" rather than an
-   error indicator. Healthy installations see this for ≤60 s on first
-   load then it disappears. */
-.traffic-empty-hint {
-    color: var(--color-text-subtle);
-    font-size: var(--text-xs);
-    margin-top: var(--space-1);
-    line-height: 1.4;
-}
-
-.traffic-consumers {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    margin-bottom: var(--space-3);
-}
-
-.traffic-consumer {
-    display: grid;
-    grid-template-columns: 32px minmax(120px, 22%) 1fr minmax(96px, max-content);
-    align-items: center;
-    gap: var(--space-3);
-}
-
-/* Round 45 Step 231 — Live Competition rank badge.
-   Top-3 carry medal glyphs (🥇/🥈/🥉) at base font-size + slight scale.
-   Rank #4/#5 fall back to a muted "#N" badge so the column reads cleanly
-   when the podium isn't fully populated. Width is fixed so glyphs and
-   numeric labels stay vertically aligned across rows regardless of which
-   variant is rendered. */
-.traffic-consumer-rank {
-    width: 32px;
-    text-align: center;
-    font-size: var(--text-lg);
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    user-select: none;
-}
-
-.traffic-consumer.rank-1 .traffic-consumer-rank,
-.traffic-consumer.rank-2 .traffic-consumer-rank,
-.traffic-consumer.rank-3 .traffic-consumer-rank {
-    font-size: 18px;
-}
-
-.traffic-consumer.rank-4 .traffic-consumer-rank,
-.traffic-consumer.rank-5 .traffic-consumer-rank {
-    font-size: var(--text-sm);
-    color: var(--color-text-subtle);
-    font-family: var(--font-mono);
-    font-weight: var(--weight-medium);
-}
-
-/* Round 43 Step 180 — name cell is now a wrapper for primary label
-   + optional secondary MAC subtitle (Chrome-Claude A+C). Wrapper
-   itself just constrains overflow; child elements style themselves. */
-.traffic-consumer-name {
-    overflow: hidden;
-    min-width: 0;
-}
-
-.traffic-consumer-primary {
-    font-size: var(--text-sm);
-    color: var(--color-text);
-    font-weight: var(--weight-medium);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* Full-MAC subtitle. Mono + smaller + muted so it sits visually
-   below the primary label without competing for attention. Lets the
-   user grep against LAN Clients to find "the device matching this
-   MAC". */
-.traffic-consumer-secondary {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.02em;
-    margin-top: 2px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.traffic-consumer-bar-wrap {
-    height: 8px;
-    background: var(--color-surface-2);
-    border-radius: var(--radius-pill);
-    overflow: hidden;
-}
-
-.traffic-consumer-bar {
-    height: 100%;
-    background: linear-gradient(90deg, var(--color-accent-500), var(--color-accent-400));
-    border-radius: var(--radius-pill);
-    transition: width var(--motion-slow) var(--ease-out);
-    min-width: 2px;
-}
-
-/* Step 231 — medal-tinted bars for the podium. Gold/silver/bronze
-   gradients match the rank glyph in the rank cell, giving the row a
-   single visual identity. Off-podium (#4/#5) keep the default accent
-   gradient — the rank cell already differentiates them in muted mono. */
-.traffic-consumer.rank-1 .traffic-consumer-bar {
-    background: linear-gradient(90deg, #f5b300, #fdd663);
-}
-.traffic-consumer.rank-2 .traffic-consumer-bar {
-    background: linear-gradient(90deg, #9aa0a6, #c4c7cc);
-}
-.traffic-consumer.rank-3 .traffic-consumer-bar {
-    background: linear-gradient(90deg, #b6602a, #d68b56);
-}
-
-/* Step 231 — bytes cell carries TWO lines:
-     • recent  → big mono, the Live Competition metric (formatBytes/3s)
-     • cum     → small muted mono, cumulative since daemon boot
-   So the bar reads as "right now" while still letting the user see
-   total volume at a glance. */
-.traffic-consumer-bytes {
-    text-align: right;
-    line-height: 1.2;
-}
-.traffic-consumer-bytes-recent {
-    font-size: var(--text-xs);
-    color: var(--color-text);
-    font-variant-numeric: tabular-nums;
-    font-family: var(--font-mono);
-    font-weight: var(--weight-medium);
-}
-.traffic-consumer-bytes-cum {
-    font-size: 10px;
-    color: var(--color-text-subtle);
-    font-variant-numeric: tabular-nums;
-    font-family: var(--font-mono);
-    margin-top: 2px;
-}
-
-.traffic-consumer-others {
-    font-size: var(--text-xs);
-    color: var(--color-text-subtle);
-    text-align: center;
-    padding: var(--space-2) 0;
-    border-top: 1px dashed var(--color-border-subtle);
-    margin-top: var(--space-1);
-}
-
-.traffic-summary {
-    padding: var(--space-3) 0;
-    border-top: 1px solid var(--color-border-subtle);
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    font-variant-numeric: tabular-nums;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: var(--space-3);
-}
-
-.traffic-summary-total {
-    font-weight: var(--weight-medium);
-    color: var(--color-text);
-}
-
-/* Step 231 — secondary cumulative summary, sits to the right of the
-   "Last 3s" live line. Muted so the live metric leads the eye. */
-.traffic-summary-cum {
-    font-size: var(--text-xs);
-    color: var(--color-text-subtle);
-    font-family: var(--font-mono);
-}
-
-/* Step 231 — rank-change pulse. Triggered when the JS sees a MAC
-   change rank between polls; class is reapplied on every shuffle
-   because we rebuild the row DOM, so the keyframe replays naturally.
-   Up = ascending the podium (climb), down = falling. Pulse is brief
-   (~360 ms = motion-slow) so a fast leaderboard reshuffle stays
-   readable instead of looking like a glitch. */
-@keyframes traffic-rank-up {
-    0%   { transform: translateY(6px); opacity: 0.55; }
-    60%  { transform: translateY(-2px); }
-    100% { transform: translateY(0); opacity: 1; }
-}
-@keyframes traffic-rank-down {
-    0%   { transform: translateY(-6px); opacity: 0.55; }
-    60%  { transform: translateY(2px); }
-    100% { transform: translateY(0); opacity: 1; }
-}
-.traffic-consumer.rank-up {
-    animation: traffic-rank-up var(--motion-slow, 360ms) var(--ease-out, ease-out);
-}
-.traffic-consumer.rank-down {
-    animation: traffic-rank-down var(--motion-slow, 360ms) var(--ease-out, ease-out);
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .traffic-consumer.rank-up,
-    .traffic-consumer.rank-down {
-        animation: none;
-    }
-}
-
-.traffic-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: var(--space-2);
-}
-
-@media (max-width: 640px) {
-    /* Step 231 — narrow viewports collapse the four-column podium to a
-       two-row layout: rank+name on top, bytes right-aligned beside it,
-       and the bar spanning the full width below. Keeps the rank glyph
-       in the visual hierarchy without forcing horizontal scrolling. */
-    .traffic-consumer {
-        grid-template-columns: 28px 1fr auto;
-        grid-template-rows: auto auto;
-        gap: var(--space-1) var(--space-2);
-    }
-    .traffic-consumer-rank     { grid-column: 1; grid-row: 1; }
-    .traffic-consumer-name     { grid-column: 2; grid-row: 1; }
-    .traffic-consumer-bytes    { grid-column: 3; grid-row: 1; }
-    .traffic-consumer-bar-wrap { grid-column: 1 / -1; grid-row: 2; }
-}
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * §18 I18N DEBUG BANNER — upgrade.md §4.C3
@@ -2308,11 +2004,14 @@
  * System / Memory / Storage / DHCP / UPnP cards a -2 px lift + shadow-md
  * elevation on hover. Subtle but tasteful — the user explicitly liked it.
  *
- * The 5 cards we added between Rounds 4-17 (.wan-hero / .design-tile /
- * .devices-card / .speedtest-card / .traffic-card) were created without
- * matching :hover rules. Chrome-Claude DOM audit confirmed all 5 had
+ * The 4 cards we added between Rounds 4-17 (.wan-hero / .design-tile /
+ * .devices-card / .speedtest-card) were created without matching
+ * :hover rules. Chrome-Claude DOM audit confirmed all of them had
  * computed `transform: none` on hover — they read as visually static
  * next to the lifting cbi-section cards.
+ *
+ * Step 232 (Round 45): .traffic-card removed — Live Competition widget
+ * pulled from the Overview. Selector list shrunk accordingly.
  *
  * Same motion tokens (`--motion-fast` 120 ms + `--ease-out` cubic-bezier)
  * as the existing cbi-section rule for visual continuity. Transition
@@ -2324,8 +2023,7 @@
 .wan-hero,
 .design-tile,
 .devices-card,
-.speedtest-card,
-.traffic-card {
+.speedtest-card {
     transition:
         transform var(--motion-fast) var(--ease-out),
         box-shadow var(--motion-fast) var(--ease-out);
@@ -2334,8 +2032,7 @@
 .wan-hero:hover,
 .design-tile:hover,
 .devices-card:hover,
-.speedtest-card:hover,
-.traffic-card:hover {
+.speedtest-card:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-md);
 }

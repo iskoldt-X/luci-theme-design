@@ -7,11 +7,8 @@
 					"devstats",
 					"cpustat",
 					"temp",
-					"host-traffic",
-					"host-traffic-acct",
 					"host-presence",
-					"wifi-stations",
-					"nlbw"
+					"wifi-stations"
 				]
 			}
 		}
