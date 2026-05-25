@@ -32,7 +32,7 @@ function svgUse(href) {
 //      → Render inline top-5 device-bandwidth bar chart, total bytes
 //        summary, and "Open full Traffic Analysis →" deep-link.
 //        Data via /cgi-bin/design/nlbw (calls `nlbw -c json -g mac`).
-//        Refreshed every 30s while the Overview is open.
+//        Refreshed every 3s while the Overview is open (Step 231).
 //      → Hostnames are resolved by joining nlbw's MAC keys against
 //        luci-rpc.getDHCPLeases. MAC with no lease falls back to OUI
 //        vendor (table inlined here; same source as devices.js).
@@ -51,7 +51,12 @@ function svgUse(href) {
 // WAN throughput tile's 2 s cadence and the sparkline tiles. Backend
 // cost is negligible: one `nft -j list table bridge design_acct` call
 // per poll (~5-10 ms on the router) — 12 requests/min total.
-var REFRESH_MS = 5000;
+//
+// Round 45 Step 231: 5 s → 3 s to match the design-host-acct daemon's
+// POLL_INTERVAL (Step 227). The daemon writes /tmp/design-host-traffic.json
+// every 3 s with fresh `recent_rx`/`recent_tx` (last 3 s of activity).
+// Polling JS at 3 s lines up so each refresh sees a brand-new delta.
+var REFRESH_MS = 3000;
 var TOP_N      = 5;
 
 // ── Menu URL lookup helpers ───────────────────────────────────────────────────
@@ -250,10 +255,17 @@ function fetchHostTrafficAcct() {
 }
 
 // Round 44 Step 212: convert Hybrid Tier 2 daemon shape →
-// consumers [{mac, rx, tx}, ...] (the format renderConsumers wants).
-// The daemon already maps IP→MAC via /proc/net/arp internally, so no
-// lease-table join needed here (unlike hostTrafficToConsumers which
-// joins nft per-IP counters against leases). Pure shape-translation.
+// consumers [{mac, rx, tx, recent_rx, recent_tx}, ...] (the format
+// renderConsumers wants). The daemon already maps IP→MAC via
+// /proc/net/arp internally, so no lease-table join needed here
+// (unlike hostTrafficToConsumers which joins nft per-IP counters
+// against leases). Pure shape-translation.
+//
+// Round 45 Step 231: pass through `recent_rx`/`recent_tx` if present.
+// Daemon (Step 230+) emits these as last-poll-cycle bytes — the
+// Live Competition widget uses them for bar size & ranking. Older
+// daemon builds without the field → renderConsumers falls back to
+// the synthetic-delta path.
 function acctToConsumers(acctData) {
 	if (!acctData || !acctData.available || !acctData.data || !acctData.data.hosts) {
 		return [];
@@ -263,11 +275,14 @@ function acctToConsumers(acctData) {
 	for (var mac in hosts) {
 		if (!hosts.hasOwnProperty(mac)) continue;
 		var h = hosts[mac];
-		out.push({
+		var entry = {
 			mac: mac.toUpperCase(),
 			rx: +h.rx || 0,
 			tx: +h.tx || 0
-		});
+		};
+		if (h.recent_rx !== undefined) entry.recent_rx = +h.recent_rx || 0;
+		if (h.recent_tx !== undefined) entry.recent_tx = +h.recent_tx || 0;
+		out.push(entry);
 	}
 	return out;
 }
@@ -295,6 +310,34 @@ function hostTrafficToConsumers(hostData, leases) {
 		};
 	}).filter(function (c) { return c.mac && (c.rx > 0 || c.tx > 0); })
 	  .sort(function (a, b) { return (b.rx + b.tx) - (a.rx + a.tx); });
+}
+
+// Round 45 Step 231: synthesize `recent_rx` / `recent_tx` for consumers
+// that don't carry them. Tier 1 (Hybrid Tier 2 daemon) provides recent
+// fields directly off the JSON; Tier 2 (nft bridge counters) and Tier 3
+// (nlbwmon) only expose monotonic cumulative bytes, so the widget caches
+// previous absolutes per MAC and computes delta = current - previous.
+//
+// `cache` is an object keyed by MAC. First-poll consumers (mac not yet
+// in cache) get recent_rx=recent_tx=0 — one wasted refresh, then live.
+// Negative deltas (counter reset, e.g. daemon restart or nft table
+// reload) collapse to 0 so the bar doesn't render as a giant negative.
+function applySyntheticRecent(consumers, cache) {
+	for (var i = 0; i < consumers.length; i++) {
+		var c = consumers[i];
+		if (c.recent_rx !== undefined && c.recent_tx !== undefined) {
+			continue;
+		}
+		var prev = cache[c.mac];
+		if (prev) {
+			c.recent_rx = Math.max(0, c.rx - prev.rx);
+			c.recent_tx = Math.max(0, c.tx - prev.tx);
+		} else {
+			c.recent_rx = 0;
+			c.recent_tx = 0;
+		}
+		cache[c.mac] = { rx: c.rx, tx: c.tx };
+	}
 }
 
 function fetchLeasesByMac() {
@@ -346,7 +389,7 @@ return baseclass.extend({
 			E('div', { 'class': 'traffic-head' }, [
 				svgEl('svg', { 'class': 'svg-icon traffic-icon', 'aria-hidden': 'true' },
 					svgUse(this.iconBase + '#i-bar-chart')),
-				E('span', { 'class': 'traffic-title' }, _('Traffic Analysis')),
+				E('span', { 'class': 'traffic-title' }, _('Live Competition')),
 				E('span', { 'class': 'traffic-meta', 'id': 'traffic-meta' }, '')
 			]),
 			E('div', { 'class': 'traffic-body', 'id': 'traffic-body' },
@@ -444,10 +487,24 @@ return baseclass.extend({
 				consumers = nlbwConsumers;
 			}
 
+			// Round 45 Step 231: ensure every consumer has recent_rx /
+			// recent_tx populated. Tier 1 already does; Tier 2/3 get
+			// synthesized from absolute deltas across polls.
+			if (!self._byteCache) self._byteCache = {};
+			applySyntheticRecent(consumers, self._byteCache);
+
 			self.renderConsumers(consumers, byMac);
 		});
 	},
 
+	// Round 45 Step 231: Live Competition View. Rows sorted by
+	// recent_rx+recent_tx (last 3 s of activity), top-3 get medal
+	// glyphs, rank changes trigger a one-shot CSS pulse. Tier 1
+	// daemon supplies recent fields directly; Tier 2/3 get synthetic
+	// deltas via applySyntheticRecent. Bar width is the recent ratio
+	// to top-1; the bytes cell shows recent rate (big) plus
+	// cumulative (small subtitle) so absolute totals are still
+	// discoverable.
 	renderConsumers: function (consumers, leasesByMac) {
 		var container = document.getElementById('traffic-consumers');
 		var summary = document.getElementById('traffic-summary');
@@ -461,35 +518,67 @@ return baseclass.extend({
 			// honest "still collecting" message; bottom line is a soft
 			// pointer at the most common root cause discovered in
 			// Chrome-Claude's Round 17 diagnostic — Software Flow
-			// Offloading bypasses conntrack, so nlbwmon's byte counters
-			// freeze near zero per flow. Phrased as a tip rather than an
-			// error so users on healthy setups don't think something's
-			// wrong.
+			// Offloading bypasses conntrack, so byte counters freeze
+			// near zero per flow.
 			container.appendChild(E('div', { 'class': 'traffic-empty' }, [
 				E('div', {},
-					_('No traffic data yet — nlbwmon collects continuously, check back in a minute.')),
+					_('No traffic data yet — bandwidth daemon collects continuously, check back in a minute.')),
 				E('div', { 'class': 'traffic-empty-hint' },
-					_('Tip: if still empty after a minute, check Network → Firewall → Routing/NAT Offloading — Software flow offloading bypasses the conntrack counters nlbwmon reads.'))
+					_('Tip: if still empty after a minute, check Network → Firewall → Routing/NAT Offloading — Software flow offloading bypasses the conntrack counters bandwidth monitors read.'))
 			]));
 			if (summary) summary.textContent = '';
 			if (meta) meta.textContent = '';
 			return;
 		}
 
+		// Sort by Live Competition metric: who's eating the most in the
+		// last poll cycle. Tie-break by cumulative so two idle hosts
+		// don't visibly shuffle on every refresh.
+		consumers.sort(function (a, b) {
+			var ra = (a.recent_rx || 0) + (a.recent_tx || 0);
+			var rb = (b.recent_rx || 0) + (b.recent_tx || 0);
+			if (rb !== ra) return rb - ra;
+			return (b.rx + b.tx) - (a.rx + a.tx);
+		});
+
 		var top = consumers.slice(0, TOP_N);
 		var otherCount = Math.max(0, consumers.length - TOP_N);
-		var maxTotal = top[0].rx + top[0].tx;
+		var maxRecent = (top[0].recent_rx || 0) + (top[0].recent_tx || 0);
 		var grandRx = 0, grandTx = 0;
-		consumers.forEach(function (c) { grandRx += c.rx; grandTx += c.tx; });
+		var grandRecentRx = 0, grandRecentTx = 0;
+		consumers.forEach(function (c) {
+			grandRx += c.rx; grandTx += c.tx;
+			grandRecentRx += (c.recent_rx || 0);
+			grandRecentTx += (c.recent_tx || 0);
+		});
 
-		top.forEach(function (c) {
-			var total = c.rx + c.tx;
-			var pct = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
+		var lastRank = this._lastRank || {};
+		var newRank  = {};
+
+		top.forEach(function (c, idx) {
+			var rank = idx + 1;
+			var rt = (c.recent_rx || 0) + (c.recent_tx || 0);
+			var ct = c.rx + c.tx;
+			var pct = maxRecent > 0 ? (rt / maxRecent) * 100 : 0;
 			var lbl = deviceLabel(c.mac, leasesByMac);
+			newRank[c.mac] = rank;
 
-			// Step 180: name cell now wraps primary label + optional
-			// secondary MAC subtitle. CSS at features.css §traffic
-			// styles `.traffic-consumer-secondary` as mono small-grey.
+			// Rank-change animation: compare against last render. Class
+			// is read by CSS keyframes to pulse the row briefly. Pure
+			// presentation — no JS timeouts needed.
+			var prev = lastRank[c.mac];
+			var motionCls = '';
+			if (prev && prev !== rank) {
+				motionCls = prev > rank ? ' rank-up' : ' rank-down';
+			}
+
+			var rankLabel = rank === 1 ? '🥇'
+			              : rank === 2 ? '🥈'
+			              : rank === 3 ? '🥉'
+			              : '#' + rank;
+
+			// Step 180: name cell wraps primary label + optional
+			// secondary MAC subtitle.
 			var nameChildren = [
 				E('div', { 'class': 'traffic-consumer-primary' }, lbl.primary)
 			];
@@ -499,16 +588,26 @@ return baseclass.extend({
 				);
 			}
 
-			container.appendChild(E('div', { 'class': 'traffic-consumer' }, [
+			container.appendChild(E('div', {
+				'class':     'traffic-consumer rank-' + rank + motionCls,
+				'data-mac':  c.mac
+			}, [
+				E('div', { 'class': 'traffic-consumer-rank' }, rankLabel),
 				E('div', { 'class': 'traffic-consumer-name', 'title': lbl.title }, nameChildren),
 				E('div', { 'class': 'traffic-consumer-bar-wrap' },
 					E('div', {
 						'class': 'traffic-consumer-bar',
 						'style': 'width: ' + pct.toFixed(1) + '%'
 					})),
-				E('div', { 'class': 'traffic-consumer-bytes' }, formatBytes(total))
+				E('div', { 'class': 'traffic-consumer-bytes' }, [
+					E('div', { 'class': 'traffic-consumer-bytes-recent' },
+						rt > 0 ? formatBytes(rt) + '/3s' : '—'),
+					E('div', { 'class': 'traffic-consumer-bytes-cum' }, formatBytes(ct))
+				])
 			]));
 		});
+
+		this._lastRank = newRank;
 
 		if (otherCount > 0) {
 			container.appendChild(E('div', { 'class': 'traffic-consumer-others' },
@@ -517,14 +616,20 @@ return baseclass.extend({
 
 		if (summary) {
 			summary.innerHTML = '';
-			summary.appendChild(E('span', { 'class': 'traffic-summary-total' },
-				_('Total: %s ↓ %s ↑')
+			var liveLine = (grandRecentRx + grandRecentTx) > 0
+				? _('Last 3s: %s ↓ %s ↑')
+					.replace('%s', formatBytes(grandRecentRx))
+					.replace('%s', formatBytes(grandRecentTx))
+				: _('Network idle — no host competing right now');
+			summary.appendChild(E('span', { 'class': 'traffic-summary-total' }, liveLine));
+			summary.appendChild(E('span', { 'class': 'traffic-summary-cum' },
+				_('Total %s ↓ %s ↑')
 					.replace('%s', formatBytes(grandRx))
 					.replace('%s', formatBytes(grandTx))));
 		}
 
 		if (meta) {
-			meta.textContent = _('%d devices · refresh 30s').replace('%d', consumers.length);
+			meta.textContent = _('%d devices · live').replace('%d', consumers.length);
 		}
 	},
 

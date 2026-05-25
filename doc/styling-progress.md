@@ -4284,7 +4284,90 @@ Step 221 写 journal 时以为 Step 223 是终态。**事实上 Round 44 daemon-
 
 ---
 
-## 📊 第三轮（Step 21 + 22）累计变化（更新）
+# 🏆 Round 45 — Live Competition View widget(traffic.js 重写,Round 44 reframe 落地)
+
+> 起飞时间:2026-05-25(Round 44 FREEZE 同日)
+> 主轴:用 Step 230 的 `recent_rx`/`recent_tx` 字段把 traffic.js 从"cumulative bytes bar"重写成"per-host ranking podium"。**绝对值不靠谱;相对排序靠谱** 的 reframe 在 UI 层兑现。
+> 节奏:Round 44 daemon-track 17 个 step 才走完,Round 45 widget-track 应该 ≤ 5 个 step。daemon 的数据合同已定(`recent_rx + recent_tx + last_seen`),frontend 只 consume。
+
+## Step 231 — Live Competition podium 落地(traffic.js 重写)
+
+**时间**:2026-05-25
+**文件**:
+- `htdocs/luci-static/resources/design-x/traffic.js`(consumers shape + sort 切到 recent / renderConsumers 改 podium / REFRESH_MS 5s→3s)
+- `htdocs/luci-static/design-x/css/features.css`(§17 加 rank cell + 金银铜 bar 配色 + 两行 bytes cell + rank-pulse keyframes + reduced-motion)
+
+**做了什么:**
+
+#### 1. consumers shape 加 recent 字段
+
+`acctToConsumers()`(Tier 1 daemon)直接 pass-through 新字段(`recent_rx`/`recent_tx`)。Tier 2(nft)+ Tier 3(nlbwmon)源数据没有 recent,加 `applySyntheticRecent(consumers, cache)` helper:第 N+1 次 poll 用 `recent = current - previous`(`Math.max(0, ...)` 防 counter reset 负值),第 0 次 poll 全 zero。cache 挂在 instance 上(`this._byteCache`),不跨 detect/render 周期持久化。
+
+#### 2. renderConsumers 重写成 podium
+
+- **sort key**:`recent_rx + recent_tx` desc,tiebreak `rx + tx` desc。idle 期间不会因为浮点抖动而每 poll reshuffle。
+- **row layout**:从 3-column(name / bar / bytes)→ **4-column**(rank / name / bar / bytes)。rank cell 固定 32px。
+- **rank 显示**:#1 `🥇` / #2 `🥈` / #3 `🥉` / #4-5 mono `#4`/`#5`(muted),top-3 比 off-podium 视觉更突出。
+- **bar 配色**:rank-1 金渐变 `#f5b300 → #fdd663` / rank-2 银 `#9aa0a6 → #c4c7cc` / rank-3 铜 `#b6602a → #d68b56` / rank-4+ 沿用 `--color-accent` 默认。
+- **bytes cell 两行**:上行 mono 加粗 = `recent_total/3s`(idle 时 "—") / 下行小灰 = cumulative。绝对量没消失,只是 demoted 到 subtitle。
+- **summary**:`Last 3s: X ↓ Y ↑` + `Total X ↓ Y ↑`(flex,左右排)。`grand recent = 0` 时左侧 swap 成 "Network idle — no host competing right now"。
+- **meta**:`5 devices · live`(去掉旧 `refresh 30s` 谎报)。
+- **card title**:`Traffic Analysis` → `Live Competition`。
+
+#### 3. rank-change animation
+
+`this._lastRank[mac]` 跨 render 记前一次 rank。新 render 时:
+- `prev > new` → 行加 `.rank-up` class → keyframe `traffic-rank-up`(translateY 6px → 0)
+- `prev < new` → `.rank-down` keyframe(translateY -6px → 0)
+- 第一次出现 / rank 不变 → 无 class
+
+DOM 每 poll 全 rebuild(简单),所以 keyframe 在 class 重设那一刻自动 replay,不需要 setTimeout 清 class。`@media (prefers-reduced-motion: reduce)` 关掉动画 — accessibility tax 1 行 CSS。
+
+#### 4. REFRESH_MS 5000 → 3000
+
+对齐 daemon `POLL_INTERVAL=3`(Step 227)。JS poll 比 daemon 写慢,每次 poll 都拿到一个**新** snapshot(daemon 已经 flush 一次 recent_*)。如果 JS 3s daemon 3s,可能偶尔 race 拿到同一 snapshot 两次,但 next-poll 自动补齐 — 比 5s 滞后好很多。
+
+#### 没破坏的事
+
+- 3-tier fallback chain(Step 212)完整 — Tier 1(acct)→ Tier 2(nft)→ Tier 3(nlbw)。daemon 没装 / 没跑也能 show 数据。
+- `deviceLabel()`(Round 43 Step 180 primary/secondary/title 三字段 contract)完整调用,Private/Unknown device 区分不变。
+- `tryInject` polling + 20-retry budget 不变。`L.require('design-x.capability').nlbw()` gate 不变 — nlbwmon 没装仍走 placeholder。
+- 老 `.traffic-consumer-bytes` selector 没残留(原来是单行,现在是 wrapper,内含 `.traffic-consumer-bytes-recent` + `.traffic-consumer-bytes-cum`),CSS 上 right-align 还在。
+- 移动端 grid 重排(640px 下)考虑了新 rank cell(rank+name+bytes 第一行 / bar 占满第二行)。
+
+#### Break change(visible)
+
+- 视觉:Overview "Traffic Analysis" 卡 ← 现在叫 "Live Competition",bars 不再是"过去 N 小时累计"而是"过去 3s"。**这是预期的 reframe** — Round 44 用户主动要的语义。
+- meta 文案 `refresh 30s`(谎报,实际 5s)→ `live`。
+- 设备零流量时 bar 几乎不可见(min-width 2px),idle 期 UI 看起来更"安静" — 这也是 reframe 想要的 honest signal。
+
+#### 没做的事(留给后续 step)
+
+- **idle threshold UI**:目前 recent_total > 0 就上 bar / 等于 0 显示 "—"。可以加 e.g. "< 100 B/3s 也算 idle" 软阈值,避免 ARP/mDNS 噪声把 idle 设备推上 podium。**等 Chrome-Claude 实测看 idle 期 noise floor 再决定**。
+- **animated bar width transition**:现在 `transition: width var(--motion-slow)` 已在,但 podium row 全 rebuild 会让 transition 不连贯(新 DOM 每次从 0 起 transition)。可以做 reconciliation(by data-mac 复用 DOM)— 但**先 ship 再说**,过早优化的味道。
+- **mobile compact mode**:rank cell 在窄屏占 28px;如果真的太挤可以变成 `:before` 伪元素挂在 name 上。**等 Chrome-Claude 移动端实测后再决定**。
+- **rank-stable badge**:可以给"连续 3 个 poll 都 #1"加 fire emoji。**propose-then-reject** — 用户没要,Round 45 不做。
+
+#### 验证
+
+```bash
+$ node --check htdocs/luci-static/resources/design-x/traffic.js   ✅
+```
+
+CSS 没 lint 工具上手,但 keyframe 名 + selector 都是无歧义。Chrome-Claude 实机验证留给 Step 232。
+
+#### 部署依赖
+
+- 必须 Step 230 daemon ship 过(`recent_rx`/`recent_tx` 字段已写入 JSON)。**否则 Tier 1 走 synthetic-delta 路径**,效果跟 Tier 2/3 一样(第一次 poll zero,之后 live)— 仍然 functional,只是少了 daemon 内部"per-poll reset"的精度。
+- 不需要 daemon update — 老 daemon 没 recent 字段,JS fallback to synthetic 即可。**前后向 都兼容**。
+
+#### 教训预存
+
+写到这里(ship 前),预计 Step 232 实机验证最可能踩的坑:
+1. emoji 字体在路由器浏览器 / Safari iOS 缺 fallback → 显示成 tofu 方块。Mitigation:CSS `font-family` 不强制,让 system 选;实在不行 swap 成 `1/2/3` 文字。
+2. `recent_rx`/`recent_tx` 在 daemon 0 流量 poll 下 = 0,但 `last_seen` 仍更新 → consumers 列表里仍出现 mac,bar 全 idle。这是**对的行为**(用户能看到设备存在但不活跃)。
+3. 3s poll + 4 个 rpc 并发(acct/host-traffic/nlbw/leases)→ rpcd 上仍 ≤ 1.3 req/s/method。Round 44 测过 5s 没掉,3s 也应该撑得住。如果 rpcd 抖,降到 4s 就行,不需要 architecture 改动。
+
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 |---|---|---|---|
