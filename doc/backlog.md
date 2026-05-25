@@ -2,7 +2,7 @@
 
 > Living document. Updated at major decision points to capture: what's locked in next, what's deferred, what's explicitly opted out, and what needs deep redesign.
 >
-> Last updated: 2026-05-24, end of Round 43 — added per-host bandwidth discovery (see `doc/bandwith.md`, Round 44 candidate). Round 43 itself shipped Steps 179-193 (LAN Clients / Status table polish + Chrome-Claude overview bug catalog). Round 42 MTK fork verified and post-deployment hotfixes (Steps 171-178) shipped.
+> Last updated: 2026-05-25, mid-Round 45 — Live Competition widget + bandwidth daemon track all pulled (Step 232). Round 45 quick-win pass shipped: Step 233 (Clients rename + promote above cbi-sections), Step 234 (IPv6 in expand detail), Step 235 (column click-to-sort), Step 237 (ARP-based Last Seen surface alignment). WAN sparkline P0+P1 fix is the next active track (Step 236). MAC vendor lookup Phase 2B still ahead. Round 44 daemon-track saga 16-18h closed in journal, all 7 daemon files deleted, 8 memory entries kept as anti-relapse insurance.
 
 ---
 
@@ -64,26 +64,38 @@ Two work items, the first BLOCKED on user verification of MTK build:
 
 ---
 
-## 🧪 Round 44+ candidates (data layer enhancements, previously Round 42+)
+## 🧪 Round 44+ candidates (data layer enhancements) — STATUS UPDATE 2026-05-25
 
-Sorted by user-visible value:
+Sorted by user-visible value. Lines updated mid-Round-45 to reflect current ship state.
 
-- **MAC vendor lookup** — Discovery DONE + Phase 1 verification DONE 2026-05-24 → see dedicated section below + `doc/macvendor.md`. **Phase 2B confirmed** (Phase 2A unreachable: ufp package not in ImmortalWrt 24.10 feeds). Embed Wireshark `manuf` 24-bit MA-L as `oui.json.gz` (~150 KB) in theme, build-time fetch, no git commit. LAA/Multicast bit detection done unconditionally (covers ~44% of user's actual devices for free). User explicitly rejected report-recommended "independent data package" approach (effectiveness > decoupling). **Scheduled: Round 45 main work, ~4-5h.**
-- **ARP-based real Last Seen** — Step 140 renamed the column to "Lease" to be honest about data source (DHCP lease validity ≠ device activity). Real last-seen needs `/proc/net/arp` REACHABLE/STALE/DELAY/FAILED state + `iwinfo.assoclist[].inactive` for Wi-Fi. Now should go through the new `luci-theme-design-x` rpcd ubus object (Round 42 architecture) as a new method, NOT a raw CGI. **~1-2h work**.
-- **IPv6 addresses in expand detail** — `getHostHints.ip6addrs` returns array; render a line per address in the detail panel. **~10 min work**.
-- **Column header click-to-sort** — Name / IP / Lease columns become sortable on click. Round 38 Chrome-Claude P1 suggestion. **~30 min work**.
+- **MAC vendor lookup** — Discovery DONE + Phase 1 verification DONE 2026-05-24 → see dedicated section below + `doc/macvendor.md`. **Phase 2B confirmed**. **Status: PARTIALLY SHIPPED** — Round 44 Step 204 actually shipped the vendor.js module + Wireshark manuf integration (vendor lookup IS working in the LAN Clients expand-row "Vendor" cell). The "Round 45 main work, ~4-5h" estimate above was written before Step 204. **Remaining: build-CI fetch automation** (currently the `oui.json.gz` is fetched by `Makefile` postinst? — actually verify, may already be in build pipeline) + `NOTICE` file finalization. **Effective work left: ~1-2h** if anything at all. Re-audit before Round 46 to confirm what's still needed.
+- **ARP-based real Last Seen** — ✅ **SHIPPED**. Round 44 Step 218 added `host-presence` rpcd method (parses `/proc/net/arp` + `iwinfo assoclist`) + `formatPresence()` consumer in devices.js. Round 45 Step 237 closed the loop with column header rename "Lease" → "Last Seen" + sort comparator switch from `lease.expires` → presence inactivity (asc = most-active first, Offline sinks to bottom). **Pipeline: complete.** Detail-panel "Lease expires" row kept (shows DHCP epoch, separate metadata).
+- **IPv6 addresses in expand detail** — ✅ **SHIPPED** at Round 45 Step 234. `getHostHints` rpc added alongside `getDHCPLeases`. `hintsByMac` populated, fed into `detailCellsFor`. New "IPv6" cell renders multi-line (SLAAC global + DHCPv6 + link-local + ULA), spans 2 grid tracks ≥640px, dashed separator between lines. Pure IPv4 hosts get no IPv6 cell. CSS at `features.css` `.devices-detail-cell-ipv6` + `.devices-detail-ipv6-line`.
+- **Column header click-to-sort** — ✅ **SHIPPED** at Round 45 Step 235. Device / IP / Last Seen sortable (MAC + Signal intentionally not). Module-level `SORT_COMPARATORS` (name/ip/lease). State persists across sessions via `localStorage` key `design-device-sort-v1`. Keyboard accessible (Enter / Space). Arrow indicator next to active column header.
 
 ---
 
-## 🛠️ Round 45+ candidates (action button completions, previously Round 43+)
+## 🛠️ Round 45 quick-win pass — ✅ DONE 2026-05-25
+
+Steps 232-237 (Step 236 still pending = WAN sparkline carry-over). Shipped today:
+
+- **Step 232 (Round 45 FREEZE)** — Live Competition widget + bandwidth daemon track entirely removed. 7 files deleted (traffic.js + design-host-acct.sh + 2 init.d + 2 uci-defaults + 1 sysctl.d). 6 files edited (features.css §17 strip + style.css order rules + 2 footer templates + rpcd 3 methods + ACL JSON + Makefile postinst/prerm). capability.js `nlbw()` probe removed (no callers). Makefile prerm now serves as upgrade-cleanup hook for any pre-Step-232 install. ipk -5 KB net.
+- **Step 233 — Clients rename + cbi-section promotion**. Card title "LAN Clients" → "Clients" (covers Tailscale/VPN/static-IP devices, not just literal LAN). `.devices-card { order: 10 → -1 }` promotes the card above all upstream cbi-sections (System / Memory / UPnP / Wireless). User-relevant "who's on my network" answer is now at the top of Overview.
+- **Step 234 — IPv6 in expand detail.** (see above)
+- **Step 235 — Column click-to-sort.** (see above)
+- **Step 237 — Last Seen column rename + presence sort.** (see above)
+
+---
+
+## 🛠️ Round 46+ candidates (action button completions, previously Round 43+/Round 45+)
 
 Currently three of the five LAN Clients action buttons are placeholders that just toast "not yet implemented":
 
-- **Whitelist** — write to MAC ACL list (which is which? `wireless.mac_filter` or `dhcp.@host.whitelist`?). Needs design decision first. **~30 min once decided**.
-- **Limit** — per-MAC bandwidth limit via tc/qdisc or sqm-scripts. Touches `/etc/config/qos` or `/etc/config/sqm`. **~2-4h, depends on which QoS stack**.
-- **Block** — drop traffic to/from MAC. Easiest via `nftables` set + drop rule in firewall, or via `dhcp.@host.dns_set` to give wrong DNS. **~1-2h**.
+- **Whitelist** — ⏸ **DEFERRED per user decision 2026-05-25** (Step 232 conversation). Semantic was ambiguous (`wireless.mac_filter` vs `dhcp.@host.whitelist` vs nftables firewall set); user said "do Block + Limit first, decide if Whitelist still needed after."
+- **Limit** — per-MAC bandwidth limit via tc/qdisc or sqm-scripts. Touches `/etc/config/qos` or `/etc/config/sqm`. **~2-4h, depends on which QoS stack**. Round 46 candidate.
+- **Block** — drop traffic to/from MAC. Easiest via `nftables` set + drop rule in firewall, or via `dhcp.@host.dns_set` to give wrong DNS. **~1-2h**. Round 46 candidate.
 
-These all involve persistent service config and **MUST follow Step 153's input-validation lesson** (sanitize before any UCI write). Action-button writes should land in the rpcd ubus object as new methods under the existing `luci-theme-design-x` ACL grant.
+These all involve persistent service config and **MUST follow Step 153's input-validation lesson** (sanitize before any UCI write). Action-button writes should land in the rpcd ubus object as new methods under the existing `luci-theme-design-x` ACL grant. **Note:** Round 45 Step 232 trimmed the rpcd surface from 8 → 5 methods; action buttons will need to add write-capable methods (currently rpcd is read-only, ACL JSON only grants `read`). **Adding ACL `write` block + new methods is the architecture step needed before any button can write UCI.**
 
 ---
 
@@ -95,7 +107,17 @@ These all involve persistent service config and **MUST follow Step 153's input-v
 
 ---
 
-## 🎯 Round 44 candidate — Per-host bandwidth accounting redesign (discovery DONE)
+## 🪦 Round 44 — Per-host bandwidth accounting (KILLED 2026-05-25)
+
+**Final disposition**: Round 44 daemon-track went through 7 implementations across 17 Steps (210-230), spent 16-18 hours, shipped 4 times with broken accuracy. Step 230 froze the daemon and the user reframed to "Live Competition ranking widget" (Step 231). Then **Step 232 pulled everything**: widget + all 7 daemon files + 3 rpcd methods + ACL entries. **No live UI consumes per-host bandwidth data in Round 45+.**
+
+**Knowledge sediment preserved**: 8 memory entries (`sfo-bypasses-conntrack-events`, `ucode-socket-no-netlink`, `awk-comment-apostrophe-trap`, `luci-26-response-class-hijack`, etc.) + `doc/bandwith.md` + `doc/OpenWrtFlowOffloadAccounting Challenge.md` + `doc/foa_challenge_v2.md` + Round 44 journal in `doc/styling-progress.md`. **Anyone reviving this track will hit those memory entries first.**
+
+**Reason for kill**: Even after 6 hours of conntrack-poll refinement (Steps 226-230), absolute byte accuracy was capped at 23-42% under SFO + intra-LAN inflation. User's reframe ("ratio is good enough for ranking") was correct, but reviewing the widget proposal before ship, the user decided the UI wasn't worth maintaining either. **Net Round 44 output ≈ 0 user-visible value + 8 memory entries + an exemplary post-mortem.** The post-mortem is the asset.
+
+---
+
+## 🎯 Round 44 candidate — Per-host bandwidth accounting redesign (discovery DONE — KILLED, see above)
 
 ### Status (updated 2026-05-24, end of Round 43)
 
@@ -149,9 +171,18 @@ ships).
 
 ---
 
-## 🎯 Round 45 candidate — MAC vendor lookup (Phase 2B confirmed, ready to ship)
+## 🎯 Round 45 candidate — MAC vendor lookup — UPDATE 2026-05-25
 
-### Status (updated 2026-05-24, end of Round 43)
+**Status check needed**: Round 44 Step 204 actually shipped `vendor.js` and integrated it into `devices.js` `detailCellsFor` (vendor name + OUI prefix renders in expand-row "Vendor" cell, replacing the "Unknown" placeholder that had been there since Step 148). The "Round 45 main work, ~4-5h" estimate below was written 2026-05-24 BEFORE Step 204 landed.
+
+**What's still actually open**:
+1. **Build-CI fetch automation** — verify whether `htdocs/luci-static/design-x/data/oui.json.gz` is fetched at build time by GitHub Actions, or whether vendor.js downloads it at runtime, or whether it's checked into git. (Need to check before scheduling.)
+2. **`root/usr/share/luci-theme-design-x/NOTICE`** — license attribution for the embedded Wireshark manuf data. May already exist (Round 44 Step 204 may have created it). Verify.
+3. Any rough edges in the live lookup (cache invalidation? gzip decompression failure handling?). Chrome-Claude can verify in a single audit.
+
+**Re-audit + remaining work estimate**: ~1-2h, not 4-5h. Drop this from "Round 45 main work" status.
+
+### Original status block (kept for context, written 2026-05-24)
 
 LAN Clients expand-row "Vendor: Unknown" placeholder (in place since Step 148
 Round 40) gets resolved. After commissioning a deep-research report
@@ -225,9 +256,11 @@ re-architecture. See `doc/macvendor.md` §一.五 last paragraph.
 
 ---
 
-## 🎯 Round 44 candidate — WAN Traffic tile sparkline fixes (discovery DONE)
+## 🎯 Round 45 active — WAN Traffic tile sparkline fixes (next: Step 236)
 
-### Status (updated 2026-05-24, end of Round 43)
+**Status update 2026-05-25**: Round 44 was fully consumed by the daemon-track saga; sparkline fix never landed. Round 45 reframe means **Step 236 is the natural next track** (well-documented in `doc/wan_traffic.md`, atomic 3-step plan, ~2.5h). Discovery is fully settled; decision points 2-4 in the original block below are bandwidth-daemon questions that have been pulled with Step 232 — they no longer apply.
+
+### Status (originally written 2026-05-24, end of Round 43)
 
 User reported "during upload, the number was high but the dashed line was
 invisible; shortly after upload finished, the line suddenly appeared and
@@ -295,12 +328,12 @@ new MutationObserver(m=>console.log(m))
 If either check fails the entire `doc/wan_traffic.md` diagnosis needs
 re-examination — but predicted false positives < 5%.
 
-### Decision points awaiting user
+### Decision points (2026-05-25 — most superseded by Step 232)
 
-1. Schedule: ship Round 44 next, or defer for other rounds first?
-2. Tier 2 (zero deps) vs Tier 3 (+ 50 KB conntrack-tools)?
-3. Reboot persistence: yes / no / opt-in?
-4. nlbwmon coexistence probe in `traffic.js`?
+1. ~~Schedule: ship Round 44 next, or defer for other rounds first?~~ — **DECIDED**: Step 236 is next, scheduled now in Round 45.
+2. ~~Tier 2 (zero deps) vs Tier 3 (+ 50 KB conntrack-tools)?~~ — N/A (bandwidth daemon killed).
+3. ~~Reboot persistence: yes / no / opt-in?~~ — N/A (bandwidth daemon killed).
+4. ~~nlbwmon coexistence probe in `traffic.js`?~~ — N/A (traffic.js + nlbw probe killed).
 
 ---
 
