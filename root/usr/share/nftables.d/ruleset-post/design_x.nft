@@ -4,7 +4,7 @@
 # Block / Unblock action. Manual edits will be overwritten on
 # next action. To wipe all blocks manually:
 #
-#     rm /usr/share/nftables.d/table-post/design_x.nft && fw4 reload
+#     rm /usr/share/nftables.d/ruleset-post/design_x.nft && fw4 reload
 #
 # Architecture (locked in Round 46 verification):
 #   - Standalone `inet` family table (does NOT inject into fw4's

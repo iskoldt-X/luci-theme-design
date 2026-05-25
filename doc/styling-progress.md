@@ -5195,6 +5195,79 @@ nft list set inet design_x blocked_macs
 2. **设计也是验证的产物,不只是 implementation**:有了 A2 结果"`/usr/share/nftables.d/table-post/` 标准 fw4 dir"才确定我们走独立 table + 文件持久化,而不是注入 fw4 UCI。如果没 verify,我会瞎猜 UCI 路径,撞 Step 153 dnsmasq 那类雷。
 3. **验证 prompt 本身也是 deliverable**:Step 242 commit 的最后一段(13 项 ssh verification list)就是 Step 243 起飞的 pre-flight check。**写代码 + 写验证清单 + 写测试** 同 commit,Step 243 不需要再设计 verification。
 
+### Step 242a — hotfix: nftables.d 目录用错(`table-post` → `ruleset-post`)
+
+**时间**:2026-05-25(Step 242 ship 同日,用户实测发现)
+**文件**:
+- `root/usr/share/nftables.d/table-post/design_x.nft` → `root/usr/share/nftables.d/ruleset-post/design_x.nft`(整文件移位)
+- `root/usr/libexec/rpcd/luci-theme-design-x`(`NFT_FILE` 路径 + 2 处注释路径更新)
+- `root/usr/share/nftables.d/ruleset-post/design_x.nft` header 里 "manual wipe" 命令路径更新
+
+**事件起源**:Step 242 ship 后用户实测 13 项验证清单,fw4 reload 时报错:
+
+```
+/usr/share/nftables.d/table-post/design_x.nft:6:1-5: Error: syntax error, unexpected table
+table inet design_x {
+^^^^^
+```
+
+而 ubus 路径(block-mac / unblock-mac / list-blocks)完全 work —— 因为 rpcd handler 把我们的 .nft 文件当**独立 nft 脚本**直接 `nft -f` 加载,没经过 fw4 的 include 处理。
+
+**根因**(verify 前没读 README):`/usr/share/nftables.d/README` 写得清清楚楚 4 个子目录的 include 语义:
+
+| 子目录 | 在生成 ruleset 里的位置 | 能写什么 |
+|---|---|---|
+| `ruleset-pre/` / `ruleset-post/` | `table inet fw4 {...}` 块**外** | 完整独立 `table family name { ... }` ✓ |
+| `table-pre/` / `table-post/` | `table inet fw4 {...}` 块**内** | chain / set / map / element 声明 — **不能套 `table`** |
+| `chain-pre/$chain/` / `chain-post/$chain/` | 某具体 chain 内 | rule statements 只 |
+
+Round 46 验证 A2 query 看到 zerotier / homeproxy / miniupnpd 都用 `table-post/`,我**没 verify 它们文件的 syntax 形式**就 assume "table-post 是独立 table"。实测 miniupnpd 文件:`chain upnp_forward {}` 这种声明,**没套 table** —— 跟 README 一致。我把它**误读为"独立 table 也行"**。
+
+**Verify-first 工作流不只是预先跑 ssh query,query 结果也要读细**。Step 242a 是 verify-first 第一次实战的内部教训:**查到的事实要 read carefully,光看一眼标题不行**。
+
+#### 修法(2 行级别)
+
+1. 文件移到 `root/usr/share/nftables.d/ruleset-post/design_x.nft`
+2. rpcd handler `NFT_FILE="/usr/share/nftables.d/ruleset-post/design_x.nft"`
+3. 文件内 header 注释 + rpcd handler 内 2 处注释里的路径同步更新
+
+#### 验证(用户重跑 13 项后预期)
+
+- fw4 reload **no syntax error**
+- `nft list table inet design_x` **work**(fw4 已经创建了表)
+- 之前的 #3 #10 该 PASS
+
+**注意:用户路由器上有 stale `table-post/design_x.nft` 残留**(Step 242 原文件),需要 ssh 删:
+
+```bash
+ssh luci-router '
+  rm -f /usr/share/nftables.d/table-post/design_x.nft
+  rmdir /usr/share/nftables.d/table-post 2>/dev/null
+  fw4 reload
+  nft list table inet design_x
+'
+```
+
+scp 新文件:
+
+```bash
+scp root/usr/share/nftables.d/ruleset-post/design_x.nft luci-router:/usr/share/nftables.d/ruleset-post/design_x.nft && \
+scp root/usr/libexec/rpcd/luci-theme-design-x luci-router:/usr/libexec/rpcd/luci-theme-design-x && \
+ssh luci-router '
+  mkdir -p /usr/share/nftables.d/ruleset-post  # IPK 之外的 fresh dir,确保存在
+  chmod +x /usr/libexec/rpcd/luci-theme-design-x
+  /etc/init.d/rpcd reload
+  rm -f /usr/share/nftables.d/table-post/design_x.nft
+  rmdir /usr/share/nftables.d/table-post 2>/dev/null
+  fw4 reload
+'
+```
+
+#### 教训
+
+- **Verify-first 第二层教训**:**verify 不只是跑 query,还要读 query 返回值的 fine print**。Round 46 我跑了 A2 query 看到 zerotier 用 `table-post/`,但没读它的 .nft 文件内容,假设了 syntax 形式。**纠正:看到一个引用就把引用对象本身读了**。Step 242a hotfix 是这条教训的具体落地。
+- **fw4 README 是真相之源**:`/usr/share/nftables.d/README` 一开始就把 4 个 include 位置讲得清楚,跑 A2 时**应该一起 cat 出来**。Step 242a 之后这条加进 Round 46 verification batch:**任何 hook directory 探索都顺便 cat README**。
+
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 

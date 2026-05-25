@@ -22,7 +22,7 @@
 # Step 242 (Round 46): list-blocks (read) + block-mac / unblock-mac (write)
 # added for the Clients-card Block button. State lives in kernel nftables
 # (set `inet design_x blocked_macs`) + on-disk skeleton at
-# /usr/share/nftables.d/table-post/design_x.nft. Active surface is now 8:
+# /usr/share/nftables.d/ruleset-post/design_x.nft. Active surface is now 8:
 # devstats / cpustat / temp / host-presence / wifi-stations / list-blocks
 # / block-mac / unblock-mac.
 
@@ -30,7 +30,7 @@
 # Helpers (Step 242)
 # ──────────────────────────────────────────────────────────────────────
 
-NFT_FILE="/usr/share/nftables.d/table-post/design_x.nft"
+NFT_FILE="/usr/share/nftables.d/ruleset-post/design_x.nft"
 
 # Validate a MAC string against ^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$ using
 # shell case-pattern (busybox ash, no Bash bashisms). Returns 0 if valid.
@@ -59,7 +59,7 @@ ensure_table() {
 # the current kernel state. Read kernel state via `nft -j` (JSON) since
 # the text form spans multiple lines and is awkward to parse in shell.
 # After regenerate, the on-disk skeleton matches kernel; reboot replays
-# the same set membership via fw4's normal table-post include path.
+# the same set membership via fw4's normal ruleset-post include path.
 regenerate_state_file() {
 	local elems
 	elems=$(nft -j list set inet design_x blocked_macs 2>/dev/null \
