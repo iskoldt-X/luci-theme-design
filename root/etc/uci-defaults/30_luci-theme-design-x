@@ -9,9 +9,10 @@ if [ "$PKG_UPGRADE" != 1 ]; then
 	EOF
 fi
 
-# Ensure uhttpd has CGI enabled at /cgi-bin (default, but defensive against
-# stripped configs). Required for theme-provided CGI scripts under
-# /www/cgi-bin/design/ — see doc/upgrade.md §0.5.
+# Defensive: ensure uhttpd's CGI prefix is set so LuCI dispatcher entries
+# work, including our Lua controller endpoints under
+# /cgi-bin/luci/admin/design-x/{ping,download,upload} (speedtest). Default
+# uhttpd ships this set, but stripped/custom configs sometimes drop it.
 if [ -f /etc/config/uhttpd ]; then
 	CURRENT_CGI=$(uci -q get uhttpd.main.cgi_prefix)
 	if [ -z "$CURRENT_CGI" ]; then
@@ -21,8 +22,10 @@ if [ -f /etc/config/uhttpd ]; then
 	fi
 fi
 
-# Belt-and-suspenders for postinst-pkg failures: ensure CGI scripts are
-# executable even if the postinst hook didn't run.
-[ -d /www/cgi-bin/design ] && chmod -R +x /www/cgi-bin/design/ 2>/dev/null
+# Step 241 (Round 45): legacy `chmod -R +x /www/cgi-bin/design/` removed.
+# The 9 design CGIs were deleted in Round 44 Step 201 — all metrics moved
+# to the luci-theme-design-x rpcd ubus object (Round 42 Steps 163-167) and
+# the 3 streaming endpoints moved to the Lua controller above. Nothing
+# under /www/cgi-bin/design/ exists in this IPK anymore.
 
 exit 0

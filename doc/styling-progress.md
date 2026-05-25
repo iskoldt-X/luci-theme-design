@@ -4915,6 +4915,121 @@ $ python3 brace-check.py  → both files clean ✓
 
 **Round 45 的真·meta-lesson**:Step 232 一锅 ship 6 个文件改动,**我没做 CSS-side syntax check 就 commit**。Round 44 daemon-track 之后我对"小心 awk 注释引号"这类教训已经写进 memory,但**还没 internalize 到"多 hunk commit 必须 syntactic verify each file"**这个原则。Step 240 把它沉淀。**下一个跨多文件 commit 之前,跑 `python3 brace check`(JS 跑 `node --check`,CSS 跑 brace+stray-`*/` 检查)是 mandatory pre-commit gate**。
 
+## Step 241 — uci-defaults 死代码清理 + 落盘 perf-audit.md
+
+**触发**:用户重装 ImmortalWrt + 最新 IPK 之后问"主题有可能从任何角度影响上网性能吗",我做了一次详尽 audit。confirmed **0 实质性影响**,但顺手发现 `30_luci-theme-design-x` 的 24-26 行还有 Round 42 之前的 `/www/cgi-bin/design/` 死引用(Round 44 Step 201 删 CGI 时漏了这处)。Step 241 把这两件事一并做了。
+
+**时间**:2026-05-25(Step 240 紧跟 同 session)
+**文件**:
+- `root/etc/uci-defaults/30_luci-theme-design-x`(清掉 cgi-bin 死引用 + 改注释解释保留 cgi_prefix 检查的真实理由)
+- `doc/perf-audit.md`(新建,264 行,完整 audit 落盘)
+- `doc/INDEX.md`("Current state" + "Active docs" 更新)
+- `doc/backlog.md`(Round 45 状态行更新)
+
+#### 1. uci-defaults 清理
+
+`30_luci-theme-design-x` 改前的尾段:
+
+```sh
+# Ensure uhttpd has CGI enabled at /cgi-bin (default, but defensive against
+# stripped configs). Required for theme-provided CGI scripts under
+# /www/cgi-bin/design/ — see doc/upgrade.md §0.5.       ← 错的引用
+if [ -f /etc/config/uhttpd ]; then
+    CURRENT_CGI=$(uci -q get uhttpd.main.cgi_prefix)
+    if [ -z "$CURRENT_CGI" ]; then
+        uci set uhttpd.main.cgi_prefix='/cgi-bin'
+        ...
+
+[ -d /www/cgi-bin/design ] && chmod -R +x /www/cgi-bin/design/ 2>/dev/null   ← 整行死代码
+```
+
+改后:
+
+```sh
+# Defensive: ensure uhttpd's CGI prefix is set so LuCI dispatcher entries
+# work, including our Lua controller endpoints under
+# /cgi-bin/luci/admin/design-x/{ping,download,upload} (speedtest). Default
+# uhttpd ships this set, but stripped/custom configs sometimes drop it.
+if [ -f /etc/config/uhttpd ]; then
+    # ... 同前 ...
+
+# Step 241 (Round 45): legacy `chmod -R +x /www/cgi-bin/design/` removed.
+# The 9 design CGIs were deleted in Round 44 Step 201 — all metrics moved
+# to the luci-theme-design-x rpcd ubus object (Round 42 Steps 163-167) and
+# the 3 streaming endpoints moved to the Lua controller above. Nothing
+# under /www/cgi-bin/design/ exists in this IPK anymore.
+```
+
+注意 `uhttpd.main.cgi_prefix` 的检查**保留**:Lua controller 的 speedtest 端点 `/cgi-bin/luci/admin/design-x/{ping,download,upload}` 仍然走 `/cgi-bin/luci/`,所以这条 defensive guard 还有价值。注释说明改成"为了 LuCI dispatcher / Lua controller 跑起来",删了"为了 design CGI"的错误归因。
+
+#### 2. `doc/perf-audit.md` 落盘(264 行)
+
+10 个章节:
+
+| 章节 | 内容 |
+|---|---|
+| 一、TL;DR | 一张表覆盖所有 timing scenarios + verdict |
+| 二、Full inventory | router 上 6 个文件 + 不在那的 9 类(init.d / cron / hotplug / firewall / nftables / tc / dnsmasq / fw4 / service worker)|
+| 三、Activity when admin open | 7 个 polling source × cadence × backend cost 全表,总 CPU < 1% 数学推导 |
+| 四、Forwarding path 验证 | 8 个 verification command(`nft list tables` / `iptables-save` / `tc qdisc` / `ip rule` / ...) |
+| 五、Asset sizes | 16 个 CSS+JS 文件 raw + minified 体积,~750 KB 总 IPK static payload |
+| 六、Speedtest behavior | 3 个 Lua endpoint(`ping` / `download` / `upload`)逐个 memory + CPU bound 分析 |
+| 七、Quick Actions | 4 个 user-triggered `file.exec`(wifi reload / firewall reload / ifup wan / reboot)的语义 |
+| 八、Round 46 future | Block + Limit 会破例(per-packet 评估),提前预警 |
+| 九、Tools to verify | 3 个 shell snippet:CSS brace+`*/` check / router-side residue check / DevTools Network observation |
+| 十、Conclusion | "this theme is a pure-presentation LuCI shell" |
+
+这份文档**可以反复 reread**。未来任何"我想加一个 daemon / cron / hotplug listener"的提案,这是 mandatory pre-read。 Round 44 daemon-track 灾难 16-18h,**就是因为没有这种 doc 提前刹车**。
+
+#### 3. INDEX.md + backlog.md sync
+
+- INDEX.md "Current state":Steps shipped 237 → 241,latest commit info 更新,Round 46 = next round 标注
+- INDEX.md "Active docs" 表:`perf-audit.md` 加一行,说明 "Re-read before adding any daemon/cron/firewall rule"
+- backlog.md 顶部 "Last updated" 字段:重写为 end-of-Round-45 完整状态,Step 232-241 都列上
+
+#### 没做的事(propose-then-reject)
+
+- **把 perf-audit 的 verification commands 包成 `scripts/check-perf.sh`**:跟 Step 240 propose-then-reject 的 `scripts/check-css.sh` 是同一类(把审计脚本化)。**当前不做**,等 Step 241 文档跑一段时间看用户/我会不会真的去复跑。如果会跑 → 包脚本;如果只读不跑 → 维持 doc-only。
+- **删除 `LUCI_DEPENDS:=+luci-lua-runtime`**:Round 42 Step 166 加的(为了 Lua controller 跑 speedtest)。如果未来 Round 46+ 把 controller 改成 ucode,可以 drop 这个 200 KB RAM 依赖。**Round 46 候选**,Step 241 不动。
+
+#### Break change(可见)
+
+零。文档新增 + 死代码删除,行为完全不变。
+
+#### 验证
+
+```bash
+$ wc -l doc/perf-audit.md  → 264
+$ git status               → 4 files modified, 1 added (perf-audit.md)
+$ grep -c "cgi-bin/design" root/etc/uci-defaults/30_luci-theme-design-x  → 0 (clean)
+```
+
+scp 测试不需要 — uci-defaults 改的是首次启动行为,**老 install 不重跑**;新 install 看到的是新文件;两边都正确。
+
+#### Round 45 真·终结
+
+| Step | 内容 | 性质 |
+|---|---|---|
+| 231 | Live Competition podium widget(后被 cancel) | 反例 |
+| 232 | 删 daemon + traffic widget(comment bug latent) | 大拆 |
+| 233 | Clients rename + 重排(被 232 bug 静默 disable) | 文案 |
+| 234 | IPv6 in expand detail | feature |
+| 235 | Column click-to-sort | feature |
+| 236 | WAN sparkline P2a + wan_traffic 收尾 | latent fix + 文档 |
+| 237 | Last Seen 列头 + presence sort | 数据-标签对齐 |
+| 238 | MAC vendor pipeline audit(0 代码 verification) | 审计 |
+| 239 | Step 232 注释 hotfix(unblocks 233 + grid) | hotfix |
+| 240 | Memory 沉淀 + Step 232-237 CSS audit | 沉淀 + 审计 |
+| 241 | uci-defaults cleanup + perf-audit.md 落盘 | 清理 + 文档 |
+
+**Round 45 = 11 step**(预算 6-8,超 3-5 是 Step 239+240+241 的 hotfix + 沉淀 + audit overhead)。**Round 44 反面教材付 16-18h,Round 45 反过来是教科书般的 "ship-audit-sediment 三段式"**。
+
+**memory 增到 9 条**:`css-comment-truncate-swallows-rule` 是 Round 45 加的唯一新条。
+
+**Round 46 起点**:Block + Limit action buttons,需要 ACL write block + rpcd write methods + Step 153 input validation 严格执行。Whitelist 暂缓。**预估 3-4 step,~4-6h**。下次 session 开新 round。
+
+| 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
+
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |

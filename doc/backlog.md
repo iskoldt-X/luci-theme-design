@@ -2,7 +2,7 @@
 
 > Living document. Updated at major decision points to capture: what's locked in next, what's deferred, what's explicitly opted out, and what needs deep redesign.
 >
-> Last updated: 2026-05-25, mid-Round 45 — Live Competition widget + bandwidth daemon track all pulled (Step 232). Round 45 quick-win pass shipped: Step 233 (Clients rename + promote above cbi-sections), Step 234 (IPv6 in expand detail), Step 235 (column click-to-sort), Step 237 (ARP-based Last Seen surface alignment). WAN sparkline P0+P1 fix is the next active track (Step 236). MAC vendor lookup Phase 2B still ahead. Round 44 daemon-track saga 16-18h closed in journal, all 7 daemon files deleted, 8 memory entries kept as anti-relapse insurance.
+> Last updated: 2026-05-25, end of Round 45 — Steps 232-241 all shipped. Live Competition widget + bandwidth daemon track pulled (Step 232). Quick-win pass: Step 233 Clients rename + cbi-section promotion, Step 234 IPv6 in expand detail, Step 235 column click-to-sort, Step 236 WAN sparkline P2a defensive + wan_traffic.md close-out, Step 237 ARP-based Last Seen surface alignment, Step 238 MAC vendor pipeline audit ✅ PASS, Step 239 hotfix for Step 232 CSS comment terminator typo (the bug that silently disabled Step 233 + grid layout), Step 240 memory sediment + Step 232-237 CSS audit, Step 241 uci-defaults dead-code cleanup + `doc/perf-audit.md` written. Round 44 daemon-track saga 16-18h closed in journal, all 7 daemon files deleted, 9 memory entries (added css-comment-truncate-swallows-rule in Step 240). **Round 46 = action buttons (Block + Limit; Whitelist deferred)**.
 
 ---
 

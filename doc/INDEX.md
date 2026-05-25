@@ -26,7 +26,7 @@ After that you should be able to function as if you'd been on the project all al
 
 - **Branch:** `js`. The default working branch. Direct commits OK, NEVER push to `origin` without explicit user permission.
 - **Rounds shipped:** 44 done (1-44). **Round 45 in progress**. Round 1 = initial cleanup; Round 42 = cross-branch fork to luci-theme-design-x; Round 43 = LAN Clients polish + bug catalog; Round 44 = bandwidth daemon-track saga (16-18h, 4× ship-broken, ended in user "reframe to ranking widget"); Round 45 = Live Competition widget (Step 231) + immediate FREEZE (Step 232) + quick-win pass (Steps 233-235, 237) + WAN sparkline + MAC vendor in flight.
-- **Steps shipped:** 237 (each Step = one focused commit). Latest: `f52d0f9` Step 237 ARP-based Last Seen column rename + presence sort. Next: Step 236 (WAN sparkline P0+P1 fix, the "ID-out-of-order" gap from Round 44 carry-over).
+- **Steps shipped:** 241 (each Step = one focused commit). Latest: Step 241 — uci-defaults cleanup (`/www/cgi-bin/design/` dead refs removed) + perf-audit doc written. Round 45 closed at Steps 232-241. Next: Round 46 main work (action buttons: Block + Limit; Whitelist deferred per Step 232 conversation).
 - **Package identity:** the IPK forked to `luci-theme-design-x` at Round 42 Step 159 — `PKG_CONFLICTS:=luci-theme-design` enforces opkg-level mutual exclusion with the legacy package. The theme DISPLAY NAME stays `Design`; install path is `/luci-static/design-x/`; LuCI session for the new fork.
 - **What's in flight:** Round 45 continues; widget-track + per-host-bandwidth daemon both pulled in Step 232 (`doc/backlog.md` updated). Next major work: WAN sparkline P0+P1 (3-step atomic, `doc/wan_traffic.md` has the plan) → MAC vendor lookup Phase 2B (`doc/macvendor.md`, Round 45 original main work). Round 46 = action buttons (Block + Limit; Whitelist deferred per Step 232 conversation).
 
@@ -74,7 +74,8 @@ any changes.
 | File | Lines | Role | Read it when |
 |---|---|---|---|
 | **`development.md`** | 209 | Local dev workflow (`scripts/dev-sync.sh`, `dev-tail.sh`, SSH setup) | About to write code |
-| **`styling-progress.md`** | 2300+ | **Engineering journal** — every Step 1 through 70+ with what/why/break-change/verify | Looking for "why is X this way" → grep here |
+| **`styling-progress.md`** | 4500+ | **Engineering journal** — every Step 1 through 241 with what/why/break-change/verify | Looking for "why is X this way" → grep here |
+| **`perf-audit.md`** | 280 | **Performance / forwarding-path audit** (Step 241, 2026-05-25). Every router-side artifact + RPC cadence + verdict on internet-impact concerns. Re-read before adding any daemon/cron/firewall rule. | Asked about theme perf impact, or considering a background job |
 | **`luci-compat.md`** | 105 | LuCI API compatibility matrix, verified versions, internal vs public surface | About to monkey-patch a LuCI internal |
 | **`upgrade.md`** | 1431 | Functional feature roadmap (v2). Tier S/A/B/C/D priorities + i18n contract + CGI policy | Planning a new feature card |
 | **`finalplan.md`** | 1166 | Consolidated P0/P1/P2/P3 fix plan (v2). Original code-quality audit + responses | Wondering about a fix's rationale |
