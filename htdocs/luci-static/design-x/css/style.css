@@ -5223,11 +5223,11 @@ td.cbi-button, .cbi-button-apply,
    on wide screens. Devices card especially needs ≥440 px (its
    6-column grid sums to 326 + 1fr for hostname). Floor decides the
    responsive breakpoints:
-   Step 232 (Round 45): traffic card removed; comment now reflects
-   the 2-extra layout. */
      main < 880 px        → 1 track  (cards stack)
      880 ≤ main < 1320 px → 2 tracks (2-up + wrap)
-     main ≥ 1320 px       → 3 tracks (full 3-up row) */
+     main ≥ 1320 px       → 3 tracks (full 3-up row)
+   Step 232 (Round 45): traffic card removed; comment now reflects
+   the 2-extra layout. */
 .node-admin-status-overview #view {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
