@@ -5407,6 +5407,83 @@ scp + 重测预期:
 
 **3 个 hotfix 累计 ~30 min。对比若是没有 verify-first 工作流直接 ship UI,这些坑会在 Step 243 用户验证 Block 按钮时全部 surface,bug-fix 路径会非常痛苦**(UI 已 commit、用户期待 Block 按钮 work、回退牵涉多文件)。**Verify-first ROI 在 Round 46 第一次实战 = 救命级**。
 
+## Step 243 — devices.js Block UI wiring(Block 按钮 + 红点 + Blocked badge + 模态确认)
+
+**时间**:2026-05-25(Step 242c 后,backend 验证 13 项全 PASS 之后才起飞)
+**文件**:
+- `htdocs/luci-static/resources/design-x/devices.js`(RPC declare / fetchBlockedMacs / blockedMacs state / Block-Unblock 按钮切换 / actionBlock+actionUnblock 方法)
+- `htdocs/luci-static/design-x/css/features.css`(`.devices-row-blocked-dot` + `.devices-blocked-badge` + `.devices-modal-mac` 模态 mac 样式)
+
+**做了什么**(纯 UI,后端 Step 242 已 ship):
+
+1. **RPC bindings**:`callListBlocks` / `callBlockMac` / `callUnblockMac` 三个 rpc.declare,目标都是 `luci-theme-design-x` ubus 对象。后端 ACL 已经在 Step 242 加了 write block,所以前端调用直接 work。
+2. **`fetchBlockedMacs()`**:转换 backend `{macs:[...]}` 为前端 O(1) lookup map(uppercase MAC → true)。catch 失败默认空 map(degrade gracefully)。
+3. **refresh() Promise.all 加第 5 个**:跟 leases/wifi/presence/hints 并行 fetch,~10 ms 额外开销,跟其他几个一起 ~30s 周期。
+4. **`__init__` 加 `this.blockedMacs = {}`**:初始化空 map。
+5. **buildRow() 增量**:
+   - `var isBlocked = !!self.blockedMacs[mac]`
+   - row 加 `devices-row-blocked` class(blocked 时)
+   - icon-wrap 内追加 `<span class="devices-row-blocked-dot">`(blocked 时,absolute 定位,右上角)
+   - actionButtons 里 Block 按钮**条件切换**:
+     - blocked → `btn-ghost` 标签 `Unblock` 走 `actionUnblock()`
+     - 未 blocked → `btn-danger` 标签 `Block` 走 `actionBlock()`
+6. **detailCellsFor() 增量**:blocked 时追加 Status cell,内含红圆点 + `"Blocked · all traffic dropped"`。
+7. **Limit 按钮 toast 文案改诚实**:`"Rate limiting is not yet implemented"` → `"Per-device rate limiting requires sqm-scripts; install it from the package manager to shape bandwidth."` Round 46 永久 defer 决定的反映。
+8. **`actionBlock(mac, displayName)`**:`L.ui.showModal` 模态:
+   - 标题:"Block this device?"
+   - body:3 段文字 — what will happen / MAC literal in mono box / how to undo
+   - 按钮:Cancel(返回) + Block(`cbi-button-negative` 红 button)
+   - 模式跟 quick-actions.js Reboot 模态完全对齐
+9. **`_doBlock(mac, displayName)`**:确认后调 `callBlockMac` + toast 通知 + 乐观更新 `blockedMacs[mac]=true` + 触发 `refresh()` 重 fetch 校对
+10. **`actionUnblock(mac, displayName)`**:无模态(restorative 不破坏),直接 RPC + toast + 状态更新 + refresh
+11. **CSS 新增**:
+    - `.devices-icon-wrap { position: relative; }`(让红点 absolute 定位起锚)
+    - `.devices-row-blocked-dot`:9 px 圆点,`--color-danger` 红,2 px ring(surface-0 颜色)防被高对比度 icon 吞掉,绝对定位 top:-3 right:-3
+    - `.devices-row-blocked .devices-summary { opacity: 0.85 }`:轻度去饱和。**故意比 offline 的 0.55 弱** — blocked 仍要让 user 读出 MAC/IP 核对,不能太暗
+    - `.devices-detail-cell-blocked dt { color: --color-danger }`:detail 里 Status label 红
+    - `.devices-blocked-badge`:inline-flex 红点 + 文字,加粗
+    - `.devices-modal-mac`:模态里 MAC 文字 mono + 浅 surface 框
+
+#### 没做的事
+
+- **自己当前 MAC 的 Block 防护**:理论上用户可以 Block 自己的笔记本然后断网。**故意不做检测** — 模态确认 + 撤回路径(`unblock-mac` 通过 ubus / SSH `nft delete element`)已经足够 safety net。检测"我自己的 MAC"需要 ARP 表 + 客户端 IP 反查,复杂度跟价值不匹配。模态文字写了"You can undo this from the Clients card later",已经够。
+- **Whitelist 按钮文案**:仍是 "not yet implemented",**deferred 决议不改文案**。用户可能将来想做 Whitelist,语义保留。
+- **Block / Unblock toast 失败后回滚 optimistic update**:目前 catch 只 toast 错误,没回滚 `blockedMacs[mac]`。但**下一次 refresh()(30s 内)会从 kernel 重新拉真实状态**,自愈。**接受 ≤30s 视觉不一致窗口**。
+- **Block 按钮 disable 状态(防双击)**:不做。actionBlock 入口是模态,模态打开期间用户没法再点 Block 按钮(模态 cover 全屏)。Unblock 是 fire-and-forget,双击多发一次 unblock-mac RPC,handler 是 idempotent → 无 side effect。
+
+#### Break change(可见)
+
+- Clients 卡 expand 里 Block 按钮**现在真的会 block**(模态确认之后)。这是 Round 46 的核心 deliverable
+- Block 之后:主 row icon 右上角**红点**;详情面板**Status: Blocked · all traffic dropped**;Block 按钮变 Unblock(btn-ghost 灰)
+- Limit 按钮 toast 文案变诚实
+- Whitelist / Set Static 不动
+
+#### 验证(scp 之后用户实测)
+
+scp 命令:
+```bash
+scp htdocs/luci-static/resources/design-x/devices.js luci-router:/www/luci-static/resources/design-x/devices.js && \
+scp htdocs/luci-static/design-x/css/features.css     luci-router:/www/luci-static/design-x/css/features.css
+```
+
+测试步骤:
+1. 刷新 Overview。Clients 卡正常显示。
+2. 展开任意设备(**不是你自己当前用的!**),点 Block 按钮 → 弹模态。
+3. 模态显示设备名 + MAC + 警告文字 + Cancel / Block 按钮。
+4. 点 Block → 模态关闭 → toast "Blocking …" → toast "Blocked X"。
+5. row 重渲染:主 row icon 右上有**红点**,row 略灰,展开后看到红色 "Blocked · all traffic dropped" Status cell。
+6. Block 按钮变 "Unblock"(灰 ghost variant)。
+7. 被 block 的设备**实测不能上网**(找另一台主机 ping 或访问)。
+8. 点 Unblock → 直接 RPC(无模态) → toast "Unblocked X" → 红点消失,row 恢复 normal,按钮回到 "Block"。
+9. 刷新页面,Block 状态跨刷新保留(状态在 kernel,UI 重新 fetch)。
+10. ssh 上路由器 `fw4 reload`,刷新 Overview,**Block 状态仍然显示**(Step 242b 持久化文件已确认 work)。
+
+#### 教训预存
+
+1. **L.ui.showModal 是个稳定 API**,跟 quick-actions Reboot 完全同模式。**新增 destructive action 都应该 default 走模态**。
+2. **乐观更新 + refresh fallback** 是个简单但有效的 pattern:RPC 之前先改本地 state(UI 立即响应),RPC 完了 refresh()(校对真实状态),错了用户最多看到 30s 不一致。**比手动 rollback 逻辑简单 + 鲁棒**。
+3. **Whitelist 留 placeholder 是对的**:用户后期可能改主意要做。**deferred 不等于 deleted**,UI 保留按钮 + 诚实 toast 让 future-self 有锚点。
+
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 

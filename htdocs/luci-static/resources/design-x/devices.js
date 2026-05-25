@@ -503,6 +503,30 @@ var getHostHints = L.rpc.declare({
 	expect: { '': {} }
 });
 
+// Step 243 (Round 46) — Block feature RPC bindings.
+// list-blocks returns {macs: ["aa:bb:..", ...]} from kernel nft state.
+// block-mac / unblock-mac mutate the inet design_x.blocked_macs set
+// AND regenerate the persistence file at
+// /usr/share/nftables.d/ruleset-post/design_x.nft so state survives
+// fw4 reload + reboot. Backend at root/usr/libexec/rpcd/luci-theme-
+// design-x; arch + verification log in doc/styling-progress.md Step
+// 242 (+a/+b/+c).
+var callListBlocks  = rpc.declare({ object: 'luci-theme-design-x', method: 'list-blocks',  expect: { '': {} } });
+var callBlockMac    = rpc.declare({ object: 'luci-theme-design-x', method: 'block-mac',    params: ['mac'], expect: { '': {} } });
+var callUnblockMac  = rpc.declare({ object: 'luci-theme-design-x', method: 'unblock-mac',  params: ['mac'], expect: { '': {} } });
+
+function fetchBlockedMacs() {
+	return callListBlocks()
+		.then(function (r) {
+			var map = {};
+			if (r && Array.isArray(r.macs)) {
+				r.macs.forEach(function (m) { map[String(m).toUpperCase()] = true; });
+			}
+			return map;
+		})
+		.catch(function () { return {}; });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 return baseclass.extend({
@@ -514,6 +538,7 @@ return baseclass.extend({
 		this.stations     = {};                   // mac → { iface, info, station } (Step 94)
 		this.presence     = {};                   // mac-nocolon → { via, iface, state, inactive_ms? } (Step 218)
 		this.hintsByMac   = {};                   // MAC-with-colons → host-hints entry (Step 234)
+		this.blockedMacs  = {};                   // MAC uppercase → true (Step 243)
 		this.sortState    = loadSortState();      // { col, dir } (Step 235)
 		this._lastLeases  = null;                 // cache last fetch so toggleSort can re-render without refetch
 		// Round 44 Step 204: kick off Wireshark manuf OUI DB load + decompress
@@ -719,12 +744,14 @@ return baseclass.extend({
 			getDHCPLeases().then(function (d) { return d; }, function () { return null; }),
 			fetchWifiStations(),
 			fetchHostPresence(),
-			getHostHints().then(function (d) { return d; }, function () { return null; })
+			getHostHints().then(function (d) { return d; }, function () { return null; }),
+			fetchBlockedMacs()
 		]).then(function (results) {
 			var leasesData = results[0];
 			var wifiData   = results[1];
 			var presence   = results[2];
 			var hintsData  = results[3];
+			var blockedMap = results[4];
 
 			if (!leasesData) {
 				var rowsEl = document.getElementById('devices-rows');
@@ -753,6 +780,8 @@ return baseclass.extend({
 					self.hintsByMac[k.toUpperCase()] = hintsData[k];
 				});
 			}
+			// Step 243 — blockedMap already keyed by uppercase MAC.
+			self.blockedMacs = blockedMap || {};
 			self._lastLeases = leases;
 			self.render(leases);
 		});
@@ -924,9 +953,14 @@ return baseclass.extend({
 			'class': 'devices-row-seen ' + (seen.stale ? 'devices-seen-stale' : 'devices-seen-online')
 		}, seen.text);
 
+		// Step 243 (Round 46): Blocked state. Lookup is O(1) against the
+		// uppercase-MAC map populated in refresh() from list-blocks RPC.
+		var isBlocked = !!self.blockedMacs[mac];
+
 		return E('div', {
 			'class':    'devices-row' + (isOpen ? ' devices-row-expanded' : '')
-			            + (seen.stale ? ' devices-row-offline' : ''),
+			            + (seen.stale ? ' devices-row-offline' : '')
+			            + (isBlocked ? ' devices-row-blocked' : ''),
 			'data-mac': mac,
 			'click': function (e) {
 				// Don't toggle when an action button (or anything inside it)
@@ -938,9 +972,16 @@ return baseclass.extend({
 			E('div', { 'class': 'devices-summary' }, [
 				// Step 93: icon now sits inside a 32×32 rounded box that
 				// changes background on hover / expand — matches preview.
+				// Step 243: red dot overlaid on top-right corner when MAC is
+				// blocked. position: absolute inside .devices-icon-wrap.
 				E('div', { 'class': 'devices-icon-wrap' }, [
 					svgEl('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
-						svgUse(self.iconBase + '#' + type.icon))
+						svgUse(self.iconBase + '#' + type.icon)),
+					isBlocked ? E('span', {
+						'class': 'devices-row-blocked-dot',
+						'aria-label': _('Blocked'),
+						'title': _('Blocked — all traffic dropped')
+					}) : null
 				]),
 				E('span', { 'class': 'devices-row-name', 'data-mac': mac }, displayName),
 				E('span', { 'class': 'devices-row-ip' }, ipFull || '—'),
@@ -970,8 +1011,22 @@ return baseclass.extend({
 					self.actionBtn('btn-ghost',     _('Rename'),       function () { self.actionRename(mac, displayName); }),
 					self.actionBtn('btn-secondary', _('Whitelist'),    function () { toastSafe('info',    _('Whitelist is not yet implemented')); }),
 					self.actionBtn('btn-secondary', _('Set Static') + ' →', function () { window.location.href = L.url('admin/network/dhcp'); }),
-					self.actionBtn('btn-warning',   _('Limit'),        function () { toastSafe('info',    _('Rate limiting is not yet implemented')); }),
-					self.actionBtn('btn-danger',    _('Block'),        function () { toastSafe('warning', _('Blocking is not yet implemented')); })
+					// Step 243 (Round 46): Limit message updated. Round 46
+					// verification confirmed tc is not in IW24.10's default
+					// install, and nft `limit rate` is policing-not-shaping
+					// (TCP retransmit-heavy UX). Limit was permanently
+					// removed from Round 46 scope; toast now honestly
+					// points users at sqm-scripts as the proper path.
+					self.actionBtn('btn-warning',   _('Limit'),        function () { toastSafe('info',    _('Per-device rate limiting requires sqm-scripts; install it from the package manager to shape bandwidth.')); }),
+					// Step 243: Block is now a real two-state button.
+					// - Not blocked → btn-danger, label "Block", modal confirm
+					//   then block-mac RPC, refresh on success
+					// - Blocked     → btn-ghost, label "Unblock", no confirm
+					//   (Unblock is restorative; immediate apply is the
+					//   right UX), unblock-mac RPC, refresh on success
+					isBlocked
+						? self.actionBtn('btn-ghost', _('Unblock'), function () { self.actionUnblock(mac, displayName); })
+						: self.actionBtn('btn-danger', _('Block'),  function () { self.actionBlock(mac, displayName); })
 				])
 			])
 		]);
@@ -1025,6 +1080,21 @@ return baseclass.extend({
 			vendorCell,
 			this.detailCell(_('Type'),       type.label)
 		];
+
+		// Step 243 (Round 46): if this MAC is in the blocked set, surface
+		// a prominent status badge as the first row after the basics. The
+		// badge is monochrome red text "Blocked · all traffic dropped" so
+		// it reads in the expand panel without needing a colored chip.
+		if (this.blockedMacs[mac]) {
+			var blockedDd = E('dd', { 'class': 'devices-blocked-badge' }, [
+				E('span', { 'class': 'devices-blocked-dot' }),
+				_('Blocked') + ' · ' + _('all traffic dropped')
+			]);
+			cells.push(E('div', { 'class': 'devices-detail-cell devices-detail-cell-blocked' }, [
+				E('dt', {}, _('Status')),
+				blockedDd
+			]));
+		}
 
 		// Step 234 (Round 45) — IPv6 addresses, one line per address.
 		// getHostHints aggregates SLAAC + DHCPv6 + link-local + NDP-seen
@@ -1221,6 +1291,82 @@ return baseclass.extend({
 			saveCustomNames(self.customNames);
 			if (nameEl) nameEl.textContent = prevCustom || currentName;
 			toastSafe('error', _('Rename failed') + ': ' +
+				(err && err.message ? err.message : String(err)));
+		});
+	},
+
+	// Step 243 (Round 46): Block button click handler.
+	// Modal confirms before the destructive RPC. Pattern mirrors the
+	// Reboot modal in quick-actions.js — `L.ui.showModal(title, [body])`
+	// with Cancel / confirm buttons. Confirmation copy is honest about
+	// what Block actually does: drops ALL traffic to/from this MAC
+	// (forward + input + output hooks). User can undo via Unblock.
+	actionBlock: function (mac, displayName) {
+		var self = this;
+		var ui   = L.ui;
+		if (!ui || typeof ui.showModal !== 'function') {
+			// Defensive fallback if a future LuCI version drops ui.showModal:
+			// skip confirm and go straight to the RPC. Better that than a
+			// silent no-op that surprises the user.
+			return self._doBlock(mac, displayName);
+		}
+		ui.showModal(_('Block this device?'), [
+			E('p', {}, _('All network traffic to and from %s will be dropped immediately. The device will lose internet access and cannot reach the router admin page.').replace('%s', '“' + displayName + '”')),
+			E('p', { 'class': 'devices-modal-mac' }, mac),
+			E('p', {}, _('You can undo this from the Clients card later by clicking Unblock on the same row.')),
+			E('div', { 'class': 'right' }, [
+				E('button', {
+					'class': 'cbi-button',
+					'click': ui.hideModal
+				}, _('Cancel')),
+				' ',
+				E('button', {
+					'class': 'cbi-button cbi-button-negative',
+					'click': function () {
+						ui.hideModal();
+						self._doBlock(mac, displayName);
+					}
+				}, _('Block'))
+			])
+		]);
+	},
+
+	_doBlock: function (mac, displayName) {
+		var self = this;
+		toastSafe('info', _('Blocking %s …').replace('%s', displayName));
+		callBlockMac(mac).then(function (r) {
+			if (r && r.error) {
+				toastSafe('error', _('Block failed') + ': ' + r.error);
+				return;
+			}
+			toastSafe('success', _('Blocked') + ' ' + displayName);
+			// Optimistic state update + immediate re-render. Also kicks a
+			// real refresh() so list-blocks is re-fetched from kernel.
+			self.blockedMacs[mac] = true;
+			self.refresh();
+		}).catch(function (err) {
+			toastSafe('error', _('Block failed') + ': ' +
+				(err && err.message ? err.message : String(err)));
+		});
+	},
+
+	// Unblock is restorative (re-enables traffic). No confirm modal —
+	// immediate apply is the right UX. A botched click is fine: it just
+	// lets a previously-blocked device back online, no destructive side
+	// effect.
+	actionUnblock: function (mac, displayName) {
+		var self = this;
+		toastSafe('info', _('Unblocking %s …').replace('%s', displayName));
+		callUnblockMac(mac).then(function (r) {
+			if (r && r.error) {
+				toastSafe('error', _('Unblock failed') + ': ' + r.error);
+				return;
+			}
+			toastSafe('success', _('Unblocked') + ' ' + displayName);
+			delete self.blockedMacs[mac];
+			self.refresh();
+		}).catch(function (err) {
+			toastSafe('error', _('Unblock failed') + ': ' +
 				(err && err.message ? err.message : String(err)));
 		});
 	}

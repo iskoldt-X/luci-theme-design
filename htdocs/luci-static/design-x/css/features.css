@@ -1522,10 +1522,75 @@
     background: var(--color-surface-1);
     border-radius: var(--radius-sm);
     transition: background var(--motion-fast) var(--ease-out);
+    position: relative;     /* Step 243 anchor for .devices-row-blocked-dot */
 }
 .devices-row:hover .devices-icon-wrap,
 .devices-row-expanded .devices-icon-wrap {
     background: var(--color-accent-500-12);
+}
+
+/* Step 243 (Round 46) — Block state visuals.
+   Main row: red dot in the top-right corner of the icon box. Sits on
+   top of the icon, ringed with surface color so it reads cleanly
+   regardless of whether the row is hovered (icon-wrap turns accent-
+   tinted) or default (surface-1). 8 px target is big enough to spot
+   from across the page but small enough not to dominate the icon.
+   Expand row detail: a Status cell with red dot + "Blocked · all
+   traffic dropped" so the user gets full context once they open the
+   row. Both treatments share the `.devices-blocked-dot` color token
+   for visual consistency. */
+.devices-row-blocked-dot {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--color-danger, #ef4444);
+    border: 1.5px solid var(--color-surface-0);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+    pointer-events: none;
+}
+
+/* Slight desaturation on the whole row when blocked — signals
+   "isolated" without being so dim it competes with offline state.
+   Offline (Step 93) uses opacity 0.55 on the summary; blocked uses
+   a smaller dim so users can still read MAC/IP to verify they
+   blocked the right device. */
+.devices-row-blocked .devices-summary {
+    opacity: 0.85;
+}
+
+.devices-detail-cell-blocked dt {
+    color: var(--color-danger, #ef4444);
+}
+.devices-blocked-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--color-danger, #ef4444);
+    font-weight: var(--weight-semibold);
+}
+.devices-blocked-badge .devices-blocked-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-danger, #ef4444);
+}
+
+/* Block confirmation modal — MAC line styling. Mono + slight muted
+   so the MAC reads as the precise identifier of WHAT will be blocked,
+   distinct from the prose around it. */
+.devices-modal-mac {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    background: var(--color-surface-1);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    color: var(--color-text);
+    margin: var(--space-3) 0;
 }
 
 .devices-row-icon {
