@@ -30,6 +30,12 @@ documented below.
 13. [Tooltip vs inline — where data goes](#13-tooltip-vs-inline)
 14. [`toastSafe` — defensive notification wrapper](#14-toastsafe)
 15. [dev-sync.sh — the ~1s ship cycle](#15-dev-sync-the-1s-ship-cycle)
+16. [rpcd write methods + ACL `write` block](#16-rpcd-write-methods--acl-write-block) — Round 46
+17. [`/usr/share/nftables.d/` directory semantics](#17-nftablesd-directory-semantics) — Round 46
+18. [Atomic-replace prelude for fw4 include files](#18-atomic-replace-prelude) — Round 46
+19. [BusyBox-safe shell idioms](#19-busybox-safe-shell-idioms) — Round 46
+20. [Verify-first workflow checklist](#20-verify-first-workflow-checklist) — Round 46
+21. [LuCI session modal for destructive UI actions](#21-luci-session-modal) — Round 46
 
 ---
 
@@ -728,5 +734,301 @@ the technique has a short distilled form.
 
 ---
 
-*Last updated: 2026-05-24 (Round 41, Step 154). Maintained alongside
+## 16. rpcd write methods + ACL `write` block
+
+**Problem.** Your theme's frontend needs to *change* router state (not
+just read it). Default ACL on `luci-theme-design-x.json` is read-only
+— LuCI session can call read methods via ubus but write attempts get
+rejected.
+
+**Pattern.** Add a `write` block to ACL JSON next to the existing
+`read` block, listing the ubus methods that mutate state:
+
+```json
+{
+  "luci-theme-design-x": {
+    "read":  { "ubus": { "luci-theme-design-x": [...read methods...] } },
+    "write": { "ubus": { "luci-theme-design-x": ["block-mac", "unblock-mac"] } }
+  }
+}
+```
+
+Inside the rpcd handler shell script, just add a `case` branch per
+new write method. Handler runs as root by default — can call `nft`,
+`uci`, `iw`, etc. directly without needing `ubus call file exec`.
+
+**Why it works.** rpcd's ACL gate runs BEFORE the handler is invoked.
+With write block in place, LuCI session can call the listed methods
+(no other ubus client can — unauth/wrong-user gets standard
+`-32002 Access denied`). The handler's root privileges let it actually
+mutate kernel/uci state.
+
+**Pitfalls.**
+- **Always server-side validate input** — Step 153 lesson. Client-side
+  sanitize is a UX nicety; server-side regex is the security gate.
+  Reject anything that could become an injection vector (MAC, hostname,
+  filename, etc.).
+- **Make methods idempotent**. nft `add element` succeeds even if the
+  element already exists; `delete element` succeeds even if it doesn't.
+  This shields against double-clicks + clock-skew retries.
+- **`[ "$IPKG_INSTROOT" = "" ]` guard around live kernel ops** in
+  Makefile prerm/postinst, so IPK pack-time fakeroot doesn't accidentally
+  call `nft delete` on the build host.
+- **Don't `set -e` in the handler** — partial failures in nft commands
+  shouldn't kill the response.
+
+**First seen in.** Round 46 Step 242 (Block backend).
+See `root/usr/share/rpcd/acl.d/luci-theme-design-x.json` +
+`root/usr/libexec/rpcd/luci-theme-design-x` for the live example.
+
+---
+
+## 17. `/usr/share/nftables.d/` directory semantics
+
+**Problem.** You want to ship nftables rules that survive fw4 reload
+and reboot, without modifying `/etc/config/firewall`.
+
+**Pattern.** fw4 includes files from 6 hook directories. **Read
+`/usr/share/nftables.d/README` on the live router first** — it's
+authoritative. Summary:
+
+| Directory                       | Include position                        | Can declare      |
+|---------------------------------|-----------------------------------------|------------------|
+| `ruleset-pre/` / `ruleset-post/`| Outside `table inet fw4 { ... }`        | Full `table` blocks ✓ |
+| `table-pre/`   / `table-post/`  | Inside `table inet fw4 { ... }`         | Chains, sets, maps, elements — **NOT** wrapped `table` |
+| `chain-pre/$chain/` / `chain-post/$chain/` | Inside named chain of fw4 table | Rule statements only |
+
+For standalone tables (Block feature pattern), use `ruleset-post/`.
+For appending into fw4's own chains, use `chain-post/$chain/`.
+
+**Why it works.** fw4 inlines these via `nft -f` at reload time. The
+directory name controls the textual position of the include, which
+determines what nft syntax is legal at that point.
+
+**Pitfalls.**
+- **Wrong directory = silent fw4 reload syntax error** that wipes
+  your table on every reload. Round 46 Step 242a burned 1 hotfix
+  on this exact mistake.
+- **`nft -f` of a chain block APPENDS rules** — multiple reloads
+  double / triple the rule count. Use the atomic-replace prelude
+  (§18) to avoid.
+- **`cat /usr/share/nftables.d/README`** as part of any A-list
+  verification batch when designing nft integrations. Don't infer
+  from existing examples (zerotier, homeproxy, miniupnpd) without
+  reading the README too — those examples use `table-post/` because
+  they declare chains-inside-fw4, not standalone tables.
+
+**First seen in.** Round 46 Step 242a (path hotfix), Step 242b
+(atomic-replace).
+
+---
+
+## 18. Atomic-replace prelude for fw4 include files
+
+**Problem.** nft's `chain X { ...rules... }` block in `nft -f`
+context APPENDS rules to existing chains, not replaces. fw4 reload
+re-runs `nft -f` on each include file on every reload (Save&Apply,
+boot, manual `fw4 reload`). Without protection, your rules double
+on the second reload, triple on the third, etc.
+
+**Pattern.** Standard nftables idiom: 3-line prelude at the top of
+the include file (or rpcd-handler-generated file):
+
+```nft
+table inet design_x          # idempotent create (no-op if exists)
+delete table inet design_x   # wipe the table contents
+                              # (chain rules, set elements all gone)
+
+table inet design_x {        # recreate fresh
+    set blocked_macs { ... }
+    chain X { ... rules ... }
+}
+```
+
+Single `nft -f` invocation runs all three statements as one atomic
+transaction. No "no rules" window mid-replace.
+
+**Why it works.** `delete table` wipes contents but allows the
+subsequent `table { ... }` recreation to be the new authoritative
+definition. Inside a single nft transaction, intermediate states
+aren't visible to the packet path.
+
+**Pitfalls.**
+- First-ever load: table doesn't exist, so `delete table X` would
+  fail. But the preceding `table inet X` (with no body) is idempotent
+  — creates an empty table if missing. Then `delete` finds the empty
+  table and succeeds.
+- **Don't put `# comment` between the three lines** if you're nervous
+  — they ARE meant to be three consecutive statements in one
+  transaction. Comments are safe (they're stripped by the parser),
+  but blank lines between them are also fine.
+
+**First seen in.** Round 46 Step 242b. See
+`/usr/share/nftables.d/ruleset-post/design_x.nft` for the live
+example.
+
+---
+
+## 19. BusyBox-safe shell idioms
+
+**Problem.** OpenWrt's userland is BusyBox-only by default. GNU
+coreutils binaries that "every Linux has" simply aren't there. Your
+shell handler silently fails when it shells out to a missing binary,
+because `$(... | missing-cmd ...)` swallows the error.
+
+**Pattern.** Before using any non-shell-builtin command in an rpcd
+handler or init script, verify it's a BusyBox applet OR explicitly
+declare it as an opkg dependency.
+
+Common GNU-only binaries that surprise:
+
+| Missing in BusyBox default | Use instead |
+|---|---|
+| `paste`        | Pure shell `for` loop with sep tracking |
+| `tac`          | `awk '{a[NR]=$0} END {for (i=NR; i>=1; i--) print a[i]}'` |
+| `seq`          | `awk 'BEGIN { for (i=1; i<=N; i++) print i }'` |
+| `xargs --no-run-if-empty` | Plain `if [ -n "$INPUT" ]; then ... fi` |
+| `pkill -u`     | `for pid in $(pgrep ...); do kill $pid; done` |
+| `realpath`     | `readlink -f` (BusyBox HAS this) |
+
+BusyBox-included applets you CAN use: `cat`, `cut`, `tr`, `sed`,
+`awk`, `head`, `tail`, `grep`, `sort`, `uniq`, `find`, `xargs` (no
+-r), `readlink`, `basename`, `dirname`, `printf`, `echo`.
+
+**Why it matters.** `$(missing-cmd args)` exits the subshell with
+non-zero status, but the outer shell doesn't `set -e` by default so
+execution continues with `$VAR=""`. The handler returns `{"ok":true}`
+because the *prior* operation succeeded. Silent failure surfaces
+days later when state diverges.
+
+**Pitfalls.**
+- **`set -o pipefail`** isn't default. Without it, pipe failures
+  don't propagate. Either turn it on for the handler or **manually
+  verify each pipe step's output** before treating the value as good.
+- **Test on the live router**, not your dev Mac. macOS / Linux dev
+  envs have full coreutils — pipelines that work locally crash on
+  the target.
+
+**First seen in.** Round 46 Step 242c. `paste -sd, -` was the silent
+killer — pipeline silently returned empty, regenerated nft file
+lacked elements clause, blocks were lost on fw4 reload.
+
+Cross-link to memory `[[verify-first-implement-second]]` for the
+broader workflow framing.
+
+---
+
+## 20. Verify-first workflow checklist
+
+**Problem.** Implementing a feature in OpenWrt/LuCI territory without
+verifying upstream constraints first leads to multi-hour rewrites
+when those constraints surface mid-implementation. Round 44 spent
+16-18 hours on daemon-track variants because each implementation
+discovered a new blocker (SFO bypasses conntrack DESTROY, ucode-mod-
+socket has no AF_NETLINK, etc.) that a 5-minute verification step
+would have revealed.
+
+**Pattern.** Before any feature commit, generate + run a batch of
+verification queries. Don't dribble them out one-per-iteration.
+
+Template ssh batch:
+
+```bash
+ssh luci-router '
+echo "=== A1: backend / mechanism check ==="
+# e.g. which fw4 fw3; nft --version
+
+echo "=== A2: persistence hook check ==="
+# e.g. ls /usr/share/nftables.d/; cat /usr/share/nftables.d/README
+
+echo "=== A3: feature primitive check ==="
+# e.g. nft add table inet test; nft add set inet test x "{ type ether_addr; }"
+
+echo "=== A4: dependency check ==="
+# e.g. opkg list-installed | grep -iE "sqm|qos|tc"
+# e.g. which tc; lsmod | grep sch_
+
+echo "=== A5: ACL example check ==="
+# e.g. find /usr/share/rpcd/acl.d -name "*.json"
+# e.g. cat luci-app-firewall.json
+'
+```
+
+Read every return value carefully — Step 242a hotfix happened
+because I read "table-post/ is a hook dir" but didn't `cat README`
+to learn the syntax constraints.
+
+**Why it works.** Verification is ~5 minutes; debugging is hours.
+ROI is 10:1+. Discovering a structural blocker BEFORE writing code
+means the design changes, not the code.
+
+**Pitfalls.**
+- **Don't accept "the doc says X"** as verification. Test on the
+  live router. Docs lag reality.
+- **Read references of verified facts**. "Directory exists" ≠ "directory
+  is suitable for my use" — cat the README, look at an existing
+  example file's actual syntax.
+- **Verification surfaces "already shipped"** sometimes. Round 45
+  Step 236 + Step 238 both turned into zero-code audit steps because
+  the work was already done elsewhere. That's a win, not a setback.
+
+**First seen in.** Round 46 (the workflow rule itself).
+Memory: `[[verify-first-implement-second]]`.
+
+---
+
+## 21. LuCI session modal for destructive UI actions
+
+**Problem.** Destructive UI actions (Block this MAC, Reboot the
+router, etc.) need user confirmation. Browser `confirm()` is ugly
+and breaks the theme aesthetic.
+
+**Pattern.** `L.ui.showModal(title, body)` + `L.ui.hideModal()`.
+Body is an array of E()-built DOM nodes. Standard layout:
+
+```javascript
+L.ui.showModal(_('Block this device?'), [
+    E('p', {}, _('Description of what will happen.')),
+    E('p', { 'class': 'mono-line' }, mac),  // key parameter shown literal
+    E('p', {}, _('How to undo.')),
+    E('div', { 'class': 'right' }, [
+        E('button', {
+            'class': 'cbi-button',
+            'click': L.ui.hideModal
+        }, _('Cancel')),
+        ' ',
+        E('button', {
+            'class': 'cbi-button cbi-button-negative',  // red for destructive
+            'click': function () {
+                L.ui.hideModal();
+                self._doDestructiveAction(mac);
+            }
+        }, _('Block'))
+    ])
+]);
+```
+
+**Why it works.** `L.ui.showModal` is part of the public LuCI 26
+API surface (used by Save&Apply, package manager, etc.). It blocks
+the page until dismissed — clicks on the underlying page don't
+register, preventing double-fire bugs.
+
+**Pitfalls.**
+- **Pair destructive with restorative**. If Block uses a modal,
+  Unblock should NOT — restorative actions should be one-click.
+  Imbalance principle: confirm destructive, instant on undo.
+- **Show the parameter literal in the modal body** (the MAC, the
+  config key, the file path being changed). User reads it before
+  confirming, catches typos in their own selection.
+- **Defensive fallback**: `if (!L.ui || typeof L.ui.showModal !==
+  'function') return doActionDirectly();` — survive future LuCI
+  versions that change the API.
+
+**First seen in.** Round 46 Step 243 (Clients-card Block button).
+Earlier inspirations: `quick-actions.js` Reboot modal (Round 12),
+`apply-modal.js` Save&Apply replacement (Step 49).
+
+---
+
+*Last updated: 2026-05-26 (Round 47, Step 246). Maintained alongside
 `doc/styling-progress.md` (the engineering journal).*

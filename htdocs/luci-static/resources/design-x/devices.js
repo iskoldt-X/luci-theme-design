@@ -1009,7 +1009,24 @@ return baseclass.extend({
 					// MAC binding), but Overview IS the right place to launch
 					// from. The → suffix signals 'this leaves Overview'.
 					self.actionBtn('btn-ghost',     _('Rename'),       function () { self.actionRename(mac, displayName); }),
-					self.actionBtn('btn-secondary', _('Whitelist'),    function () { toastSafe('info',    _('Whitelist is not yet implemented')); }),
+					// Step 245 (Round 46 close-out): Whitelist button removed.
+					// Round 46 honest review found 4 disqualifying reasons:
+					//   1. MAC randomization (iPhone / Android 10+ / modern
+					//      macOS rotate MACs per-SSID, sometimes every 24h)
+					//      directly defeats the mechanism — legitimate
+					//      device reconnects get blocked.
+					//   2. Security ≈ 0: any passive sniffer can spoof a
+					//      whitelisted MAC in 30 seconds. WPA3 password is
+					//      the real gate.
+					//   3. Functional duplicate of Block in inverse form,
+					//      with 100× maintenance burden (every new family
+					//      device needs explicit allow).
+					//   4. LuCI ships this already: Network → Wireless →
+					//      <SSID> → MAC Filter is the standard path; no
+					//      reason for theme to duplicate.
+					// Memory entries warn against "deferred placeholder"
+					// drift (Step 244's "delete > toast > redirect" reasoning).
+					// Whitelist follows Limit out the door.
 					self.actionBtn('btn-secondary', _('Set Static') + ' →', function () { window.location.href = L.url('admin/network/dhcp'); }),
 					// Step 244 (Round 46): Limit button removed entirely.
 					// Round 46 verification confirmed tc is not in IW24.10's

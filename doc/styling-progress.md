@@ -5550,8 +5550,81 @@ scp + 刷新 Overview,展开 Clients 行 → action 行现在 4 个按钮:Rename
 
 `verify-first-implement-second` 已在 Step 242c 加了 Round 46 3 个 sub-lessons。Step 244 不补 memory — 删按钮是 product decision,非 technical quirk。
 
+# 📚 Round 47 — Doc-only grooming(rounds 42-46 知识沉淀)
 
-| 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
+> 起飞:2026-05-26
+> 模板:Round 41(2026-05-24,40 rounds 后第一次 grooming)— 不写代码,把累积 tribal knowledge sediment 到 reference docs。
+> Round 41 ship 了 `doc/luci-theme-toolbox.md`(15 节)+ `doc/chrome-claude-briefing.md` 模板。
+> Round 47 是项目第二次 doc-only round。中间隔了 6 轮(42-46),累积:LuCI 26 fork / Round 44 反面教材 / Round 45 quick-win + verify-first 工作流诞生 / Round 46 Block backend + UI 完整 ship + 5 个 hotfix saga。
+
+## Step 245 — Whitelist 按钮删除(算 Round 46 真终结,与 Round 47 同 ship)
+
+**触发**:用户问 "Whitelist 到底是什么?有没有必要?",诚实评估出 4 个 disqualifying reasons:
+
+1. **MAC randomization 直接废功能**:iOS / Android 10+ / macOS 默认每 SSID 随机 MAC,Whitelist 一启合法设备重连断网
+2. **安全意义 ≈ 0**:passive sniffer 30 秒抓包 spoof,WPA3 密码才是真闸
+3. **跟 Block 功能反向重复**:Block = default-allow + drop 列表;Whitelist = default-drop + allow 列表,**维护负担 100x**
+4. **LuCI 自带**:`Network → Wireless → <SSID> → MAC Filter` 已是标准路径,theme 重复 = anti-pattern
+
+跟 Limit(Step 244)同 pattern:**deferred placeholder 久了等于死代码**,主动删比留 toast 干净。actionBtn 行替换为 14 行 explanatory comment,让未来 reader 不会再问同问题。Clients 卡 action 行现 **3 个按钮**:Rename / Set Static → / Block(或 Unblock)。
+
+## Step 246 — `luci-theme-toolbox.md` 扩 6 节(rounds 42-46 know-how)
+
+`doc/luci-theme-toolbox.md` 原 15 节 → 21 节。新增:
+
+| § | 标题 | 沉淀自 |
+|---|---|---|
+| 16 | rpcd write methods + ACL `write` block | Round 46 Step 242 |
+| 17 | `/usr/share/nftables.d/` directory semantics | Round 46 Step 242a |
+| 18 | Atomic-replace prelude for fw4 include files | Round 46 Step 242b |
+| 19 | BusyBox-safe shell idioms | Round 46 Step 242c |
+| 20 | Verify-first workflow checklist | Round 46 元 lesson |
+| 21 | LuCI session modal for destructive UI actions | Round 46 Step 243 |
+
+每节按 Round 41 template:**Problem → Pattern → Why it works → Pitfalls → First seen in** + memory cross-link。~280 行新内容。
+
+## Step 247 — `chrome-claude-briefing.md` 加 backend-verification 变体
+
+Round 46 实战了一种新 verification pattern:**backend 独立于 UI 验证**(rpcd 方法 ubus 直调,不需要 UI button)。Step 242 + 3 个 hotfix 都用过,**Round 46 不写一行 UI 代码就抓住 3 个 backend bug**。
+
+briefing 加 1 个 ~50 行变体模板,通用化成"10-check ssh batch + ALL PASS 才进 UI"。未来任何新 backend feature 都该用这模板验证。
+
+## Step 248 — `INDEX.md` + `backlog.md` Round 46 close-out
+
+INDEX.md "Current state":
+- Rounds shipped 44 → **46**,Steps 241 → **248**
+- Round descriptions 加 R45-46 描述
+- "What's in flight" 改为 "Round 47 doc grooming",**无 carryover backlog**
+
+backlog.md 顶部 + Round 46 candidates 段:
+- Block ✅ SHIPPED end-to-end
+- Limit 🪦 PERMANENTLY REMOVED(Step 244)
+- **Whitelist 🪦 PERMANENTLY REMOVED**(Step 245,4 disqualifying reasons 落盘)
+- 10 memory entries
+- Round 48 = user-driven
+
+## Round 47 元教训
+
+**Doc-only grooming round 的 ROI**:Round 41 + Round 47 累计 ~3-4h ship 2 个 reference doc + 多 doc 同步。单次看不出明显回报,但**累积效应**在:
+
+- 未来 session 启动时间从 "翻 commit history 半小时" 缩到 "看 INDEX + toolbox 5 分钟"
+- "这个 quirk 撞过吗" 查 toolbox + memory 30 秒答
+- 新人(含 future-me)上手不需要重读 5000 行 styling-progress.md
+
+**节奏建议:每 5-7 round 一次 grooming**。Round 41(R0-40)→ Round 47(R42-46)→ Round ~53(R48-52)。**Doc 是 long-term asset**,代码是 short-term deliverable,长期看 doc 更重要。
+
+## Round 47 收官
+
+| Step | 内容 |
+|---|---|
+| 245 | Whitelist 按钮删除 + 14 行 explanatory comment |
+| 246 | `luci-theme-toolbox.md` 6 新节(rounds 42-46 know-how) |
+| 247 | `chrome-claude-briefing.md` backend-verification 变体 |
+| 248 | INDEX + backlog Round 46 close-out sync |
+
+**Round 47 = 4 steps,~1.5h,纯 doc(Step 245 严格算 UI 但跟 grooming 同 ship)**。
+
+**Round 48 起点**:**无强制候选**。等用户决定方向 — UI 打磨 / Chrome-Claude 全局 audit / 新 feature / 性能优化 / 等等。
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 

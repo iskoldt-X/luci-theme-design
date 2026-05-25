@@ -354,6 +354,69 @@ line every time the agent makes the same mistake twice.
 
 ---
 
+## Variant: backend-feature end-to-end verification (Round 46+)
+
+Use when shipping a feature where the backend can be exercised
+independently of the UI. The Block feature (Round 46) is the
+canonical example: rpcd methods can be called via `ubus call ...`
+without ever touching the Clients-card button, so we verify them
+before wiring UI.
+
+Pattern: 1-script ssh batch returning numbered check-list. Each
+check is either a single ubus / nft / shell command + expected
+verdict. Chrome-Claude (or you, manually) runs the batch, returns
+PASS/FAIL per item.
+
+```bash
+ssh luci-router '
+echo "=== 1. files in place ==="
+ls -l /path/to/file1 /path/to/file2
+
+echo "=== 2. service config reloaded (rpcd .list contains new methods) ==="
+/etc/init.d/rpcd reload && sleep 1
+ubus -S call $UBUS_OBJECT list 2>&1
+
+echo "=== 3. mechanism primitive works ==="
+# e.g. nft list table inet design_x
+
+echo "=== 4. happy-path RPC ==="
+ubus call $UBUS_OBJECT some-method "{\"arg\":\"value\"}"
+
+echo "=== 5. side-effect visible on filesystem ==="
+cat /some/state/file | grep expected-content
+
+echo "=== 6. invalid input rejected ==="
+ubus call $UBUS_OBJECT some-method "{\"arg\":\"garbage\"}"
+# expect: {"error":"invalid-arg"}
+
+echo "=== 7. inverse operation works ==="
+ubus call $UBUS_OBJECT undo-method "{\"arg\":\"value\"}"
+
+echo "=== 8. persistence across service reload ==="
+ubus call $UBUS_OBJECT some-method "{\"arg\":\"persist-test\"}"
+$SERVICE reload && sleep 1
+# check state still present
+
+echo "=== 9. no rule duplication on multiple reloads ==="
+$SERVICE reload && sleep 1; $SERVICE reload && sleep 1
+# check rule count unchanged
+
+echo "=== 10. cleanup ==="
+ubus call $UBUS_OBJECT undo-method "{\"arg\":\"persist-test\"}"
+'
+```
+
+**Gates**: ALL items must PASS before UI work starts. Any FAIL = a
+hotfix step BEFORE UI. Round 46 caught 3 backend bugs (Step 242a
+path / Step 242b atomic-replace / Step 242c paste-not-found) this
+way — every one would have surfaced as a UI bug if we'd shipped UI
+first.
+
+**See Round 46 Step 242 + 242a/b/c for the live application** of
+this template.
+
+---
+
 ## Cross-references
 
 - `doc/styling-progress.md` — the engineering journal (Rounds 1–N).
@@ -370,6 +433,6 @@ line every time the agent makes the same mistake twice.
 
 ---
 
-*Last updated: 2026-05-24 (Round 41, Step 155). Bump this date
+*Last updated: 2026-05-26 (Round 47, Step 247). Bump this date
 whenever you append to "Things Chrome-Claude consistently gets wrong"
 so the briefing stays current.*
