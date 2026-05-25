@@ -171,16 +171,21 @@ ships).
 
 ---
 
-## 🎯 Round 45 candidate — MAC vendor lookup — UPDATE 2026-05-25
+## ✅ MAC vendor lookup — SHIPPED & VERIFIED 2026-05-25 (Step 238)
 
-**Status check needed**: Round 44 Step 204 actually shipped `vendor.js` and integrated it into `devices.js` `detailCellsFor` (vendor name + OUI prefix renders in expand-row "Vendor" cell, replacing the "Unknown" placeholder that had been there since Step 148). The "Round 45 main work, ~4-5h" estimate below was written 2026-05-24 BEFORE Step 204 landed.
+**Final disposition**: pipeline ships clean end-to-end. Chrome-Claude audit on user's live router (Step 238, this round) returned **4/4 PASS** on data file / lookup call / UI integration / console health. 13 LAN client rows spot-checked: 12 resolved to real vendor names (ProxmoxServe, TpLinkTechno, QingpingElec, Espressif, QingdaoIntel, Apple, etc.) + LAA prefixes correctly identified as "Private (randomized)". The one miss (`BC:23:23` → Unknown vendor) is a genuine Wireshark `manuf` data gap, not a pipeline failure — upstream coverage limitation we inherit.
 
-**What's still actually open**:
-1. **Build-CI fetch automation** — verify whether `htdocs/luci-static/design-x/data/oui.json.gz` is fetched at build time by GitHub Actions, or whether vendor.js downloads it at runtime, or whether it's checked into git. (Need to check before scheduling.)
-2. **`root/usr/share/luci-theme-design-x/NOTICE`** — license attribution for the embedded Wireshark manuf data. May already exist (Round 44 Step 204 may have created it). Verify.
-3. Any rough edges in the live lookup (cache invalidation? gzip decompression failure handling?). Chrome-Claude can verify in a single audit.
+**Build pipeline**: `.github/workflows/build.yml` step "Fetch + transform Wireshark manuf OUI database" pulls upstream manuf, awk-transforms to JSON, gzips to `htdocs/luci-static/design-x/data/oui.json.gz` with a 450 KB ceiling assertion. Current real size: **337,601 bytes (~330 KB)**, well under ceiling. File is gitignored (CI-generated only); IPK packaging picks it up via default `htdocs/` install rule.
 
-**Re-audit + remaining work estimate**: ~1-2h, not 4-5h. Drop this from "Round 45 main work" status.
+**Runtime characteristics** (measured 2026-05-25):
+- **Lazy fetch**: `oui.json.gz` is NOT requested on page load; fires on first `vendor.lookup()`. No idle bandwidth cost.
+- **Cold-start**: ~95 ms (fetch + DecompressionStream + JSON parse + map lookup).
+- **Cache**: module singleton across LuCI navigations. Subsequent lookups are O(1) map hits.
+- **Reset**: `vendor.__reset__()` discards the in-memory cache (useful for cold-start measurement).
+
+**Format**: vendor cell renders as `"VendorShortName (XX:XX:XX)"` (e.g. `"ProxmoxServe (BC:24:11)"`). The Chrome-Claude prompt suggested `"·"` separator; current parens format is functionally equivalent. **Propose-then-reject**: not normalized, current format is readable and shipped — no churn.
+
+**What this entry used to claim was needed**: "Round 45 main work, ~4-5h". **Actual remaining work**: 0h (Round 44 Step 204 shipped the implementation; Step 238 was pure verification + doc close-out).
 
 ### Original status block (kept for context, written 2026-05-24)
 

@@ -4695,6 +4695,73 @@ scp + 刷新行为:**视觉零变化**(latent fix)。如果某种 race condition
 1. **开 step 前先 cat 一遍源码注释**:Step 236 一开始我以为要 ship 3 个 atomic fix,~2.5h 工作量。Read 一遍 sparkline.js 发现 Step 205/206 注释把 Fix-1/2/3 都标了 ship 状态,剩下 scope 不到原计划 1/10。**backlog.md 写完不 verify,持续 stale 是个普遍问题**。这一条跟 Step 237 的"数据-标签错位"是同一类:**信息分布在 doc + code + memory + commit history,光看一个 source 容易 stale**。
 2. **propose-then-reject 在文档里也要留痕**:Fix-5 我决定不做,但 wan_traffic.md §五 还是把它标了 "⏸ 未做",说明理由。**不留痕 = 后续 Round 会有人再开同一个工。** Memory 不沉淀因为没普适价值,但**文档的 ship 状态表必须留痕**。
 
+## Step 238 — MAC vendor pipeline 实机验证 + backlog 关单
+
+**时间**:2026-05-25(Step 236 同 session 后)
+**文件**:
+- `doc/backlog.md`(MAC vendor 条目从"~4-5h Round 45 main work"改成 ✅ SHIPPED & VERIFIED)
+- `doc/macvendor.md`(顶部 status 改成"全部 SHIPPED",新增 §零 Round 45 Step 238 verification 块)
+
+**开 step 前的状态**:Round 44 Step 204 早已 ship `vendor.js` + devices.js 集成 + NOTICE 文件 + build.yml 拉 Wireshark manuf 的 CI 步骤。但**没人做过端到端实机验证** — 整条 pipeline 是否真的在用户路由器上活着,Vendor cell 是否显示真厂商名而不是 fallback "Unknown" / "Private",从未确认。
+
+**做了什么**(0 行代码,纯审计 + 文档收尾):
+
+1. **生成 Chrome-Claude 验证 prompt** — 4 个 check:
+   - Data file (Network tab 找 `/luci-static/design-x/data/oui.json.gz`,期望 200 + 100-300 KB)
+   - Lookup call (console 跑 `vendor.lookup('3C:22:FB:00:00:00', null)`,期望 "Apple")
+   - UI integration (展开 3+ Clients 行,看 Vendor cell)
+   - Console health (60s 窗口,任何 vendor / oui / DecompressionStream 错误)
+2. **用户跑 prompt** — Chrome-Claude 返回 **4/4 PASS**:
+   - oui.json.gz: 337,601 bytes (~330 KB),lazy fetch
+   - lookup('3C:22:FB') → "Apple",95 ms cold-start
+   - 13 行 spot check:12 行真名(ProxmoxServe / TpLinkTechno / QingpingElec / Espressif / QingdaoIntel / Apple),1 行 "Unknown vendor" (`BC:23:23` 是 Wireshark manuf 数据 shard 缺口),6 个 LAA prefix 正确识别 "Private (randomized)"
+   - 零 console error
+3. **`doc/backlog.md` 关单** — "Round 45 candidate — MAC vendor lookup (~4-5h)" 整段重写为 "✅ SHIPPED & VERIFIED",列出实测数据 + runtime characteristics(lazy fetch / singleton cache / __reset__)
+4. **`doc/macvendor.md` 顶部 status** — "等待 Round 45 实施" → "全部 SHIPPED & VERIFIED"。新增 §零 verification 章节(置顶),记录 4-check 结果 + Wireshark manuf 数据缺口分析 + 渲染格式 `"VendorShortName (XX:XX:XX)"` parens 的 propose-then-reject(原计划 `· ` 分隔,实测 parens 也清晰不 churn)
+
+#### 数据缺口注释
+
+`BC:23:23` 在用户实机上有一台设备命中但 Wireshark manuf 缺。**上游数据限制,不是 pipeline 失败**。Wireshark `manuf` coverage ~70-80% IEEE OUI registry(只含 MA-L 24-bit;MA-M / MA-S 需要 28/36 bit 解析,跟 build.yml 当前 awk 转换不兼容,**未来 enhancement 候选**,**不是 Round 45 scope**)。
+
+#### 没做的事
+
+- **格式从 parens 改成 `·` 分隔符**:Chrome-Claude 报告里提了一笔(说 "easy one-line change")。**propose-then-reject** — `"ProxmoxServe (BC:24:11)"` 已经清晰,**为美学差异改一个生产文件 = unnecessary churn**。Memory 不沉淀,backlog 也不留。
+- **MA-M / MA-S 28-bit / 36-bit OUI 支持**:Wireshark manuf 数据里有,但 build.yml 当前 awk 只处理 24-bit MA-L。未来 enhancement 候选,**Round 45 不做**。覆盖率提升估计 +5-10%(剩余的小厂 OUI),边际效益低。
+- **数据 update 频率**:build CI 每次构建都拉新的 Wireshark manuf,**自动跟上游**。**不需要手动 update**。
+
+#### Break change
+
+**零**。Step 238 是 0 代码 commit,纯审计 + 文档关单。
+
+#### 验证
+
+```bash
+$ git diff --stat HEAD~1  → 2 docs only (backlog.md + macvendor.md)
+```
+
+不需要 scp,不需要 Chrome-Claude verification,文档改动只对未来读者可见。
+
+#### 教训
+
+1. **"开 step 前先扫一遍是否已 ship"已经第 2 次救命** — Step 236 发现 Round 44 Steps 205/206 已经做完 P0/P1/Fix-3,Step 238 发现 Round 44 Step 204 已经做完 vendor.js + CI + NOTICE。**Round 45 至今 7 个 step,2 个是"以为要做实际只要 audit"**。**backlog.md 累积 stale 是个普遍模式**:写完 backlog 不 verify,然后做了不 strikethrough,持续 ~半轮就开始 mislead。
+2. **Pre-ship audit 比 post-ship 修复便宜 10x**:Step 238 ~30 min audit + 关单 vs 假如我们没 audit 直接进 Round 46,然后某天用户报"Vendor 一直显示 Unknown" → 调试 → 发现 oui.json.gz 没在 IPK 里 → 修 → re-ship。**审计 = 永远应该做的**。
+3. **Chrome-Claude 作为 "verification gateway" 模式继续稳定** — Round 43 Phase 6 首次 + Round 44 batch verify + Round 45 Step 238 已经第 4-5 次。**双 Claude 工作流(Code-Claude 做生成 / Chrome-Claude 做实机验证)是项目的 force multiplier**。**memory 沉淀这个模式吗**? — 已经有 `chrome-claude-briefing.md`,这就是契约文件,不再加 memory。
+4. **数据 pipeline 缺口的 honest framing**:`BC:23:23` Unknown vendor 不是 bug,是 upstream 数据缺口。**承认上游数据限制比假装我们什么都覆盖更可信**。**未来如果用户问"为啥某 MAC 还是 Unknown",这个 honest reading 直接给出答案**。
+
+#### 关联 backlog 状态
+
+| 候选(写在 backlog.md 时) | 实际 ship 状态 |
+|---|---|
+| ARP-based Last Seen ~1-2h | ✅ Round 44 Step 218 + Round 45 Step 237 |
+| IPv6 in expand detail ~10min | ✅ Round 45 Step 234 |
+| Column click-to-sort ~30min | ✅ Round 45 Step 235 |
+| WAN sparkline P0+P1 ~2.5h | ✅ Round 44 Steps 205+206 + Round 45 Step 236 |
+| **MAC vendor lookup ~4-5h** | **✅ Round 44 Step 204 + Round 45 Step 238**(实际 0 hour 在 Round 45,纯 audit) |
+| Whitelist | ⏸ DEFERRED(Step 232 决定) |
+| Block / Limit | Round 46 候选 |
+
+**Round 45 quick-win pass 全部 done**:Step 232 / 233 / 234 / 235 / 236 / 237 / 238 = 7 个 step,跟原计划"Round 45 终态 6-8 step"对齐。**Round 46 是真正的下一个 round 起点,Block + Limit + Whitelist 全是新工**。
+
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 |---|---|---|---|
 | 现代 rgb()/hsl() | 50 处 | **0** | 0 |

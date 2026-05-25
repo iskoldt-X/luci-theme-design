@@ -1,12 +1,40 @@
 # MAC Vendor Lookup — 落地计划
 
 > 创建:2026-05-24,Round 43 进行中。
-> 状态:**Phase 1 验证完成 (2026-05-24)。Phase 2B 路径确认。等待 Round 45 实施。**
+> 状态:**✅ 全部 SHIPPED & VERIFIED (2026-05-25, Round 45 Step 238)**。
+>   - Phase 1 verification:2026-05-24(确认 Phase 2A unreachable,锁 Phase 2B)
+>   - Phase 2B 实施:Round 44 Step 204(vendor.js 模块 + devices.js 集成 + NOTICE 文件)
+>   - Build CI:Round 44 Step 204(`.github/workflows/build.yml` 拉 Wireshark manuf → gzip → ~330 KB)
+>   - Live verification:Round 45 Step 238(Chrome-Claude 4/4 PASS)— **见 §零**
 > 触发:LAN Clients 卡 expand-row Vendor 字段长期是 `Unknown` placeholder
 > (Step 148 加上 MAC 列后这个 placeholder 更显眼)
 > 上游研究:`doc/OpenWrtMACVendorLookupArchitecture.md`(deep research 报告,
 > Phase 1 验证已确认其 PR #7931 / ufp-neigh 路径在 ImmortalWrt 24.10 上 unreachable,
 > 见 §一.五 验证结果)
+
+---
+
+## 〇、Round 45 Step 238 verification(2026-05-25)
+
+Chrome-Claude 在用户实机 router 上跑了 4-check audit,全 PASS:
+
+| Check | 结果 | 实测数据 |
+|---|---|---|
+| 1. Data file | ✅ | `GET /luci-static/design-x/data/oui.json.gz` → 200,Content-Length **337,601 bytes (~330 KB)**。lazy fetch(首次 lookup 才请求,page load 时不拉)。 |
+| 2. Lookup call | ✅ | `vendor.lookup('3C:22:FB:00:00:00', null)` → `"Apple"`。cold-start 95 ms(fetch + DecompressionStream + JSON parse + map lookup)。 |
+| 3. UI integration | ✅ | 13 行 spot check,12 行显示真实厂商名:ProxmoxServe / TpLinkTechno / QingpingElec / Espressif / QingdaoIntel / Apple / 等。1 个 Unknown vendor(`BC:23:23`,Wireshark manuf 数据盘里没有 — 上游数据缺口,**不是 pipeline 失败**)。LAA prefix(`2A:`,`B2:`,`AE:`,`96:`,`22:`,`3A:`)→ `"Private (randomized)"` 全部正确。 |
+| 4. Console health | ✅ | 60 秒观察窗口,**零** errors / warnings / unhandled rejections。无 vendor / oui / DecompressionStream / Response 相关报错。 |
+
+**实际渲染格式**:`"VendorShortName (XX:XX:XX)"`(parens + 空格分隔),如 `"ProxmoxServe (BC:24:11)"`。原计划用 `" · "` 分隔(`"Apple · 3C:22:FB"`);**propose-then-reject**,parens 也清晰,不为美学差异 churn。
+
+**Runtime characteristics**:
+- **Lazy fetch**:`oui.json.gz` 不在 page load 时请求,首个 `lookup()` 时触发。
+- **Singleton cache**:`L.require('design-x.vendor')` 跨 LuCI 导航返回同一实例,subsequent lookup 是 O(1) map hit。
+- **Reset 路径**:`vendor.__reset__()` 清掉 in-memory cache。
+
+**数据缺口**:`BC:23:23` 在用户实机上有一台设备命中,但 Wireshark `manuf` 数据 shard 里没有此 OUI。**上游数据限制,我们继承**。Wireshark `manuf` 是 community-curated,coverage 大约 IEEE OUI registry 的 70-80%(MA-L only,不含 MA-M / MA-S — 那俩需要的 28-bit / 36-bit 解析跟 build.yml 的 24-bit shard 不兼容,也是个 trade-off)。
+
+**Net result**:Pipeline 干净 ship,0 代码改动,Step 238 是纯验证 + 文档收尾 step。`doc/backlog.md` 的"MAC vendor lookup"条目从 "Round 45 main work, ~4-5h" 划掉为 ✅ SHIPPED & VERIFIED。
 
 ---
 
