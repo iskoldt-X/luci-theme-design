@@ -1,6 +1,6 @@
 {
 	"luci-theme-design-x": {
-		"description": "Read-only system metrics for the design-x LuCI theme dashboard. All methods are pure reads of /sys/class/, /proc/, or via iwinfo/nlbw ubus calls — no writes, no exec of user input. Replaces the legacy unauthenticated /cgi-bin/design/* endpoints (Round 42 Step 163, Codex P1-6).",
+		"description": "Read-only system metrics for the design-x LuCI theme dashboard. All read methods are pure reads of /sys/class/, /proc/, or via iwinfo ubus calls — no writes, no exec of user input. Step 242 (Round 46) adds write methods for the Clients-card Block button: block-mac / unblock-mac manage a kernel-side nftables set, and list-blocks reports current state. Write methods accept a single MAC string, validated server-side against `^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$` before any kernel call — same client-side-sanitize discipline as Step 153 host-rename. Replaces the legacy unauthenticated /cgi-bin/design/* endpoints (Round 42 Step 163, Codex P1-6).",
 		"read": {
 			"ubus": {
 				"luci-theme-design-x": [
@@ -8,7 +8,16 @@
 					"cpustat",
 					"temp",
 					"host-presence",
-					"wifi-stations"
+					"wifi-stations",
+					"list-blocks"
+				]
+			}
+		},
+		"write": {
+			"ubus": {
+				"luci-theme-design-x": [
+					"block-mac",
+					"unblock-mac"
 				]
 			}
 		}

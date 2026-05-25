@@ -5028,6 +5028,174 @@ scp 测试不需要 — uci-defaults 改的是首次启动行为,**老 install �
 
 **Round 46 起点**:Block + Limit action buttons,需要 ACL write block + rpcd write methods + Step 153 input validation 严格执行。Whitelist 暂缓。**预估 3-4 step,~4-6h**。下次 session 开新 round。
 
+# 🛡️ Round 46 — Action buttons(只做 Block,Limit + Whitelist 永久 defer)
+
+> 起飞:2026-05-25(Round 45 同日续 session)
+> Round 46 用户提出**工作流变革**:**verify-first, implement-second**。先验证路径再写代码,用最小努力找正确道路。第 10 条 memory 入册 `verify-first-implement-second`。
+> 实施 scope 也由验证 narrow 出来:tc 不在 IW24.10 默认包里 → Limit 走 nft policing UX 烂 + 撞 SFO 坑;**砍 Limit,只做 Block**。
+
+## Round 46 验证(opening,非 step)
+
+用户实机 ssh 跑了 A1-A8 验证 query 包。返回结果锁定全部决策:
+
+| Topic | 实测 | 决定 |
+|---|---|---|
+| Firewall backend | fw4 + nftables v1.1.1 active | 走 nft inet 族 |
+| Persistence hook 路径 | `/usr/share/nftables.d/{table,chain}-post/` 标准 fw4 dir,zerotier / homeproxy 都用 | 我们的 .nft 文件落 `table-post/design_x.nft` |
+| nft set + ether_addr | ✅ 创建成功 | Block 走 set + drop rule |
+| tc / sqm / qos | **未装,tc 二进制不存在** | **Limit 永久 defer** |
+| ACL write block 格式 | luci-app-firewall.json 是最近示范 | 抄它的 read+write 二级结构 |
+| rpcd handler 权限 | 跑 root | 可以直接 nft 不需要 ubus.file.exec |
+
+**Verify-first 第一次实战成功**:5 分钟验证消除了 4-5h 的潜在弯路。**对比 Round 44 daemon 死磕 16-18h**,工作流变革立竿见影。
+
+## Step 242 — Block 后端(nft 表 + rpcd write methods + ACL)
+
+**时间**:2026-05-25(Round 46 开局 step)
+**文件**:
+- `root/usr/share/nftables.d/table-post/design_x.nft`(**新**,fw4 自动 include 的 skeleton)
+- `root/usr/share/rpcd/acl.d/luci-theme-design-x.json`(加 write block + list-blocks)
+- `root/usr/libexec/rpcd/luci-theme-design-x`(加 3 个 methods + 2 个 helper function)
+- `Makefile` prerm hook 加 `nft delete table inet design_x`
+
+**做了什么**(纯后端,**不动 UI**,UI wiring 等 Step 243):
+
+1. **`/usr/share/nftables.d/table-post/design_x.nft`** — fw4 启动 / reload 时自动 include 的标准 hook:
+
+   ```nft
+   table inet design_x {
+       set blocked_macs { type ether_addr }
+       chain block_forward {
+           type filter hook forward priority filter; policy accept;
+           ether saddr @blocked_macs counter drop
+           ether daddr @blocked_macs counter drop
+       }
+       chain block_input  { ... ether saddr @blocked_macs drop }
+       chain block_output { ... ether daddr @blocked_macs drop }
+   }
+   ```
+
+   - **独立 table**(不注入 fw4 chains)— fw4 reload 不动我们的 state
+   - **3 个 hook**(forward / input / output)= 被 block 设备**不能上网 + 不能访问路由器**
+   - **counter** 每条规则附带 — `nft list table inet design_x` 看到丢包统计
+   - **DROP 在 filter hook 早期执行,在 flow offloading 之前** → Round 44 SFO 幽灵无法 undermine(SFO 只 offload 已 establish 的 flow,drop 让 flow 根本不 establish)
+   - 文件 ship 时 set 是空的,kernel 加载后 table 存在但没 blocked MAC
+
+2. **rpcd handler 加 3 个 method**(`.list` JSON 同步更新):
+
+   - `list-blocks` — **read**,返回 `{"macs":["aa:bb:..","cc:dd:.."]}`(从 kernel nft 读,authoritative)
+   - `block-mac` — **write**,argument `{"mac":"aa:bb:cc:dd:ee:ff"}`,加到 set + 重写 .nft 文件
+   - `unblock-mac` — **write**,同上,从 set 删除 + 重写 .nft 文件
+
+3. **2 个 helper**:
+
+   - `mac_valid()` — Step 153 lesson:server-side MAC regex `^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$` 用 shell case-pattern 实现(busybox ash 兼容,no Bash)。**不通过的输入 100% 拒绝**,不通过任何 sanitize fallback
+   - `ensure_table()` — 检查 `nft list set inet design_x blocked_macs` 是否存在,不存在就 `nft -f` 重加载 skeleton。**首次安装 / kernel state 被外部清除时自愈**
+   - `regenerate_state_file()` — 读 kernel set elements,重写 `/usr/share/nftables.d/table-post/design_x.nft` 让 reboot 后 fw4 重新 include 恢复
+
+4. **ACL JSON** — luci-app-firewall.json 是模板,加 read.list-blocks + write {block-mac, unblock-mac}:
+
+   ```json
+   "read":  { "ubus": { "luci-theme-design-x": [..., "list-blocks"] } },
+   "write": { "ubus": { "luci-theme-design-x": ["block-mac", "unblock-mac"] } }
+   ```
+
+5. **Makefile prerm** 加 `nft delete table inet design_x` — 卸载 theme 时清 kernel state(防"卸载了 theme 但 block 规则还在"惊吓)
+
+#### Authoritative state vs persistence file
+
+| 数据 | 权威源 | 同步策略 |
+|---|---|---|
+| "现在哪些 MAC 被 block" | kernel `inet design_x blocked_macs` set | rpcd 每次写操作后 `regenerate_state_file` 写盘 |
+| 重启后哪些 MAC 应该被 block | `/usr/share/nftables.d/table-post/design_x.nft` 文件 | fw4 启动 include 文件 → kernel set 重建 |
+
+→ **kernel state 和 disk state 写后立即一致**;用户手动 `nft add element` 不通过我们 UI 也会出现在 list-blocks 输出(因为读 kernel);用户手动 `vi` 文件不重 reload 不生效(直到 fw4 reload)。
+
+#### 用户的可逆操作(perf-audit 承诺的"用户能从系统层 reverse")
+
+| 操作 | 命令 |
+|---|---|
+| 看现在 block 哪些 | `cat /usr/share/nftables.d/table-post/design_x.nft` 或 `nft list set inet design_x blocked_macs` |
+| 临时全清(重启又会回来) | `nft flush set inet design_x blocked_macs` |
+| 永久全清 | `rm /usr/share/nftables.d/table-post/design_x.nft && fw4 reload`(table 整个消失;下次 UI block 重建) |
+| 卸载 theme 一并清 | `opkg remove luci-theme-design-x` → prerm 自动 `nft delete table` |
+| 查看 drop 统计 | `nft list table inet design_x`(counter 输出每条规则的 packets/bytes) |
+
+#### Verify-first 承诺(没做的事)
+
+- **devices.js Block 按钮 wiring** — Step 243 才做,Step 242 后端单飞先 verify
+- **UI badge "Blocked" 标记** — Step 243
+- **Limit 任何路径** — 永久 defer 出 Round 46
+
+#### Break change
+
+零(没动 UI,backend 是新增方法不改老的)。
+
+#### 验证清单(Chrome-Claude 跑这一轮才能 Step 243 起飞)
+
+scp 之后,在 router ssh 跑下面这段,逐项确认 → 没 PASS 不进 Step 243:
+
+```bash
+# 1. 文件 + ACL 落地
+ls -l /usr/share/nftables.d/table-post/design_x.nft
+ls -l /usr/share/rpcd/acl.d/luci-theme-design-x.json
+ls -l /usr/libexec/rpcd/luci-theme-design-x
+
+# 2. rpcd 重新加载 ACL
+/etc/init.d/rpcd reload && sleep 1
+
+# 3. .list 输出包含 8 个 method
+ubus -S call luci-theme-design-x list 2>&1 | head
+
+# 4. fw4 reload 让 .nft 文件被 include
+fw4 reload && sleep 1
+
+# 5. table 已创建 + set 为空
+nft list table inet design_x
+
+# 6. list-blocks 返回空数组
+ubus call luci-theme-design-x list-blocks
+
+# 7. block-mac 接受有效 MAC
+ubus call luci-theme-design-x block-mac '{"mac":"aa:bb:cc:dd:ee:ff"}'
+ubus call luci-theme-design-x list-blocks
+# 应该看到 {"macs":["aa:bb:cc:dd:ee:ff"]}
+
+# 8. .nft 文件被重写(elements 出现)
+cat /usr/share/nftables.d/table-post/design_x.nft
+
+# 9. 错误 MAC 被拒
+ubus call luci-theme-design-x block-mac '{"mac":"invalid"}'
+ubus call luci-theme-design-x block-mac '{"mac":"aa:bb:cc:dd:ee"}'  # 缺一段
+# 应该返回 {"error":"invalid-mac"}
+
+# 10. unblock-mac 工作
+ubus call luci-theme-design-x unblock-mac '{"mac":"aa:bb:cc:dd:ee:ff"}'
+ubus call luci-theme-design-x list-blocks  # 应该空数组
+
+# 11. 持久化 — block + 模拟 reboot(fw4 reload)
+ubus call luci-theme-design-x block-mac '{"mac":"11:22:33:44:55:66"}'
+fw4 reload && sleep 1
+nft list set inet design_x blocked_macs
+# 应该看到 11:22:33:44:55:66 仍在 set 里(从 .nft 文件恢复)
+
+# 12. 真 reboot 测试(可选,你心情好就跑)
+# reboot
+# 上来后 nft list set inet design_x blocked_macs 应仍含 11:22:33:44:55:66
+
+# 13. ACL gate 验证 — 没登录的 ubus 应该拒
+# 这一项 Chrome-Claude 在 admin 页面验证更方便
+```
+
+13 项全 PASS → Step 243 起飞写 UI。任意一项 FAIL → 不进 Step 243,定位修复。
+
+#### 教训(verify-first 第一次实战)
+
+1. **5 分钟 ssh query 把 Round 46 scope 砍掉一半**:Limit 整条线被 tc 缺席 + nft policing UX 烂的事实劝退。如果直接进 implementation,我又会写 ~200 行 tc / nft limit 代码然后实测发现垃圾。**验证省 4-6h**。
+2. **设计也是验证的产物,不只是 implementation**:有了 A2 结果"`/usr/share/nftables.d/table-post/` 标准 fw4 dir"才确定我们走独立 table + 文件持久化,而不是注入 fw4 UCI。如果没 verify,我会瞎猜 UCI 路径,撞 Step 153 dnsmasq 那类雷。
+3. **验证 prompt 本身也是 deliverable**:Step 242 commit 的最后一段(13 项 ssh verification list)就是 Step 243 起飞的 pre-flight check。**写代码 + 写验证清单 + 写测试** 同 commit,Step 243 不需要再设计 verification。
+
+
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |

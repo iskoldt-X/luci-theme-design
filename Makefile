@@ -78,6 +78,14 @@ if [ -f /etc/crontabs/root ]; then
     sed -i '/design-host-acct refresh/d' /etc/crontabs/root 2>/dev/null
     [ -x /etc/init.d/cron ] && /etc/init.d/cron restart 2>/dev/null
 fi
+# Step 242 (Round 46): wipe Block feature state on package removal so
+# uninstalling the theme doesn't leave a dangling nftables table that
+# silently keeps dropping a previously-blocked MAC's traffic.
+# IPKG_INSTROOT guard: only touch live kernel when we're on the target,
+# not in the IPK pack fakeroot.
+if [ "$${IPKG_INSTROOT}" = "" ]; then
+    nft delete table inet design_x 2>/dev/null
+fi
 exit 0
 endef
 

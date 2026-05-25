@@ -87,15 +87,11 @@ Steps 232-237 (Step 236 still pending = WAN sparkline carry-over). Shipped today
 
 ---
 
-## 🛠️ Round 46+ candidates (action button completions, previously Round 43+/Round 45+)
+## 🛠️ Round 46 — Action button completions (STATUS UPDATE 2026-05-25)
 
-Currently three of the five LAN Clients action buttons are placeholders that just toast "not yet implemented":
-
-- **Whitelist** — ⏸ **DEFERRED per user decision 2026-05-25** (Step 232 conversation). Semantic was ambiguous (`wireless.mac_filter` vs `dhcp.@host.whitelist` vs nftables firewall set); user said "do Block + Limit first, decide if Whitelist still needed after."
-- **Limit** — per-MAC bandwidth limit via tc/qdisc or sqm-scripts. Touches `/etc/config/qos` or `/etc/config/sqm`. **~2-4h, depends on which QoS stack**. Round 46 candidate.
-- **Block** — drop traffic to/from MAC. Easiest via `nftables` set + drop rule in firewall, or via `dhcp.@host.dns_set` to give wrong DNS. **~1-2h**. Round 46 candidate.
-
-These all involve persistent service config and **MUST follow Step 153's input-validation lesson** (sanitize before any UCI write). Action-button writes should land in the rpcd ubus object as new methods under the existing `luci-theme-design-x` ACL grant. **Note:** Round 45 Step 232 trimmed the rpcd surface from 8 → 5 methods; action buttons will need to add write-capable methods (currently rpcd is read-only, ACL JSON only grants `read`). **Adding ACL `write` block + new methods is the architecture step needed before any button can write UCI.**
+- **Whitelist** — ⏸ **DEFERRED indefinitely** (Step 232 conversation). Semantic was ambiguous; user opted to do Block first, reassess after.
+- **Limit** — 🪦 **REMOVED FROM ROUND 46 PERMANENTLY** (Round 46 verification, 2026-05-25). `tc` not in IW24.10 default install; adding `+tc-tiny` dep forces every theme user to pull a 50 KB package they didn't ask for. nft-only path (`limit rate over X drop`) is policing not shaping → ugly UX (TCP retransmits on stalled flows) + structurally vulnerable to flow_offloading bypass (Round 44's SFO ghost). Effort:value ratio judged unacceptable. **Future home**: if a user installs `sqm-scripts` independently, we could add a "Limit (requires sqm)" wrapper UI in a later round. Not a Round 46 step.
+- **Block** — ✅ **IN PROGRESS, Step 242 (this round)**. nft inet table `design_x` with `blocked_macs` set + forward/input/output drop hooks. Standalone table at `/usr/share/nftables.d/table-post/design_x.nft` — independent of fw4's main table, picked up by fw4 includes on reload + boot. rpcd handler adds 3 methods (`list-blocks` / `block-mac` / `unblock-mac`) with strict server-side MAC regex validation (Step 153 lesson). Persistence file regenerated on every write. **Step 242 = backend + verification clip; Step 243 = UI wiring (devices.js Block button)**.
 
 ---
 
