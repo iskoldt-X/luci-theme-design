@@ -55,15 +55,16 @@ var STORAGE_KEY      = 'design-device-names-v1';
 var SORT_STORAGE_KEY = 'design-device-sort-v1';  // Step 235
 
 // Step 235 (Round 45) — comparators for header click-to-sort.
-// Returned numbers follow Array.prototype.sort convention; the caller
-// negates for descending order. `name` carries the legacy "named first"
-// rule so the default sort matches every prior release; `ip` is segment-
-// numeric (192.168.1.10 sorts AFTER 192.168.1.2, not before); `lease`
-// treats static leases as "expires at infinity" → bottom of ascending,
-// top of descending. Static-or-missing rows clump together regardless
-// of direction, which is what the user wants.
+// Step 237 (Round 45) — signature updated: (a, b, ctx) with ctx
+// carrying customNames + presence. `name` carries legacy "named first"
+// + locale tie-break; `ip` is segment-numeric so 1.10 sorts after 1.2;
+// `lease` (key kept for sortState backwards-compat with Step 235
+// localStorage payloads) now keys off presence inactivity when the
+// host-presence rpcd method has data, with the Step 235 lease.expires
+// fallback for routers that don't have the new backend yet.
 var SORT_COMPARATORS = {
-	name: function (a, b, customNames) {
+	name: function (a, b, ctx) {
+		var customNames = ctx && ctx.customNames;
 		function nameOf(l) {
 			var mac = (l.macaddr || l.mac || '').toUpperCase();
 			return ((customNames && customNames[mac]) || l.hostname || '').toLowerCase();
@@ -88,7 +89,26 @@ var SORT_COMPARATORS = {
 		for (var i = 0; i < 4; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i];
 		return 0;
 	},
-	lease: function (a, b) {
+	lease: function (a, b, ctx) {
+		var presence = ctx && ctx.presence;
+		// Step 237: presence-driven sort when host-presence data exists.
+		// Asc = most-recently-active first; Offline rows (mac not in
+		// presence map) sink to the bottom regardless of lease state.
+		if (presence && Object.keys(presence).length) {
+			function inactivity(l) {
+				var mac = (l.macaddr || l.mac || '').toUpperCase().replace(/:/g, '');
+				var e = presence[mac];
+				if (!e) return Infinity;                    // offline
+				if (e.via === 'wifi') return e.inactive_ms || 0;
+				return 0;                                   // arp: live
+			}
+			var ia = inactivity(a), ib = inactivity(b);
+			if (ia === Infinity && ib === Infinity) return 0;
+			if (ia === Infinity) return 1;
+			if (ib === Infinity) return -1;
+			return ia - ib;
+		}
+		// Fallback (no presence backend on this router): Step 235 logic.
 		// lease.expires is REMAINING seconds (Step 140). ≤0 = static.
 		var ea = (a.expires > 0) ? a.expires : Infinity;
 		var eb = (b.expires > 0) ? b.expires : Infinity;
@@ -753,10 +773,14 @@ return baseclass.extend({
 
 		// Step 235 (Round 45) — sort by current sortState. Comparators live
 		// at module top; this here only dispatches and negates for desc.
+		// Step 237: ctx carries presence map alongside customNames so the
+		// lease (= Last Seen) comparator can sort by host-presence
+		// inactivity instead of lease.expires.
 		var cmp = SORT_COMPARATORS[this.sortState.col] || SORT_COMPARATORS.name;
 		var self = this;
+		var ctx  = { customNames: self.customNames, presence: self.presence };
 		unique.sort(function (a, b) {
-			var r = cmp(a, b, self.customNames);
+			var r = cmp(a, b, ctx);
 			return self.sortState.dir === 'desc' ? -r : r;
 		});
 
@@ -792,7 +816,13 @@ return baseclass.extend({
 			// MAC column promoted main-row in Step 148; left non-sortable.
 			E('span', { 'class': 'devices-col-mac' }, _('MAC')),
 			E('span', { 'class': 'devices-col-sig' }, _('Signal')),
-			this.headerCell('lease', _('Lease'),  'devices-col-seen'),
+			// Step 237 (Round 45): column header "Lease" → "Last Seen".
+			// Data shown has been presence-based since Step 218
+			// (formatPresence: "Active" / "Xs" / "Xm" / "Offline").
+			// Header label finally catches up to the data source.
+			// sortState key stays 'lease' for localStorage compatibility
+			// with Step 235 saves.
+			this.headerCell('lease', _('Last Seen'),  'devices-col-seen'),
 			E('span', { 'class': 'devices-col-chev' }, '')
 		];
 	},

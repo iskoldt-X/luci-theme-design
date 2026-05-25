@@ -4594,6 +4594,55 @@ scp + 刷新:
 2. **inline-flex + text-align 兼容**:cell 上 `text-align: right` 对 `display: inline-flex` 元素仍有效(把整个 inline-flex 推到右),保留了 row-reverse 不需要。看起来反直觉但确实工作。
 3. **`role="button" tabindex="0"` 是 ARIA pattern 的"button on a span"组合**,**必须配合 keydown 监 Enter/Space**,光 click 不够,否则键盘用户排不了序。WCAG 2.1 §2.1.1 必要项。
 
+## Step 237 — ARP-based Last Seen(列头改名 + 排序对齐数据源)
+
+**时间**:2026-05-25(Step 235 同批)
+**文件**:
+- `htdocs/luci-static/resources/design-x/devices.js`(SORT_COMPARATORS 签名 + lease comparator rewrite + 列头文案)
+
+**做了什么**(单文件,纯前端,~25 LOC 净改):
+
+1. **列头 "Lease" → "Last Seen"**。**Step 218 (Round 44)** 早就把数据源从 `lease.expires` 切到 `formatPresence(host-presence rpcd)`(显示 "Active" / "5m" / "Offline"),但列头一直挂着旧名 "Lease",**视觉跟数据不一致**。Step 237 把列头补到位,跟 detail panel 的 "Lease expires" 区分(后者**真的**显示 lease epoch)。
+2. **`SORT_COMPARATORS` 签名重构**:第 3 参数从 `customNames` 升级成 `ctx = { customNames, presence }`,让所有 comparator 都能拿 instance state。`name` comparator 内部 `ctx.customNames` 解构,行为不变。`ip` 不需要 ctx。
+3. **`lease` comparator rewrite**:有 presence map(`Object.keys.length > 0`)时,sort key = inactivity ms(wifi)/ 0(arp active)/ Infinity(offline)。**升序 = 最活跃的在顶**,offline 沉底。没 presence backend 时(老路由器 / rpcd method 没装)回退到 Step 235 的 `lease.expires` 逻辑。**前向 + 后向兼容**。
+4. **sortState key 保持 `lease`**:Step 235 已经持久化用户的排序到 `design-device-sort-v1`。改 key 会让老用户的存储失效(回退到默认 name asc)。**显示"Last Seen"但内部 key 仍 `lease`** — 用户层不可见,无意义的破坏性改动避免。
+
+#### 没动的东西
+
+- `formatPresence()`(Round 44 Step 218 的 wifi inactive / arp 状态 / offline 逻辑)— 数据 source 不动。
+- `host-presence` rpcd method(`/usr/libexec/rpcd/luci-theme-design-x`)— 后端早就 ship。
+- Detail panel "Lease expires" 行 — 这条**确实**显示租期到期时间(`new Date(now + expires*1000).toLocaleString()`),跟 column 显示的"上次见到"是两码事,**两个字段并存才完整**。
+- Round 38-44 整套 presence pipeline — 完全不动。
+
+#### Break change(可见)
+
+- 列头 "Lease" → "Last Seen"。语义跟数据匹配,**用户应该比之前更不困惑**。
+- 排序"Last Seen"列:**升序 = 最近活跃 → offline**(之前是按 lease 剩余时间)。绝大多数用户点 "Last Seen" 升序是想看"谁还在线",新 sort 行为更符合直觉。
+- Round 41 / 42 / 43 / 44 全 traffic 卡之外的 Clients 卡视觉**零变化**,这是个纯文案 + 排序对齐 commit。
+
+#### 验证
+
+```bash
+$ node --check htdocs/luci-static/resources/design-x/devices.js  ✅
+$ grep "_('Lease')" devices.js   → 0(列头改了)
+$ grep "_('Lease expires')" devices.js → 1(detail panel 保留)
+$ grep "_('Last Seen')" devices.js → 1(新列头)
+```
+
+scp + 刷新:
+- 列头 "Lease" 显示为 "Last Seen"
+- 默认排序还是 name asc(不变)
+- 点 "Last Seen" 列:升序 = 最近活跃(Active / 5s / 1m / 1h / Offline)而不是按 lease 剩余时间
+- 老 localStorage 排序状态(col='lease')仍然生效,只是底层 comparator 已切
+
+#### Backlog 状态更新
+
+`doc/backlog.md` 里 "**ARP-based real Last Seen**(~1-2h)" 这条:**Step 218(rpcd 后端 + formatPresence 消费)+ Step 237(列头对齐 + 排序对齐)= 完整 ship**。**实际 hours**:Step 218 已计入 Round 44,Step 237 ~10min。`doc/backlog.md` 该条可以划掉。
+
+#### 教训
+
+1. **数据 + 标签错位会持续 6 个月**:Step 140(Round 38)→ Step 218(Round 44)→ Step 237(Round 45)。Step 140 把列头从"Last Seen"改成"Lease"是 honest("我现在显示的就是 lease 剩余时间"),Step 218 把数据切到 presence 但忘了再改一次列头。**改数据 source 时必须同时审视所有 surface label**。**Memory 没沉淀过这条,但 Round 45 看到这种 6 个月延迟的错位,值得记**。
+
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 |---|---|---|---|
 | 现代 rgb()/hsl() | 50 处 | **0** | 0 |
