@@ -213,6 +213,15 @@ BEGIN {
     silent_evictions += drop_count
     delete seen_this_poll
     dumps_completed++
+    # Round 44 Step 230: snapshot this-poll deltas → exposed per-host
+    # in JSON; reset for next poll cycle. Widget uses these to render
+    # the Live Competition bars (Round 45 work).
+    delete recent_tx
+    delete recent_rx
+    for (m in recent_tx_thispoll) recent_tx[m] = recent_tx_thispoll[m]
+    for (m in recent_rx_thispoll) recent_rx[m] = recent_rx_thispoll[m]
+    delete recent_tx_thispoll
+    delete recent_rx_thispoll
     write_json()
     mode = ""
     next
@@ -234,18 +243,29 @@ mode == "ndp" && NF >= 2 {
     next
 }
 
-# ─── LANV6 mode: record LAN /64 IPv6 prefixes (Step 228) ─────────────
-# Each line = one LAN IPv6 address. We extract the /64 prefix from it
-# (first 4 colon-separated groups) for is_lan_v6() matching below.
+# ─── LANV6 mode: record LAN /64 IPv6 prefixes (Step 228 + Step 230 fix) ─
+# Each line = one LAN IPv6 address. Extract the first 4 hexgroups as
+# the /64 prefix for is_lan() matching below.
+#
+# Step 228 bug: when address has "::" compression early (e.g.
+# fd7f:dbd9:8bd9::1, where parts after split give [fd7f,dbd9,8bd9,,1]),
+# encountering empty part[4] made the parser bail with `next`, leaving
+# the LAN ULA prefix unrecorded. Step 230 fix: when we hit "::", fill
+# missing groups with "0" up to 4 to reconstruct the /64.
 mode == "lanv6" && NF >= 1 {
     n = split($1, parts, ":")
-    # IPv6 normalised has 8 groups separated by colons. For a /64 we
-    # want the first 4. Handle short forms (with ::) by taking the
-    # first 4 hexgroups before any consecutive colons.
     prefix = ""
     cnt = 0
     for (i = 1; i <= n && cnt < 4; i++) {
-        if (parts[i] == "") next   # encountered "::" — too compact, skip
+        if (parts[i] == "") {
+            # "::" compression — fill remaining slots with "0"
+            # until we have 4 hexgroups
+            while (cnt < 4) {
+                prefix = (cnt == 0) ? "0" : (prefix ":0")
+                cnt++
+            }
+            break
+        }
         prefix = (cnt == 0) ? parts[i] : (prefix ":" parts[i])
         cnt++
     }
@@ -373,6 +393,11 @@ mode == "poll" {
     per_mac_rx[mac] += rx_delta
     per_mac_seen[mac] = systime()
     bytes_credited += tx_delta + rx_delta
+    # Round 44 Step 230: accumulate THIS POLL CYCLE deltas separately
+    # for the Live Competition View widget. recent_tx/rx is reset at
+    # each ENDPOLL, so it represents bytes credited in the last 3 s.
+    recent_tx_thispoll[mac] += tx_delta
+    recent_rx_thispoll[mac] += rx_delta
 }
 
 function is_lan(ip,    parts, oct2, i, cnt, prefix, lower) {
@@ -392,23 +417,35 @@ function is_lan(ip,    parts, oct2, i, cnt, prefix, lower) {
         oct2 = parts[2] + 0
         return (oct2 >= 64 && oct2 <= 127) ? 1 : 0
     }
-    # ─── IPv6 ULA fd00::/8 (Step 228) ──
-    # Unique Local Addresses, sometimes used on LANs in addition to or
-    # instead of ISP-delegated GUA. Always treat as LAN.
+    # ─── IPv6 ULA fc00::/7 (Step 228 + Step 230 fix) ──
+    # Unique Local Addresses, used on LANs in addition to or instead of
+    # ISP-delegated GUA. RFC 4193 mandates fdXX:XXXX:XXXX::/48 form, so
+    # the first hexgroup is always 4 chars long, putting the colon at
+    # position 5. Step 228 erroneously checked position 4 — Tailscale
+    # fd7a: and user LAN fd7f: ULAs were silently dropped from LAN
+    # attribution. Step 230 uses the correct regex.
     lower = tolower(ip)
-    if (substr(lower, 1, 2) == "fd" && substr(lower, 3, 1) ~ /[0-9a-f]/ &&
-        substr(lower, 4, 1) == ":") return 1
-    # ─── IPv6 LAN GUA (Step 228) ──
-    # Match against discovered /64 prefixes from `ip -6 addr show br-lan`.
-    # An IPv6 GUA like 2606:4700:abcd:1234:cafe::1 has prefix
+    if (lower ~ /^fd[0-9a-f][0-9a-f]:/) return 1
+    if (lower ~ /^fc[0-9a-f][0-9a-f]:/) return 1
+    # ─── IPv6 LAN GUA (Step 228 + Step 230 :: fix) ──
+    # Match against discovered /64 prefixes from ip -6 addr show br-lan.
+    # IPv6 GUA like 2606:4700:abcd:1234:cafe::1 has prefix
     # "2606:4700:abcd:1234". If that prefix is in our LAN set, the
     # address belongs to a LAN device (via SLAAC from ISP delegation).
+    # Step 230: handle "::" compression by filling with "0" same as
+    # the lanv6 prefix parser above.
     if (index(lower, ":") > 0) {
         cnt = split(lower, parts, ":")
         prefix = ""
         i_count = 0
         for (i = 1; i <= cnt && i_count < 4; i++) {
-            if (parts[i] == "") return 0   # "::" — too compact, give up
+            if (parts[i] == "") {
+                while (i_count < 4) {
+                    prefix = (i_count == 0) ? "0" : (prefix ":0")
+                    i_count++
+                }
+                break
+            }
             prefix = (i_count == 0) ? parts[i] : (prefix ":" parts[i])
             i_count++
         }
@@ -432,9 +469,16 @@ function write_json(    line, sep, m, ts, macs) {
     sep = ""
     for (m in per_mac_tx) macs[m] = 1
     for (m in per_mac_rx) macs[m] = 1
+    for (m in recent_tx) macs[m] = 1
+    for (m in recent_rx) macs[m] = 1
     for (m in macs) {
-        line = line sprintf("%s\"%s\":{\"rx\":%d,\"tx\":%d,\"last_seen\":%d}",
+        # Round 44 Step 230: include recent_rx/recent_tx (last poll
+        # cycle bytes) for the Live Competition View widget. Widget
+        # uses recent_rx + recent_tx for bar size and percentage.
+        # rx/tx are cumulative since daemon start.
+        line = line sprintf("%s\"%s\":{\"rx\":%d,\"tx\":%d,\"recent_rx\":%d,\"recent_tx\":%d,\"last_seen\":%d}",
             sep, m, per_mac_rx[m] + 0, per_mac_tx[m] + 0,
+            recent_rx[m] + 0, recent_tx[m] + 0,
             per_mac_seen[m] ? per_mac_seen[m] : ts)
         sep = ","
     }
