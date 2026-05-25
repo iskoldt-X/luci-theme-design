@@ -166,6 +166,10 @@ BEGIN {
     bytes_credited = 0
     silent_evictions = 0
     id_reuses = 0
+    # Step 229: diagnostic counters for skipped flow categories
+    intra_lan_skipped = 0     # both sides LAN — noise for WAN-usage widget
+    router_local_skipped = 0  # neither side LAN — dnsmasq/NTP/WireGuard
+    no_mac_skipped = 0        # LAN side but no ARP/NDP entry
     delete in_flight     # flow_id → "orig_b" SUBSEP "repl_b"
     delete ip_to_mac     # IPv4 + IPv6 → MAC (uppercase no colons)
     delete lan_v6_prefixes  # Step 228: known LAN /64 prefixes for IPv6 GUA attribution
@@ -318,26 +322,52 @@ mode == "poll" {
 
     if (delta_orig <= 0 && delta_repl <= 0) next
 
-    # Determine LAN side (RFC 1918 IPv4 heuristic — IPv6 handled
-    # separately below)
+    # Round 44 Step 229: intra-LAN guard. If BOTH src and dst pass
+    # is_lan(), the flow never traverses WAN. Examples discovered on
+    # the user box (2026-05-25):
+    #   - iPhone <-> iPad AirDrop / iCloud cross-device sync
+    #   - Qingping IoT <-> local MQTT broker / Home Assistant
+    #   - Apple TV <-> NAS via DLNA
+    #   - dnsmasq <-> LAN device protocol exchange
+    # Crediting these inflates host totals 4x relative to WAN counter
+    # (Step 228 measured 32x tx over-count from intra-LAN being
+    # attributed as the src device's outgoing traffic). For "who is
+    # using my internet" widget purpose, intra-LAN is noise — skip it.
+    src_is_lan = is_lan(orig_src)
+    dst_is_lan = is_lan(orig_dst)
+    if (src_is_lan && dst_is_lan) {
+        intra_lan_skipped++
+        next
+    }
+    if (!src_is_lan && !dst_is_lan) {
+        # Neither side is LAN — router-internal traffic (dnsmasq upstream
+        # DNS forwarding, NTP, system updates, Tailscale WireGuard tunnel
+        # between router and relay).
+        router_local_skipped++
+        next
+    }
+
+    # Determine LAN side
     lan_ip = ""
     tx_delta = 0; rx_delta = 0
-    if (is_lan(orig_src)) {
+    if (src_is_lan) {
         lan_ip = orig_src
         # orig direction packets went LAN→WAN: orig_b is tx, repl_b is rx
         tx_delta = delta_orig
         rx_delta = delta_repl
-    } else if (is_lan(orig_dst)) {
+    } else {
         lan_ip = orig_dst
         # orig direction WAN→LAN (inbound, e.g. DNAT port-forward):
         # orig_b is rx, repl_b is tx — flipped
         tx_delta = delta_repl
         rx_delta = delta_orig
     }
-    if (lan_ip == "") next  # router-internal or non-LAN flow
 
     mac = ip_to_mac[lan_ip]
-    if (mac == "") next     # no ARP entry, cant attribute
+    if (mac == "") {
+        no_mac_skipped++
+        next
+    }
 
     per_mac_tx[mac] += tx_delta
     per_mac_rx[mac] += rx_delta
@@ -396,6 +426,7 @@ function write_json(    line, sep, m, ts, macs) {
     line = line sprintf("\"dumps_completed\":%d,\"dump_entries\":%d,", dumps_completed, dump_entries)
     line = line sprintf("\"bytes_credited\":%d,\"parse_errors\":0,", bytes_credited)
     line = line sprintf("\"id_reuses\":%d,\"silent_evictions\":%d,", id_reuses, silent_evictions)
+    line = line sprintf("\"intra_lan_skipped\":%d,\"router_local_skipped\":%d,\"no_mac_skipped\":%d,", intra_lan_skipped, router_local_skipped, no_mac_skipped)
     line = line sprintf("\"started\":%d", started_at)
     line = line "},\"hosts\":{"
     sep = ""
