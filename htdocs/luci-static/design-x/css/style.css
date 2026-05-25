@@ -5273,9 +5273,15 @@ td.cbi-button, .cbi-button-apply,
 }
 .node-admin-status-overview #view > .wan-hero         { order: -3; }
 .node-admin-status-overview #view > .design-tile-grid { order: -2; }
-/* LuCI's .cbi-section elements default to order: 0 — they fall between
-   our hero/tiles and our extras (devices/speedtest). */
-.node-admin-status-overview #view > .devices-card     { order: 10; }
+/* LuCI's .cbi-section elements default to order: 0 — Status/Memory/
+   Storage/UPnP/Wireless etc. all share that. Step 233 (Round 45):
+   .devices-card promoted from order:10 (below everything) to order:-1
+   (above all cbi-sections, just below the WAN+tile band). Users open
+   Overview to see "who's on my network" first, not to read system
+   uptime — promoting the Clients card matches that mental model.
+   Speedtest stays at order:11 so it sits at the bottom of the page,
+   in line with its on-demand (not always-needed) nature. */
+.node-admin-status-overview #view > .devices-card     { order: -1; }
 .node-admin-status-overview #view > .speedtest-card   { order: 11; }
 
 /* ═══════════════════════════════════════════════════════════════════════

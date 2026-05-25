@@ -594,7 +594,7 @@ return baseclass.extend({
 			E('div', { 'class': 'devices-head' }, [
 				svgEl('svg', { 'class': 'svg-icon devices-icon', 'aria-hidden': 'true' },
 					svgUse(this.iconBase + '#i-user')),
-				E('span', { 'class': 'devices-title' }, _('LAN Clients')),
+				E('span', { 'class': 'devices-title' }, _('Clients')),
 				E('span', { 'class': 'devices-count', 'id': 'devices-count' }, '')
 			]),
 			E('div', { 'class': 'devices-table' }, [

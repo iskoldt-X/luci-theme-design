@@ -4458,6 +4458,45 @@ Round 45 主轴**重排**为:
 
 Round 45 终态预计 6-8 个 step,**纯加法 + 小修小补**,跟 Round 44 全 daemon-track 形成对比。
 
+## Step 233 — Clients 改名 + 上移到 cbi-section 之上
+
+**时间**:2026-05-25(用户 scp 实测 Step 232 OK 后立即推 Step 233)
+**文件**:
+- `htdocs/luci-static/resources/design-x/devices.js`(card title 文案)
+- `htdocs/luci-static/design-x/css/style.css`(`.devices-card` order 调整)
+
+**做了什么**:
+
+1. **Card title 文案**:`_('LAN Clients')` → `_('Clients')`。一字省去更通用 — 静态 IP 设备 / Tailscale / VPN 客户端都不严格是 "LAN",叫 "Clients" 涵盖面更广,跟 LuCI 26 上游趋势(去掉冗余前缀)一致。
+2. **Order 调整**:`.devices-card { order: 10 }` → `{ order: -1 }`。原来 devices-card 在 LuCI cbi-section(System / Memory / Storage / Network upstream / UPnP / Wireless...)**之下**。Step 233 提升到 cbi-section **之上**(只在 wan-hero `-3` 和 design-tile-grid `-2` 之下),所以 Overview 顶部依次:WAN Hero → CPU/Mem/Net/Temp tile band → **Clients** → System / UPnP / 其他 cbi-sections。
+3. **Speedtest 不动**:仍然 `order: 11`,在窄屏下沉到底部,在 1280px+ 媒体查询里 Round 44 Step 195 把它强制 pin 到右上 col 3 row 1(grid-column / grid-row 覆盖)。
+
+#### 用户原话的解释
+
+用户说"排到Active UPnP IGD & PCP/NAT-PMP Port Maps 上面"。直读是"直接放在 UPnP 上方一行";但 cbi-section 的 cfg-ID 不稳定(2026-05-22 audit §1.1 死规则就是栽在这上面),没法用 selector 精准定位 UPnP。**实际做法**:把 devices-card 提升到所有 cbi-section 之上 — UPnP 是 cbi-section,自然就在 devices-card 之下了,**包含且超过** 用户要求。**额外副作用**:System / Memory / Storage 也在 devices-card 之下。**判断**:这是合理的 UX 提升(用户开 Overview 想看的是"现在谁在我网里",不是 uptime)。如果用户后续想精细控制,iterate。
+
+#### 没动的东西
+
+- 注释里的 "LAN Clients" 历史引用(devices.js:160/268/425/607 + style.css:1764/1783/2107/3040/3540 + NOTICE)— 这些描述的是 Round 40 当时的 card,不是当前 live 文案。**改 1 个 live string 比改 8 处历史注释干净**。
+- `.devices-card { grid-column: 1 / -1 }`(Step 147 全宽规则)不变。
+- 移动端 / 1280px+ 媒体查询不动 — order 调整不影响 row/col 显式 pin。
+- speedtest order / pos 不动。
+
+#### Break change(可见)
+
+- Overview 上 "LAN Clients" 标题变 "Clients"。
+- Clients 卡从 UPnP/System/Memory 之下,提升到这些之上。这是**用户主动要求的重排**。
+
+#### 验证
+
+```bash
+$ node --check htdocs/luci-static/resources/design-x/devices.js  ✅
+$ grep -c "order: -1\|order: 11" htdocs/luci-static/design-x/css/style.css  (确认两个 order 都在)
+$ grep -c "_('LAN Clients')" htdocs/luci-static/resources/design-x/devices.js  → 0
+$ grep -c "_('Clients')" htdocs/luci-static/resources/design-x/devices.js  → 1
+```
+
+scp 测试时刷新 Overview 应该看到:Clients 卡跳到 UPnP/System 之上,而且标题缩成 "Clients"。
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 |---|---|---|---|
