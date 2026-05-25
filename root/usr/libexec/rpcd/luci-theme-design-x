@@ -61,10 +61,19 @@ ensure_table() {
 # After regenerate, the on-disk skeleton matches kernel; reboot replays
 # the same set membership via fw4's normal ruleset-post include path.
 regenerate_state_file() {
-	local elems
-	elems=$(nft -j list set inet design_x blocked_macs 2>/dev/null \
-		| jsonfilter -e '@.nftables[*].set.elem[*]' 2>/dev/null \
-		| paste -sd, -)
+	# Step 242c (Round 46 hotfix): build comma-separated elements list
+	# WITHOUT `paste` — that's a GNU coreutils binary not present in
+	# BusyBox / OpenWrt default install. Previously `paste -sd, -`
+	# silently failed (ash: paste: not found), leaving `elems` empty
+	# and the regenerated file with no `elements = { ... }` clause —
+	# blocks survived in kernel but were lost on fw4 reload.
+	# Pure POSIX shell loop is BusyBox-safe.
+	local elems="" sep="" m
+	for m in $(nft -j list set inet design_x blocked_macs 2>/dev/null \
+		| jsonfilter -e '@.nftables[*].set.elem[*]' 2>/dev/null); do
+		elems="$elems$sep$m"
+		sep=", "
+	done
 
 	local elems_clause=""
 	[ -n "$elems" ] && elems_clause="

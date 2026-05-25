@@ -5325,6 +5325,88 @@ scp + 用户重跑 #3 应该看到每个 chain 里 rule 恰好 1 份(不再翻�
 
 **这条值得 memory 沉淀吗**?可能值得 — 第一次看到这个 quirk 就掉坑了。但是 fw4 reload incremental append 是 nft 的标准行为,**Memory 沉淀过的人**会知道 — 加进**已经存在的** `verify-first-implement-second` memory 文件作为示例就够了。下一个 step(243 verify pass 之后)顺手补一下 memory。
 
+### Step 242c — hotfix: BusyBox 缺 `paste`,silent failure 致 set 丢
+
+**时间**:2026-05-25(Step 242b 同日重测发现)
+**文件**:
+- `root/usr/libexec/rpcd/luci-theme-design-x` 的 `regenerate_state_file()`(`paste -sd, -` → 纯 shell for 循环)
+- `~/.claude/.../memory/verify-first-implement-second.md`(加 Round 46 sub-lessons 3 条)
+
+**事件起源**:Step 242b deploy 之后用户重测,**Check 1 + 2 PASS**(rules 1 份 + 不翻倍),但 **Check 3 set 丢**:`block-mac` 返回 ok,kernel set 有 MAC,但 `fw4 reload` 之后 set **空了**。
+
+**诊断路径**:跑了 4 步 diagnostic 抓出真凶。
+
+```
+=== 1. nft -j raw output ===
+{"nftables":[{"metainfo":...}, {"set":{..., "elem":["aa:11:22:33:44:55"]}}]}      ← 内核 set 含 MAC ✓
+=== 2. jsonfilter 抽 elem ===
+aa:11:22:33:44:55                                                                  ← jsonfilter 抽到了 ✓
+=== 3. paste 后 ===
+ash: paste: not found                                                              ← 这里 ❌
+=== 4. 文件实际内容 ===
+table inet design_x {
+    set blocked_macs {
+        type ether_addr                                                             ← 无 elements 行 ❌
+    }
+    ...
+```
+
+**根因**:`paste` **不在 BusyBox 默认里**。OpenWrt 没装 GNU coreutils,我的 `regenerate_state_file` 用了 `paste -sd, -` 把多行 MAC 合并成 comma-separated。**paste 报 "not found" 但 `elems=$(... | paste ...)` 子 shell 没让 caller 报错**,`elems` 静默变空字符串。
+
+```sh
+[ -n "$elems" ] && elems_clause="elements = { $elems }"
+```
+
+空字符串 → `elems_clause` 也空 → heredoc 渲染的文件无 `elements =` 行 → fw4 reload 时 atomic-replace prelude 工作但**重新创建的 set 没 elements 子句** → kernel set 空。
+
+**双重 silent failure**:
+1. `paste` 找不到 → 子 shell 命令失败,但 `$(...)` 只看 exit code 用法不严格,失败被吞
+2. `[ -n "$elems" ]` 没有 fallback / log,直接走 empty 分支
+3. handler 返回 `{"ok":true}` 因为 `nft add element` 之前已经成功
+
+**ubus 接口看起来正常,但持久化破裂**。**这是 silent failure 的经典场景**:无 error 上抛,功能"半 work"。
+
+#### 修法(纯 POSIX shell 循环,zero 外部 dep)
+
+```sh
+local elems="" sep="" m
+for m in $(nft -j list set inet design_x blocked_macs 2>/dev/null \
+    | jsonfilter -e '@.nftables[*].set.elem[*]' 2>/dev/null); do
+    elems="$elems$sep$m"
+    sep=", "
+done
+```
+
+`nft -j` + `jsonfilter` 都是 BusyBox 兼容的(nftables 包 + libubox jsonfilter)。`for` 循环 + 字符串拼接是 100% POSIX。
+
+#### Memory 沉淀(立即)
+
+`verify-first-implement-second` 加 Round 46 sub-lessons 3 条:
+
+1. **Read the references of verified facts, not just headlines**(Step 242a 教训)
+2. **nft include semantics are append, not replace**(Step 242b 教训)
+3. **OpenWrt is BusyBox-only; don't assume GNU coreutils**(本 step 教训) — 附 BusyBox-safe 工具清单 + "shell pipeline 吞 command-not-found" 子规则
+
+这一份 memory 现在是 Round 46 全过程的活教科书。**未来开 OpenWrt shell handler 之前必读**。
+
+#### 验证
+
+scp + 重测预期:
+- `regenerate_state_file()` 现在能正确写入 `elements = { ... }` 行
+- block-mac → fw4 reload → set 保留 MAC(Check 3 该 PASS)
+- 持久化最终 work
+
+#### Step 242 总览(a + b + c 收尾)
+
+| Hotfix | 修了什么 | 教训 |
+|---|---|---|
+| Step 242 | (initial ship)| 启动 verify-first 工作流 |
+| Step 242a | table-post/ → ruleset-post/ | 引用要 read references,看 README |
+| Step 242b | atomic-replace prelude(防 rule 翻倍)| nft include 是 append 不是 replace |
+| Step 242c | paste → for loop | BusyBox 没 GNU paste;pipeline 吞错 |
+
+**3 个 hotfix 累计 ~30 min。对比若是没有 verify-first 工作流直接 ship UI,这些坑会在 Step 243 用户验证 Block 按钮时全部 surface,bug-fix 路径会非常痛苦**(UI 已 commit、用户期待 Block 按钮 work、回退牵涉多文件)。**Verify-first ROI 在 Round 46 第一次实战 = 救命级**。
+
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 
