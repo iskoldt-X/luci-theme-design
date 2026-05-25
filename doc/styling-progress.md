@@ -4540,6 +4540,60 @@ scp + 刷新后:展开 iPhone / Mac 等设备应该看到多个 v6 地址(包括
 2. `getHostHints` 返回的 MAC 是 lowercase + 冒号格式(`aa:bb:cc:dd:ee:ff`)。devices.js 全部用 UPPERCASE 比较,**必须 toUpperCase 后存** — Step 234 的 hintsByMac 映射做的就是这件事。
 3. host-hints 不是实时的 — LuCI 内部 cache 几秒。但 v6 地址变化频率本来就低(SLAAC 临时地址几小时换一次),不需要每次刷新都重拉。
 
+## Step 235 — Column header click-to-sort
+
+**时间**:2026-05-25(Step 234 同批)
+**文件**:
+- `htdocs/luci-static/resources/design-x/devices.js`(SORT_COMPARATORS / sortState 持久化 / buildHeaderCells helper / toggleSort / updateHeaderIndicators)
+- `htdocs/luci-static/design-x/css/features.css`(`.devices-col-sortable` + `.devices-col-arrow` 样式)
+
+**做了什么**:
+
+1. **模块级 SORT_COMPARATORS**:`name` / `ip` / `lease` 三个比较函数。**name** 保留 "named first" 旧默认 + tie-break localCompare 小写。**ip** 按 octet 数字段排序(避免 `1.10` 排在 `1.2` 前面的字典序坑)。**lease** 静态租期(`expires ≤ 0`)统一当 `Infinity`,降序时浮顶,升序时沉底 — 大小相同的静态行不会因方向乱跳。
+2. **`SORT_STORAGE_KEY = 'design-device-sort-v1'`** + `loadSortState()` / `saveSortState(s)`。**load 时 schema 校验**(col 必须是已知 comparator key,dir 必须是 'asc'/'desc'),坏数据回 default `{ col: 'name', dir: 'asc' }`。
+3. **`buildHeaderCells()` helper** 返回 6 个 `<span>`。Device / IP / Lease 通过 `headerCell()` 加 `role="button" tabindex="0"` + `aria-sort` + click + keydown(Enter / Space)。MAC + Signal 仍是普通 span。
+4. **`headerCell(col, label, className)`** — active 时加 `.active` class + 显示 ↑/↓ arrow span;inactive 时 arrow span 仍占位但内容空(8px 宽,防止切换时整行抖动)。
+5. **`toggleSort(col)`**:同列翻 dir,异列重置 asc。`saveSortState()` 立即持久化。`this._lastLeases` 缓存上次 fetch,render 不用 refetch。
+6. **`updateHeaderIndicators()`**:render 末尾调用,重建 thead 内容 — active class + arrow 跟 sortState 同步。
+7. **`render()` 替换旧 sort**:用 `SORT_COMPARATORS[this.sortState.col]` dispatch,desc 时 negate 比较结果。
+8. **`__init__`** 加 `this.sortState = loadSortState()` + `this._lastLeases = null`。
+9. **CSS**:`.devices-col-sortable` cursor pointer + 4px gap inline-flex + 2px padding(用负 margin 抵消,不影响 cell text-align)+ hover bg + focus-visible 外环 + `.active` accent 色。`.devices-col-arrow` 10px 行内字号,8px 固定宽度。
+
+#### 没动的东西
+
+- 默认 sort 行为(name asc + named first)— 跟 Round 0-44 一致,**新装/首次打开看到的顺序不变**。只有用户点击 header 才进入新状态。
+- MAC + Signal 列不可点 — MAC 字典序排没什么 UX 价值,Signal 大量 "—" 行会乱清。
+- Mobile 640px 以下 thead `display: none`(features.css 1691),sortable 在窄屏自然隐藏 — 不需要特殊 fallback。
+- 列布局 / `grid-template-columns` 不变。
+- `customNames` rename 之后排序立即反映(name comparator 优先取 customNames)。
+
+#### Break change(可见)
+
+- 三个列头(Device / IP / Lease)hover 时背景变亮 + cursor 变 pointer。
+- 点击 header 即时排序(无网络往返)+ 出现 ↑ / ↓ arrow + 文字变 accent 色。再点同列翻向。点别列重置 asc。
+- 排序状态跨刷新 / 跨会话保持(localStorage)。
+
+#### 验证
+
+```bash
+$ node --check htdocs/luci-static/resources/design-x/devices.js  ✅
+$ wc -l devices.js  → 1197 行(+74 vs Step 234 的 1123)
+$ wc -l features.css  → 2094 行(+33 vs Step 234)
+```
+
+scp + 刷新:
+- 默认 Clients 卡列顺序不变。
+- 点 "IP" → 按 IP 数字段升序;再点 "IP" → 降序;arrow 切换 ↑/↓。
+- 点 "Lease" → 按剩余时间升序,静态租期集中底部。
+- Tab 到 IP header → Enter → 触发排序(键盘可访问)。
+- 刷新页面 → 排序保留。
+
+#### 教训预存
+
+1. **比较函数的 tie-break 策略**:`lease` 全静态时返回 0 触发 V8/SpiderMonkey 的 "unstable sort fallback" — Chrome 70+ / Firefox 没问题(stable),但**避免 sort 不稳定**还是要给定 tie-break,例如尾部加 MAC 比较。**Step 235 没加** — 假设静态行少,visual jitter 可接受。如果用户报告"排序后顺序变",加 MAC tie-break。
+2. **inline-flex + text-align 兼容**:cell 上 `text-align: right` 对 `display: inline-flex` 元素仍有效(把整个 inline-flex 推到右),保留了 row-reverse 不需要。看起来反直觉但确实工作。
+3. **`role="button" tabindex="0"` 是 ARIA pattern 的"button on a span"组合**,**必须配合 keydown 监 Enter/Space**,光 click 不够,否则键盘用户排不了序。WCAG 2.1 §2.1.1 必要项。
+
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 |---|---|---|---|
 | 现代 rgb()/hsl() | 50 处 | **0** | 0 |

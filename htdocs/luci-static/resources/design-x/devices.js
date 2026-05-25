@@ -51,7 +51,53 @@ function svgUse(href) {
 //                                              uci.qos integration)
 // ─────────────────────────────────────────────────────────────────────────────
 
-var STORAGE_KEY = 'design-device-names-v1';
+var STORAGE_KEY      = 'design-device-names-v1';
+var SORT_STORAGE_KEY = 'design-device-sort-v1';  // Step 235
+
+// Step 235 (Round 45) — comparators for header click-to-sort.
+// Returned numbers follow Array.prototype.sort convention; the caller
+// negates for descending order. `name` carries the legacy "named first"
+// rule so the default sort matches every prior release; `ip` is segment-
+// numeric (192.168.1.10 sorts AFTER 192.168.1.2, not before); `lease`
+// treats static leases as "expires at infinity" → bottom of ascending,
+// top of descending. Static-or-missing rows clump together regardless
+// of direction, which is what the user wants.
+var SORT_COMPARATORS = {
+	name: function (a, b, customNames) {
+		function nameOf(l) {
+			var mac = (l.macaddr || l.mac || '').toUpperCase();
+			return ((customNames && customNames[mac]) || l.hostname || '').toLowerCase();
+		}
+		var na = nameOf(a), nb = nameOf(b);
+		if (na && !nb) return -1;
+		if (!na && nb) return 1;
+		return na.localeCompare(nb);
+	},
+	ip: function (a, b) {
+		function key(ip) {
+			if (!ip) return [999, 999, 999, 999];
+			var p = String(ip).split('.');
+			return [
+				parseInt(p[0], 10) || 0,
+				parseInt(p[1], 10) || 0,
+				parseInt(p[2], 10) || 0,
+				parseInt(p[3], 10) || 0
+			];
+		}
+		var ka = key(a.ipaddr), kb = key(b.ipaddr);
+		for (var i = 0; i < 4; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i];
+		return 0;
+	},
+	lease: function (a, b) {
+		// lease.expires is REMAINING seconds (Step 140). ≤0 = static.
+		var ea = (a.expires > 0) ? a.expires : Infinity;
+		var eb = (b.expires > 0) ? b.expires : Infinity;
+		if (ea === Infinity && eb === Infinity) return 0;
+		if (ea === Infinity) return 1;
+		if (eb === Infinity) return -1;
+		return ea - eb;
+	}
+};
 
 // ── Type inference by hostname keyword ────────────────────────────────────────
 // First match wins. Patterns are case-insensitive regex source strings.
@@ -396,6 +442,23 @@ function saveCustomNames(map) {
 	catch (e) { /* quota / disabled — fail silent */ }
 }
 
+// Step 235 — sort-state persistence. Schema validated on load so an
+// older / corrupted payload reverts to defaults instead of throwing.
+function loadSortState() {
+	try {
+		var raw = localStorage.getItem(SORT_STORAGE_KEY);
+		var s = raw ? JSON.parse(raw) : null;
+		if (s && SORT_COMPARATORS[s.col] && (s.dir === 'asc' || s.dir === 'desc')) {
+			return s;
+		}
+	} catch (e) { /* fall through */ }
+	return { col: 'name', dir: 'asc' };
+}
+function saveSortState(s) {
+	try { localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(s)); }
+	catch (e) { /* fail silent */ }
+}
+
 function toastSafe(type, msg) {
 	if (window.toast && window.toast[type]) return window.toast[type](msg);
 	if (type === 'error' && console && console.error) console.error(msg);
@@ -431,6 +494,8 @@ return baseclass.extend({
 		this.stations     = {};                   // mac → { iface, info, station } (Step 94)
 		this.presence     = {};                   // mac-nocolon → { via, iface, state, inactive_ms? } (Step 218)
 		this.hintsByMac   = {};                   // MAC-with-colons → host-hints entry (Step 234)
+		this.sortState    = loadSortState();      // { col, dir } (Step 235)
+		this._lastLeases  = null;                 // cache last fetch so toggleSort can re-render without refetch
 		// Round 44 Step 204: kick off Wireshark manuf OUI DB load + decompress
 		// as early as possible. ~332 KB gzip fetch + DecompressionStream
 		// runs in parallel with the rest of Overview rendering; by the
@@ -610,19 +675,10 @@ return baseclass.extend({
 				E('span', { 'class': 'devices-count', 'id': 'devices-count' }, '')
 			]),
 			E('div', { 'class': 'devices-table' }, [
-				E('div', { 'class': 'devices-thead' }, [
-					// First label spans icon + name columns (see CSS rule
-					// .devices-col-name { grid-column: 1 / 3 })
-					E('span', { 'class': 'devices-col-name' }, _('Device')),
-					E('span', { 'class': 'devices-col-ip' },   _('IP')),
-					// Step 148 (Round 40):MAC column promoted from
-					// detail-only to main-row visibility (LAN Clients is
-					// now the canonical view, see Step 149).
-					E('span', { 'class': 'devices-col-mac' },  _('MAC')),
-					E('span', { 'class': 'devices-col-sig' },  _('Signal')),
-					E('span', { 'class': 'devices-col-seen' }, _('Lease')),
-					E('span', { 'class': 'devices-col-chev' }, '')
-				]),
+				// Step 235 (Round 45): thead cells built via helper so
+				// click-to-sort + arrow indicator + active class can be
+				// rebuilt on toggleSort without DOM surgery.
+				E('div', { 'class': 'devices-thead' }, this.buildHeaderCells()),
 				E('div', { 'class': 'devices-rows', 'id': 'devices-rows' }, [
 					E('div', { 'class': 'devices-empty' }, _('Loading...'))
 				])
@@ -677,6 +733,7 @@ return baseclass.extend({
 					self.hintsByMac[k.toUpperCase()] = hintsData[k];
 				});
 			}
+			self._lastLeases = leases;
 			self.render(leases);
 		});
 	},
@@ -694,13 +751,13 @@ return baseclass.extend({
 		});
 		var unique = Object.keys(byMac).map(function (m) { return byMac[m]; });
 
-		// Sort: hostname first (named clients), then by IP
+		// Step 235 (Round 45) — sort by current sortState. Comparators live
+		// at module top; this here only dispatches and negates for desc.
+		var cmp = SORT_COMPARATORS[this.sortState.col] || SORT_COMPARATORS.name;
+		var self = this;
 		unique.sort(function (a, b) {
-			var ha = a.hostname || '';
-			var hb = b.hostname || '';
-			if (ha && !hb) return -1;
-			if (!ha && hb) return 1;
-			return (a.ipaddr || '').localeCompare(b.ipaddr || '');
+			var r = cmp(a, b, self.customNames);
+			return self.sortState.dir === 'desc' ? -r : r;
 		});
 
 		countEl.textContent = unique.length ? '(' + unique.length + ')' : '';
@@ -714,10 +771,77 @@ return baseclass.extend({
 		// Step 44: build all rows ONCE with detail embedded, then toggle a
 		// class on click — no DOM rebuild on every expand.
 		rowsEl.innerHTML = '';
-		var self = this;
 		unique.forEach(function (l) {
 			rowsEl.appendChild(self.buildRow(l));
 		});
+
+		// Step 235: refresh header indicators (arrows / active class)
+		// in case sortState changed since last render.
+		this.updateHeaderIndicators();
+	},
+
+	// Step 235 — clickable column headers. Three columns sortable:
+	// name / ip / lease (MAC + Signal are not sortable — Signal's
+	// "—" rows would clump in any direction, and MAC string sort
+	// has no user value vs. the existing name+OUI grouping).
+	buildHeaderCells: function () {
+		return [
+			// Name spans icon + name columns (grid-column: 1/3 in CSS).
+			this.headerCell('name',  _('Device'), 'devices-col-name'),
+			this.headerCell('ip',    _('IP'),     'devices-col-ip'),
+			// MAC column promoted main-row in Step 148; left non-sortable.
+			E('span', { 'class': 'devices-col-mac' }, _('MAC')),
+			E('span', { 'class': 'devices-col-sig' }, _('Signal')),
+			this.headerCell('lease', _('Lease'),  'devices-col-seen'),
+			E('span', { 'class': 'devices-col-chev' }, '')
+		];
+	},
+
+	headerCell: function (col, label, className) {
+		var self = this;
+		var isActive = this.sortState.col === col;
+		var arrow    = isActive ? (this.sortState.dir === 'asc' ? '↑' : '↓') : '';
+		var classes  = className + ' devices-col-sortable' + (isActive ? ' active' : '');
+		return E('span', {
+			'class':       classes,
+			'role':        'button',
+			'tabindex':    '0',
+			'aria-sort':   isActive ? (this.sortState.dir === 'asc' ? 'ascending' : 'descending') : 'none',
+			'data-col':    col,
+			'click':       function () { self.toggleSort(col); },
+			'keydown':     function (e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					self.toggleSort(col);
+				}
+			}
+		}, [
+			E('span', { 'class': 'devices-col-label' }, label),
+			E('span', { 'class': 'devices-col-arrow' }, arrow)
+		]);
+	},
+
+	toggleSort: function (col) {
+		if (this.sortState.col === col) {
+			this.sortState = { col: col, dir: this.sortState.dir === 'asc' ? 'desc' : 'asc' };
+		} else {
+			this.sortState = { col: col, dir: 'asc' };
+		}
+		saveSortState(this.sortState);
+		// Re-render from cached leases — instant, no network round-trip.
+		// Header gets rebuilt inside render() via updateHeaderIndicators.
+		if (this._lastLeases) this.render(this._lastLeases);
+	},
+
+	// Rewrite the thead row in place to refresh active class + arrow.
+	// Called from render() so click → toggleSort → render → indicator
+	// update happens atomically with row re-sort.
+	updateHeaderIndicators: function () {
+		var theadEl = document.querySelector('.devices-thead');
+		if (!theadEl) return;
+		theadEl.innerHTML = '';
+		var self = this;
+		this.buildHeaderCells().forEach(function (c) { theadEl.appendChild(c); });
 	},
 
 	buildRow: function (l) {

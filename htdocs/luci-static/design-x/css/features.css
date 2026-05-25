@@ -1439,6 +1439,40 @@
 .devices-col-sig  {                        text-align: left;  }  /* pill is left-anchored within its cell */
 .devices-col-seen {                        text-align: right; }  /* lease "10h 33m ↓" is right-anchored */
 
+/* Step 235 (Round 45) — clickable sortable column headers.
+   .devices-col-sortable is applied to Device / IP / Lease (MAC + Signal
+   stay plain spans). Cursor + focus ring make affordance obvious; the
+   arrow span sits inline-flex alongside the label so widths don't jump
+   when the active column changes. .active gets accent color + bolder
+   weight so the user sees what's currently driving the order. */
+.devices-col-sortable {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px;
+    margin: -2px -4px;          /* keep cell text-align anchoring intact */
+    border-radius: var(--radius-sm);
+    transition:
+        background var(--motion-fast) var(--ease-out),
+        color      var(--motion-fast) var(--ease-out);
+}
+.devices-col-sortable:hover  { background: var(--color-surface-2); color: var(--color-text); }
+.devices-col-sortable:focus-visible {
+    outline: 2px solid var(--color-accent-500);
+    outline-offset: 1px;
+}
+.devices-col-sortable.active { color: var(--color-accent-500); }
+
+.devices-col-arrow {
+    font-size: 10px;
+    line-height: 1;
+    width: 8px;                 /* reserves space so non-active doesn't shift */
+    text-align: center;
+    color: inherit;
+}
+
 .devices-rows {
     background: var(--color-surface-0);
 }
