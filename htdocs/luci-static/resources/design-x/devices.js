@@ -409,6 +409,17 @@ var getDHCPLeases = L.rpc.declare({
 	expect: { '': {} }
 });
 
+// Step 234 (Round 45) — luci-rpc.getHostHints returns a per-MAC map
+// including `ip6addrs` (array of all observed v6 addresses). DHCP6
+// leases only carry one (the one currently assigned by dnsmasq); hints
+// aggregates from /proc/net/ipv6_route + NDP table + DHCP6, so a host
+// with SLAAC + DHCPv6 + link-local will all show up.
+var getHostHints = L.rpc.declare({
+	object: 'luci-rpc',
+	method: 'getHostHints',
+	expect: { '': {} }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 return baseclass.extend({
@@ -419,6 +430,7 @@ return baseclass.extend({
 		this.customNames  = loadCustomNames();    // mac → string
 		this.stations     = {};                   // mac → { iface, info, station } (Step 94)
 		this.presence     = {};                   // mac-nocolon → { via, iface, state, inactive_ms? } (Step 218)
+		this.hintsByMac   = {};                   // MAC-with-colons → host-hints entry (Step 234)
 		// Round 44 Step 204: kick off Wireshark manuf OUI DB load + decompress
 		// as early as possible. ~332 KB gzip fetch + DecompressionStream
 		// runs in parallel with the rest of Overview rendering; by the
@@ -630,11 +642,13 @@ return baseclass.extend({
 		Promise.all([
 			getDHCPLeases().then(function (d) { return d; }, function () { return null; }),
 			fetchWifiStations(),
-			fetchHostPresence()
+			fetchHostPresence(),
+			getHostHints().then(function (d) { return d; }, function () { return null; })
 		]).then(function (results) {
 			var leasesData = results[0];
 			var wifiData   = results[1];
 			var presence   = results[2];
+			var hintsData  = results[3];
 
 			if (!leasesData) {
 				var rowsEl = document.getElementById('devices-rows');
@@ -653,6 +667,16 @@ return baseclass.extend({
 			// null. Reduce to just the inner map so buildRow can look up
 			// by MAC directly. Null-safe: empty object if absent.
 			self.presence = (presence && presence.hosts) ? presence.hosts : {};
+			// Step 234 — host-hints is keyed by MAC (lowercase with colons).
+			// Normalise to UPPERCASE for consistency with everywhere else.
+			// Schema (LuCI 26): { "aa:bb:cc:dd:ee:ff": { name, ipv4, ipv6,
+			//                     ip6addrs:[...], ip4addr, ipv6s:[...], ... } }
+			self.hintsByMac = {};
+			if (hintsData) {
+				Object.keys(hintsData).forEach(function (k) {
+					self.hintsByMac[k.toUpperCase()] = hintsData[k];
+				});
+			}
 			self.render(leases);
 		});
 	},
@@ -847,6 +871,26 @@ return baseclass.extend({
 			vendorCell,
 			this.detailCell(_('Type'),       type.label)
 		];
+
+		// Step 234 (Round 45) — IPv6 addresses, one line per address.
+		// getHostHints aggregates SLAAC + DHCPv6 + link-local + NDP-seen
+		// addresses per MAC; modern dual-stack hosts commonly hold 2-3.
+		// dhcp6_leases only carries the dnsmasq-assigned one. Fall back to
+		// the singular `ipv6` field if `ip6addrs` array isn't present
+		// (older LuCI builds).
+		var hint = this.hintsByMac[mac];
+		var v6Addrs = (hint && hint.ip6addrs && hint.ip6addrs.length) ? hint.ip6addrs
+		            : (hint && hint.ipv6) ? [hint.ipv6]
+		            : [];
+		if (v6Addrs.length) {
+			var v6Lines = v6Addrs.map(function (a) {
+				return E('div', { 'class': 'devices-detail-ipv6-line' }, a);
+			});
+			cells.push(E('div', { 'class': 'devices-detail-cell devices-detail-cell-ipv6' }, [
+				E('dt', {}, _('IPv6')),
+				E('dd', { 'class': 'mono' }, v6Lines)
+			]));
+		}
 
 		if (wifi) {
 			cells.push(this.detailCell(_('Connection'),

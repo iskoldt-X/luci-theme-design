@@ -4498,6 +4498,48 @@ $ grep -c "_('Clients')" htdocs/luci-static/resources/design-x/devices.js  → 1
 
 scp 测试时刷新 Overview 应该看到:Clients 卡跳到 UPnP/System 之上,而且标题缩成 "Clients"。
 
+## Step 234 — IPv6 addresses in expand detail
+
+**时间**:2026-05-25(Step 233 同批)
+**文件**:
+- `htdocs/luci-static/resources/design-x/devices.js`(+getHostHints rpc / hintsByMac 字段 / detailCellsFor 加 IPv6 cell)
+- `htdocs/luci-static/design-x/css/features.css`(+`.devices-detail-cell-ipv6` 跨 2 列 + `.devices-detail-ipv6-line` 行间)
+
+**做了什么**:
+
+1. **新 rpc declare** `getHostHints`(`luci-rpc.getHostHints`)。返回 `{ "aa:bb:cc:dd:ee:ff": { name, ipv4, ipv6, ip6addrs:[…], … } }`。**LuCI 26 内部已聚合 SLAAC global / DHCPv6 / link-local / ULA / NDP-seen**,比 `dhcp6_leases[].ip6addr`(只 dnsmasq 分的)全多了。
+2. **Promise.all 从 3 → 4 个 fetch**(加 getHostHints)。404/失败都软处理(`.then(d=>d, ()=>null)` ),不影响 leases / wifi / presence 主流程。
+3. **`self.hintsByMac`** 在 __init__ 里初始化空 + 每次 refresh 重建(MAC 统一 UPPERCASE)。
+4. **`detailCellsFor` 新增 IPv6 cell**(条件渲染):优先 `hint.ip6addrs[]`(数组),fallback `hint.ipv6`(单字符串包成数组),都没有就不出 cell。每个地址一行 `<div class="devices-detail-ipv6-line">`,虚线分隔。
+5. **CSS**:`.devices-detail-cell-ipv6 { grid-column: span 2 }` 让长地址不挤;640px 以下回退单列;`.devices-detail-ipv6-line` 加 1.35 行高 + 1 px 上下 padding + 行间 dashed border。
+
+#### 没动的东西
+
+- `dhcp_leases` / `dhcp6_leases` 合并/dedup 逻辑(byMac 取第一个)不变 — IPv6 信息现在来自 hostHints,不再依赖 dhcp6_leases 那条孤立路径。
+- "Full IP" cell 仍然显示 IPv4(`lease.ipaddr`)。这是用户预期的"主 IP"。IPv6 单独出 cell,不替换。
+- Vendor / Type / Connection / Lease expires cells 顺序不变。
+- 没有 host-hints(getHostHints 失败/路由器太老)时,IPv6 cell 直接不出 — 不留空 placeholder。
+
+#### Break change(可见)
+
+- 展开任意 dual-stack 客户端,detail panel 多一行 "IPv6"(可能多到 4 行 v6 地址,每行虚线分隔)。
+- 单栈纯 IPv4 客户端:不显示 IPv6 cell(条件 v6Addrs.length)。
+
+#### 验证
+
+```bash
+$ node --check htdocs/luci-static/resources/design-x/devices.js  ✅
+$ grep getHostHints htdocs/luci-static/resources/design-x/devices.js  → 3 hits (declare + call + comment)
+```
+
+scp + 刷新后:展开 iPhone / Mac 等设备应该看到多个 v6 地址(包括 link-local `fe80::…` + ULA `fd…` + global `2001:…` / Tailscale `fd7a:…`)。
+
+#### 教训预存
+
+1. `getHostHints` 跟 `getDHCPLeases` 是**不同的 ubus method**,但都在 `luci-rpc` 对象下。LuCI ACL 默认就授权 LuCI session 读这俩 — 不需要改 `luci-theme-design-x.json`。
+2. `getHostHints` 返回的 MAC 是 lowercase + 冒号格式(`aa:bb:cc:dd:ee:ff`)。devices.js 全部用 UPPERCASE 比较,**必须 toUpperCase 后存** — Step 234 的 hintsByMac 映射做的就是这件事。
+3. host-hints 不是实时的 — LuCI 内部 cache 几秒。但 v6 地址变化频率本来就低(SLAAC 临时地址几小时换一次),不需要每次刷新都重拉。
+
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 |---|---|---|---|
 | 现代 rgb()/hsl() | 50 处 | **0** | 0 |

@@ -1645,6 +1645,28 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* Step 234 (Round 45) — IPv6 detail cell. getHostHints typically returns
+   2-4 addresses per dual-stack host (SLAAC global, DHCPv6 global, link-
+   local, ULA). Each emitted as its own line; cell spans 2 grid tracks
+   when room allows so long addresses don't force `word-break: break-all`
+   on every line. */
+.devices-detail-cell-ipv6 {
+    grid-column: span 2;
+}
+.devices-detail-ipv6-line {
+    line-height: 1.35;
+    padding: 1px 0;
+}
+.devices-detail-ipv6-line + .devices-detail-ipv6-line {
+    border-top: 1px dashed var(--color-border-subtle);
+}
+
+/* Narrow viewports: drop back to single track so the cell doesn't
+   strand 2 narrow columns. */
+@media (max-width: 640px) {
+    .devices-detail-cell-ipv6 { grid-column: span 1; }
+}
+
 /* Action buttons row — same left-padding alignment as detail grid */
 .devices-actions {
     display: flex;
