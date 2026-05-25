@@ -118,9 +118,39 @@ logger -t design-host-acct "starting (Tier 0, conntrack-poll, PID $$)"
 # Mux: arp refresh + conntrack snapshot in one stream → single awk
 (
     while sleep "$POLL_INTERVAL"; do
+        # ─── ARP (IPv4) ──
         echo "===ARP==="
         awk 'NR>1 && $4 != "00:00:00:00:00:00" { print $1 " " toupper($4) }' \
             /proc/net/arp 2>/dev/null || true
+
+        # ─── IPv6 neighbor (Step 228) ──
+        # /proc/net/ipv6_neigh isnt populated as text on stock kernels;
+        # `ip -6 neigh show` is the universal interface. Filter REACHABLE
+        # and STALE (kernel still believes entry valid). Format:
+        #   <ipv6> dev <iface> lladdr <mac> <state>
+        echo "===NDP==="
+        ip -6 neigh show 2>/dev/null | awk '
+            /lladdr/ && ($NF=="REACHABLE" || $NF=="STALE" || $NF=="DELAY" || $NF=="PROBE") {
+                for (i=1; i<=NF; i++) {
+                    if ($i == "lladdr") { mac = toupper($(i+1)); gsub(/:/, "", mac) }
+                }
+                if (mac != "" && mac != "000000000000") print $1 " " mac
+            }
+        ' || true
+
+        # ─── LAN IPv6 prefix discovery (Step 228) ──
+        # Get the LAN /64 GUA prefix(es) so we can attribute outbound
+        # IPv6 flows whose src is a LAN device GUA (assigned via SLAAC
+        # from ISP prefix delegation). Filter out link-local fe80::/10.
+        echo "===LANV6==="
+        ip -6 addr show br-lan 2>/dev/null | awk '
+            /^[ \t]+inet6 / && $2 !~ /^fe80:/ {
+                split($2, p, "/")
+                print p[1]
+            }
+        ' || true
+
+        # ─── Conntrack table ──
         echo "===POLL==="
         cat /proc/net/nf_conntrack 2>/dev/null || true
         echo "===ENDPOLL==="
@@ -137,7 +167,8 @@ BEGIN {
     silent_evictions = 0
     id_reuses = 0
     delete in_flight     # flow_id → "orig_b" SUBSEP "repl_b"
-    delete ip_to_mac
+    delete ip_to_mac     # IPv4 + IPv6 → MAC (uppercase no colons)
+    delete lan_v6_prefixes  # Step 228: known LAN /64 prefixes for IPv6 GUA attribution
     delete per_mac_rx
     delete per_mac_tx
     delete per_mac_seen  # last_seen epoch per mac
@@ -147,7 +178,16 @@ BEGIN {
 # ─── Sentinels ────────────────────────────────────────────────────────
 /^===ARP===$/ {
     mode = "arp"
-    delete ip_to_mac
+    delete ip_to_mac           # clear unified IP→MAC map (will be repopulated)
+    next
+}
+/^===NDP===$/ {
+    mode = "ndp"               # continues filling ip_to_mac with IPv6 entries
+    next
+}
+/^===LANV6===$/ {
+    mode = "lanv6"
+    delete lan_v6_prefixes
     next
 }
 /^===POLL===$/ {
@@ -174,11 +214,40 @@ BEGIN {
     next
 }
 
-# ─── ARP mode: build IP → MAC map ────────────────────────────────────
+# ─── ARP mode: build IP → MAC map (IPv4) ─────────────────────────────
 mode == "arp" && NF >= 2 {
     mac = $2
     gsub(/:/, "", mac)
     ip_to_mac[$1] = mac
+    next
+}
+
+# ─── NDP mode: extend IP → MAC map with IPv6 entries (Step 228) ──────
+mode == "ndp" && NF >= 2 {
+    mac = $2
+    gsub(/:/, "", mac)
+    ip_to_mac[$1] = mac
+    next
+}
+
+# ─── LANV6 mode: record LAN /64 IPv6 prefixes (Step 228) ─────────────
+# Each line = one LAN IPv6 address. We extract the /64 prefix from it
+# (first 4 colon-separated groups) for is_lan_v6() matching below.
+mode == "lanv6" && NF >= 1 {
+    n = split($1, parts, ":")
+    # IPv6 normalised has 8 groups separated by colons. For a /64 we
+    # want the first 4. Handle short forms (with ::) by taking the
+    # first 4 hexgroups before any consecutive colons.
+    prefix = ""
+    cnt = 0
+    for (i = 1; i <= n && cnt < 4; i++) {
+        if (parts[i] == "") next   # encountered "::" — too compact, skip
+        prefix = (cnt == 0) ? parts[i] : (prefix ":" parts[i])
+        cnt++
+    }
+    if (cnt == 4) {
+        lan_v6_prefixes[tolower(prefix)] = 1
+    }
     next
 }
 
@@ -276,13 +345,44 @@ mode == "poll" {
     bytes_credited += tx_delta + rx_delta
 }
 
-function is_lan(ip,    parts, oct2) {
+function is_lan(ip,    parts, oct2, i, cnt, prefix, lower) {
+    # ─── IPv4 ──
     if (substr(ip, 1, 8) == "192.168.") return 1
     if (substr(ip, 1, 3) == "10.")      return 1
     if (substr(ip, 1, 4) == "172.") {
         split(ip, parts, ".")
         oct2 = parts[2] + 0
         return (oct2 >= 16 && oct2 <= 31) ? 1 : 0
+    }
+    # ─── IPv4 CGNAT 100.64.0.0/10 (Step 228) ──
+    # Tailscale / some ISP-NAT setups use this range. Treat as LAN-side
+    # for our attribution since the local device sits behind this CGNAT.
+    if (substr(ip, 1, 4) == "100.") {
+        split(ip, parts, ".")
+        oct2 = parts[2] + 0
+        return (oct2 >= 64 && oct2 <= 127) ? 1 : 0
+    }
+    # ─── IPv6 ULA fd00::/8 (Step 228) ──
+    # Unique Local Addresses, sometimes used on LANs in addition to or
+    # instead of ISP-delegated GUA. Always treat as LAN.
+    lower = tolower(ip)
+    if (substr(lower, 1, 2) == "fd" && substr(lower, 3, 1) ~ /[0-9a-f]/ &&
+        substr(lower, 4, 1) == ":") return 1
+    # ─── IPv6 LAN GUA (Step 228) ──
+    # Match against discovered /64 prefixes from `ip -6 addr show br-lan`.
+    # An IPv6 GUA like 2606:4700:abcd:1234:cafe::1 has prefix
+    # "2606:4700:abcd:1234". If that prefix is in our LAN set, the
+    # address belongs to a LAN device (via SLAAC from ISP delegation).
+    if (index(lower, ":") > 0) {
+        cnt = split(lower, parts, ":")
+        prefix = ""
+        i_count = 0
+        for (i = 1; i <= cnt && i_count < 4; i++) {
+            if (parts[i] == "") return 0   # "::" — too compact, give up
+            prefix = (i_count == 0) ? parts[i] : (prefix ":" parts[i])
+            i_count++
+        }
+        if (i_count == 4 && (prefix in lan_v6_prefixes)) return 1
     }
     return 0
 }
