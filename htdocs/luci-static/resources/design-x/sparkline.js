@@ -281,13 +281,22 @@ function renderTileSpark(tileEl, ring, ringSecondary, minRange) {
 	// (Step 197) is preserved — it's a separate parameter slot and only
 	// applies on stable single-line metrics like Memory (WAN tile leaves
 	// it undefined so no interference).
+	// Step 236 (Round 45) — compute both paths up front so the empty-state
+	// check can require BOTH rings to lack data. Old single-ring check
+	// (only `!linePath`) would force secondary into empty-mode whenever
+	// primary had <2 samples, even if secondary had a full curve. Latent
+	// per doc/wan_traffic.md §三.P2 (rx/tx push symmetrically in
+	// wan-stats.js so primary-empty + secondary-full never actually
+	// occurred), but the fix is defensive and cheap.
 	var linePath = ring.path(SPARK_W, SPARK_H, null, minRange);
+	var secPath  = ringSecondary ? ringSecondary.path(SPARK_W, SPARK_H, null, minRange) : '';
 
 	// Step 57: when fewer than 2 samples have arrived (1st poll cycle),
-	// ring.path() returns ''. Instead of leaving the SVG empty (looks
-	// broken), draw a faded dashed baseline so the user sees "data area
-	// is here, just collecting".
-	if (!linePath) {
+	// ring.path() returns ''. Step 236: empty state only triggers when
+	// BOTH rings (primary + secondary if present) lack data. Single-ring
+	// tiles (CPU/Mem/Temp) pass undefined ringSecondary → secPath = ''
+	// → behavior identical to pre-Step-236 (linePath drives everything).
+	if (!linePath && !secPath) {
 		var baseY = (SPARK_H / 2).toFixed(1);
 		lineEl.setAttribute('d', 'M 0,' + baseY + ' L ' + SPARK_W + ',' + baseY);
 		lineEl.classList.add('design-tile-spark-line-empty');
@@ -304,23 +313,41 @@ function renderTileSpark(tileEl, ring, ringSecondary, minRange) {
 		return;
 	}
 
-	lineEl.classList.remove('design-tile-spark-line-empty');
-	lineEl.setAttribute('d', linePath);
-	// Step 79: flip line attributes to the "real curve" presentation.
-	// Pinned inline (not just class swap) so CSS-not-applied scenarios
-	// still render the curve visibly. accent-500 is #10b981.
-	lineEl.setAttribute('stroke', '#10b981');
-	lineEl.setAttribute('stroke-width', '2');
-	lineEl.removeAttribute('stroke-dasharray');
-	lineEl.removeAttribute('opacity');
-	fillEl.setAttribute('d', linePath + ' L' + SPARK_W + ',' + SPARK_H + ' L0,' + SPARK_H + ' Z');
+	// Primary ring rendering — Step 236 splits the "linePath exists" path
+	// into two cases so the (primary empty, secondary not) edge no longer
+	// clears secondary.
+	if (linePath) {
+		lineEl.classList.remove('design-tile-spark-line-empty');
+		lineEl.setAttribute('d', linePath);
+		// Step 79: flip line attributes to the "real curve" presentation.
+		// Pinned inline (not just class swap) so CSS-not-applied scenarios
+		// still render the curve visibly. accent-500 is #10b981.
+		lineEl.setAttribute('stroke', '#10b981');
+		lineEl.setAttribute('stroke-width', '2');
+		lineEl.removeAttribute('stroke-dasharray');
+		lineEl.removeAttribute('opacity');
+		fillEl.setAttribute('d', linePath + ' L' + SPARK_W + ',' + SPARK_H + ' L0,' + SPARK_H + ' Z');
+	} else {
+		// Step 236: primary lacks data but secondary does → primary
+		// reverts to its dashed baseline, secondary continues to render
+		// below. fill clears because it follows the primary curve.
+		var bY = (SPARK_H / 2).toFixed(1);
+		lineEl.setAttribute('d', 'M 0,' + bY + ' L ' + SPARK_W + ',' + bY);
+		lineEl.classList.add('design-tile-spark-line-empty');
+		lineEl.setAttribute('stroke', '#a1a1aa');
+		lineEl.setAttribute('stroke-width', '1.5');
+		lineEl.setAttribute('stroke-dasharray', '4 4');
+		lineEl.setAttribute('opacity', '0.85');
+		fillEl.setAttribute('d', '');
+	}
 
-	// Round 44 Step 205: secondary line also auto-scales independently
-	// (sharedHi removed — see comment block above). path() returns '' if
-	// the ring has <2 samples — in that case clear the line attribute so
-	// a stale path from a prior render doesn't linger.
+	// Round 44 Step 205: secondary line auto-scales independently
+	// (sharedHi removed). Step 236: secPath now precomputed above, set
+	// here unconditionally so a stale path from a prior render doesn't
+	// linger even when secondary just emptied. Single-ring callers
+	// (ringSecondary undefined) have lineSecondaryEl null in DOM, so
+	// this is a no-op for them.
 	if (lineSecondaryEl) {
-		var secPath = ringSecondary ? ringSecondary.path(SPARK_W, SPARK_H, null, minRange) : '';
 		lineSecondaryEl.setAttribute('d', secPath || '');
 	}
 }

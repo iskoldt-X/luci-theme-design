@@ -4643,6 +4643,58 @@ scp + 刷新:
 
 1. **数据 + 标签错位会持续 6 个月**:Step 140(Round 38)→ Step 218(Round 44)→ Step 237(Round 45)。Step 140 把列头从"Last Seen"改成"Lease"是 honest("我现在显示的就是 lease 剩余时间"),Step 218 把数据切到 presence 但忘了再改一次列头。**改数据 source 时必须同时审视所有 surface label**。**Memory 没沉淀过这条,但 Round 45 看到这种 6 个月延迟的错位,值得记**。
 
+## Step 236 — WAN sparkline P2a 防御性修复 + wan_traffic.md 收尾
+
+**时间**:2026-05-25(Step 237 同一 session 后)
+**文件**:
+- `htdocs/luci-static/resources/design-x/sparkline.js`(renderTileSpark 二分支 + 两 ring 都缺才 empty)
+- `doc/wan_traffic.md`(§三 P2 / §五 Fix-1 ~ Fix-5 全部加 ship 状态注释)
+- `doc/backlog.md`(WAN sparkline 条目 re-tag 为"Round 45 active")— 上一个 doc-snapshot commit 已含
+
+**开 step 前的重大发现**:
+
+`doc/wan_traffic.md` 原计划 3-step atomic ship,~2.5h。**实际上 Round 44 的 Step 205 + 206 已经 ship 了 Fix-1 (P0 sharedHi removal) + Fix-2 (P1 contrast,实际是 hue separation 蓝/绿,比文档建议的同色 + opacity 更强) + Fix-3 (Peak meta line)**。源代码注释都老老实实标了。**backlog.md 那条 "Round 44 candidate"是 stale**。开 step 之前发现这个事实,**Step 236 实际剩余 scope 只剩 Fix-4 (P2a defensive)**。
+
+**做了什么**:
+
+1. **renderTileSpark() 重构**:
+   - 老逻辑:`var linePath = ring.path(...); if (!linePath) { empty + 清 secondary; return; }`
+   - 新逻辑:`linePath + secPath 同时 precompute`,empty-state 改成 `if (!linePath && !secPath)`。
+   - 拆出 primary-empty / primary-curve 两分支:
+     - primary 有 curve → 渲染绿色 curve + fill
+     - primary 空但 secondary 有 → primary 退回灰 dashed baseline,fill 清空,secondary 仍然独立渲染
+   - secondary 最后无条件 setAttribute(`secPath || ''`),不再被 primary 的 early-return 误清
+2. **CPU / Mem / Temp 单 ring tile 行为完全不变**:`ringSecondary` undefined → `secPath = ''` → `if (!linePath && !'')` = `if (!linePath)` → 等价旧路径。**Backward compat 严格保持**。
+3. **wan_traffic.md §三 P2 + §五 Fix-1~Fix-5 全部加上 ship 状态**:Fix-1/2/3 ✅ Round 44 Step 205/206;Fix-4 ✅ Round 45 Step 236;Fix-5 ⏸ 未做(P3 低优先级)。
+4. **wan_traffic.md §五 开头**加一段"收尾状态"概览,告诉未来读者整个 fix plan 的实际 ship 轨迹(Step 205 + 206 + 236 跨 Round 44+45)。
+
+#### 没动的东西
+
+- **`MetricRing.prototype.path()` 接口**:`(w, h, sharedHi, minRange)` 签名完全不动。Step 205 注释说"sharedHi 保留供未来场景,WAN tile 不再使用",这条契约 Step 236 也守住。
+- **CSS `.design-tile-spark-line-secondary`**:`stroke: --color-info` (蓝) / `stroke-width: 2` / `stroke-dasharray: 5 3` / `opacity: 0.9` 不动。
+- **wan-stats.js 的 emit 路径**:rx/tx 仍然在同一 push 周期里(两 ring 长度同步)。Step 236 改的是"如果他们不同步会发生什么"的防御层,不改实际同步。
+- **Fix-5 (fmtBpsSplit 抽 util)**:**主动不做**。两处复制(wan-hero.js + sparkline.js)总共 12 行,抽 util 会引入新 file + L.require + 微 IPK 体积。Round 36 Step 137 漂移过一次 (`rxBps → rxBitsPerSec`),那是一次性事件,**两处复制成本远低于新 module 复杂度**。Memory 不沉淀,backlog 也不留 — **propose-then-reject 收尾**。
+
+#### Break change(可见)
+
+**零**。Step 236 是 latent bug 防御性修补,生产路径上(rx/tx 同步 push)肉眼根本看不出差异。
+
+#### 验证
+
+```bash
+$ node --check htdocs/luci-static/resources/design-x/sparkline.js  ✅
+$ grep -c "if (!linePath && !secPath)" sparkline.js  → 1
+$ grep -c "Step 236" sparkline.js  → 5(三个新注释 + 两个 inline 引用)
+$ grep -c "Round 45 Step 236\|Round 44 Step 205\|Round 44 Step 206" wan_traffic.md → ≥5(全部 Fix 段标记)
+```
+
+scp + 刷新行为:**视觉零变化**(latent fix)。如果某种 race condition / kernel-driver 让 rx/tx 不同步出现(理论场景),旧实现会让 secondary 闪烁清空,新实现会让 primary 退回 dashed baseline + secondary 平稳显示。**不可能验证这个 race 是否真的解决了**,因为再现条件不存在。
+
+#### 教训
+
+1. **开 step 前先 cat 一遍源码注释**:Step 236 一开始我以为要 ship 3 个 atomic fix,~2.5h 工作量。Read 一遍 sparkline.js 发现 Step 205/206 注释把 Fix-1/2/3 都标了 ship 状态,剩下 scope 不到原计划 1/10。**backlog.md 写完不 verify,持续 stale 是个普遍问题**。这一条跟 Step 237 的"数据-标签错位"是同一类:**信息分布在 doc + code + memory + commit history,光看一个 source 容易 stale**。
+2. **propose-then-reject 在文档里也要留痕**:Fix-5 我决定不做,但 wan_traffic.md §五 还是把它标了 "⏸ 未做",说明理由。**不留痕 = 后续 Round 会有人再开同一个工。** Memory 不沉淀因为没普适价值,但**文档的 ship 状态表必须留痕**。
+
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 |---|---|---|---|
 | 现代 rgb()/hsl() | 50 处 | **0** | 0 |

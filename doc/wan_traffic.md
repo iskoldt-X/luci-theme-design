@@ -128,9 +128,9 @@ Chrome-Claude 实测 `yMax=37, yMin=25.5` 全部 ≥ 0.64h,正是这个症状。
 - ring 有 rx 历史尖峰: tx 被 P0 压到底部,**且**因 P1 半透明,与底部 fill 视觉混杂
 - → 两种情况下 secondary 都"看不到"
 
-### 🟢 P2 — empty-state 检查只看 primary,会误清 secondary
+### 🟢 P2 — empty-state 检查只看 primary,会误清 secondary — ✅ Round 45 Step 236
 
-**位置**:`sparkline.js:272-287`
+**位置**(改前):`sparkline.js:272-287`
 
 ```js
 if (!linePath) {           // linePath 来自 primary (rx) ring.path()
@@ -144,7 +144,11 @@ if (!linePath) {           // linePath 来自 primary (rx) ring.path()
 实际上:rx 和 tx 由同一 emit 一起 push (`sparkline.js:548-549`),两 ring 长度同步。
 这是 **latent bug**,被当前的对称推送掩盖。
 
-修法:把检查改成"两 ring 都 `< 2` 才进 empty state"。
+**Step 236 (Round 45)** ship 了 §五 Fix-4 的修法:
+1. linePath + secPath 同时 precompute
+2. empty-state 改成 `if (!linePath && !secPath)`
+3. 拆出 primary-empty / primary-curve 两分支,让 primary 在 secondary 有数据时仍然能正确退回 dashed baseline,而 secondary 独立渲染
+4. 单 ring tile(CPU/Mem/Temp)行为不变(ringSecondary undefined → secPath = '' → 等价旧路径)
 
 ### 🟢 P2 — `fmtBpsSplit` 在两处定义且逐行相同
 
@@ -201,7 +205,16 @@ rename (`rxBps → rxBitsPerSec`) 已经需要**两处同时改**,漂移过一�
 
 按 ROI 排序。**建议合并到 Round 44 polish ship,不单独走**。
 
-### Fix-1:删除 sharedHi 跨 ring 同步,两线独立 auto-scale ⭐ P0
+> **2026-05-25 收尾状态(Step 236 之后):全部 Fix 已 ship。**
+> - Fix-1 (P0 sharedHi removal) → **Round 44 Step 205** ✅
+> - Fix-2 (P1 contrast bump) → **Round 44 Step 205** ✅ (实际颜色升级版:Step 206 改成 hue separation `--color-info` 蓝色,比文档建议的同色 + 透明度更强)
+> - Fix-3 (Peak meta line) → **Round 44 Step 206** ✅
+> - Fix-4 (empty-state two-ring guard) → **Round 45 Step 236** ✅ (落后 Fix-1 半轮 ship,latent bug 修了)
+> - Fix-5 (fmtBpsSplit 抽 util) → **未做**(P3,优先级最低,功能性零影响)
+>
+> 全程跨 Round 44 + 45,**实际 atomic 4 步**(Step 205 + 206 + 236;Fix-4 被 Step 236 单独 ship 而非合并 Fix-1)。原计划"3 atomic Steps,~2.5h"实际是分阶段 ship,但合计代码改动量符合预估。
+
+### Fix-1:删除 sharedHi 跨 ring 同步,两线独立 auto-scale ⭐ P0 — ✅ Round 44 Step 205
 
 **改动**:`sparkline.js:248-309` 的 `renderTileSpark()`
 
@@ -263,7 +276,7 @@ function renderTileSpark(tileEl, ring, ringSecondary) {
 3. 改完是"相对比例输,两线可读" → 严格优于现状
 4. 量级信息从 meta line 补回(Fix-3)
 
-### Fix-2:secondary line 视觉对比度补丁 ⭐ P1
+### Fix-2:secondary line 视觉对比度补丁 ⭐ P1 — ✅ Round 44 Steps 205 + 206
 
 **改动**:`htdocs/luci-static/design-x/css/features.css:549-557`
 
@@ -292,7 +305,7 @@ function renderTileSpark(tileEl, ring, ringSecondary) {
 - secondary **应该**与 primary 视觉有区分(虚 vs 实是核心区分手段)
 - 加得过重会让两条线"等权重",失去主次,信息架构反而混乱
 
-### Fix-3:meta line 显示双向 peak(信息补偿) ⭐ P1
+### Fix-3:meta line 显示双向 peak(信息补偿) ⭐ P1 — ✅ Round 44 Step 206
 
 **改动**:`sparkline.js:556-575` 的 `onWanStats` meta 计算
 
@@ -322,11 +335,13 @@ setTile(this.tileNet, {
 **为什么必须做**:补偿 Fix-1 的视觉信息丢失。两线 auto-scale 后,用户无法直接从图形看
 "↓ 比 ↑ 大 4 倍"这种相对量级。Peak 文字把这个**量化信息**回填。
 
-### Fix-4:empty-state 改成"两 ring 都缺才触发" — 已含于 Fix-1
+### Fix-4:empty-state 改成"两 ring 都缺才触发" — ✅ Round 45 Step 236
 
-无独立 commit 必要。
+**实际 ship 历史**:Fix-1(Step 205)的 sharedHi 删除已经把 secondary 改成独立 auto-scale,但 empty-state 检查仍是单 ring(只看 primary 的 `!linePath`)。该 path 在生产路径上从未触发(rx/tx 由 wan-stats 同一 emit push,长度同步),但 **latent**。Step 236 把检查改成"两 ring 都缺数据才进 empty state",同时拆出 (primary 空 + secondary 有数据) 分支让 primary 显示 dashed baseline 而不影响 secondary 渲染。
 
-### Fix-5:`fmtBpsSplit` 抽到 util module ⭐ P3
+`sparkline.js:284-326` 改动 ~30 LOC 净增加(含三个 Step 注释 + 两段并存 path)。CPU/Mem/Temp 单 ring 调用方传 `undefined ringSecondary` → `secPath = ''` → 行为等价于 Step 236 之前(linePath 主导一切)。**Backward compat 严格保持**。
+
+### Fix-5:`fmtBpsSplit` 抽到 util module ⭐ P3 — ⏸ 未做(Step 236 不含)
 
 **改动**:新建 `htdocs/luci-static/resources/design-x/util.js`(~10 行),把 helper 搬过去。
 wan-hero.js / sparkline.js 都 `'require design-x.util'`。
