@@ -82,7 +82,12 @@ set -e
 
 OUT_FILE=/tmp/design-host-traffic.json
 TMP_FILE=/tmp/.design-host-traffic.json.tmp
-POLL_INTERVAL=5
+# Round 44 Step 227: poll 5s → 3s. Step 226 verified `silent_evictions`
+# 5681 in 60 dumps (~95 flow/dump dying between polls). Modern HTTPS
+# is short-connection-heavy; tighter window captures more before
+# eviction. CPU cost: ~2x at minimal absolute (awk + cat on ~1000
+# conntrack lines per poll).
+POLL_INTERVAL=3
 STARTED_AT=$(date +%s)
 
 # Self-locking: prevent multiple daemons. Round 44 Step 225 lesson —
@@ -223,11 +228,22 @@ mode == "poll" {
         # ID reuse / counter restart: counters went backwards
         if (delta_orig < 0) { delta_orig = orig_b; id_reuses++ }
         if (delta_repl < 0) { delta_repl = repl_b }
-    } else {
-        # First sighting — BASELINE only, no credit. Avoids over-counting
-        # flows that pre-date daemon start.
+    } else if (dumps_completed == 0) {
+        # First poll EVER — baseline existing conntrack entries without
+        # crediting (these bytes accrued before daemon started running).
         delta_orig = 0
         delta_repl = 0
+    } else {
+        # Round 44 Step 227: subsequent polls — a flow_id we haven't
+        # seen before is almost certainly a NEW flow created between
+        # last poll and now. Credit its current bytes (which all
+        # accrued during the gap). Modern web is short-connection-heavy
+        # — many flows appear and disappear within 1-2 polls and would
+        # otherwise be lost completely. Step 226's baseline-only policy
+        # ate 5681 such flows in 60 polls (~95/poll, the silent_evictions
+        # counter). Step 227 credits them.
+        delta_orig = orig_b
+        delta_repl = repl_b
     }
     in_flight[flow_id] = orig_b SUBSEP repl_b
 
