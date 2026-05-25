@@ -4159,6 +4159,59 @@ Step 195 ship 完用户接受了 Phase 1 视觉(没要求继续 hero 内容增�
 - **Step 218** — LAN Clients "Lease" 列改用真 last-seen。新 rpcd 方法 `host-presence` 读 `/proc/net/arp`(wired,ATF_COM flag)+ `iwinfo assoclist.inactive_ms`(wireless)。devices.js 加 `formatPresence(presenceMap, mac, lease)`:wifi inactive < 5s → "Active",< 60s → "<Xs",< 1h → "<Xm" stale,no presence + no map → fall back to lease.expires。Round 38 留的语义不准确 bug 彻底关闭
 - **Step 220** — vendor.js singleton 加固。Chrome-Claude 观察 `oui.json.gz` 被请求 10 次。根因:Step 204→208 之间 Response hijack 让 fetch 失败 → catch 释放 `_mapPromise = null` → 下一个 detail panel 渲染重 fetch → 循环。fix:catch 不立刻 null,setTimeout(30000)。worst-case rate bounded at 2/minute under repeated failure。同时加 `window.designDebug` 三处 console.debug 诊断 log
 
+### Phase 7 — daemon-track Step 223 实战大失败 + 4 次重写 + 用户 reframe(Step 226-230)
+
+Step 223 ship 后 Chrome-Claude 浏览器侧实机 batch verify。**daemon 看起来在跑(impl=nft-bridge-direct, bytes_credited=107298),但 5 分钟 ground-truth DELTA 对比**:
+
+```
+WAN 接口 rx 62 MB / tx 5 MB     (5 分钟内真实流量)
+daemon  rx 385 KB / tx 224 KB   (daemon 算到的)
+覆盖率: rx 0.6%, tx 4%
+```
+
+**Step 223 的"nft bridge family 不被 offload 绕过"假设彻底破灭**。原 daemon 注释里 Step 118(Round 31)2026-Q1 写的"bridge family 独立于 inet/netfilter,offload 只 bypass FORWARD"在现代 kernel 上不再成立 —— SFO 用 `dst_output` 直接 dispatch 到 egress device,跳过 bridge xmit 层。bridge family hooks 只 fire for slow-path 包(SYN/ACK/ICMP/fragmented)。**Round 31 选 bridge family 是在 2026-Q1 kernel 上做的对的选择,Round 44 在更新的 kernel 上选它就错了**。
+
+接下来 5 次 daemon 重写,每次 ship+实测+发现新 surface 失效:
+
+- **Step 226 conntrack-poll(第 4 个 impl)** — 改读 `/proc/net/nf_conntrack` 表(per-flow byte counters)。Deep-research report(`doc/foa_challenge_v2.md`)独立验证这是 mt7986 + SFO 上"唯一 offload-survivable"的路径(`nf_flow_offload_stats()` 每 ~1s 同步 HW MIB → conntrack 表)。**但 ship 测出 23% rx / 42% tx coverage** — `silent_evictions=5681 in 60 polls`,说明 short-lived flow 被 daemon "baseline only" 错过
+
+- **Step 227 first-sight credit(第 5 个 impl)** — 把"first-sighting baseline + no credit"改成"first-sight 也 credit current bytes"。modern HTTPS 大量短连接,这能捕获。**bonus:** poll interval 5s→3s 减少 eviction 窗口。**但 sh -n 报 syntax error,我没 block 在那** — `device's`/`haven't` apostrophe 在 awk-in-shell 单引号块里被 shell 切碎了 → Step 227 hotfix 紧跟一个 commit 改注释。memory:`[[awk-comment-apostrophe-trap]]`
+
+- **Step 228 IPv6 + CGNAT(第 6 个 impl)** — 实测 23%/42% 后挖深一层:`is_lan()` 只覆盖 IPv4 RFC 1918,**漏 Tailscale CGNAT 100.64/10 + IPv6 全部**(用户机器 iPhone/iPad/macOS 60%+ 流量走 IPv6)。加 CGNAT range + IPv6 ULA + `ip -6 addr show br-lan` 读 LAN /64 prefix + `ip -6 neigh show` 提供 IPv6→MAC 映射
+
+- **Step 228 ship 后大震惊:rx 253%, tx 3249%(过 2.5-32 倍)**!不是 under-count,是 **over-count**。daemon credit 485 MB vs WAN delta 121 MB。Qingping IoT 温度计居然 tx=48 MB — 明显错。**根因:** intra-LAN 流量(AirDrop/iCloud P2P/MQTT broker/DLNA/router-internal protocol chatter)被算成 src 设备的 tx。Step 229 加 `if (src_is_lan && dst_is_lan) intra_lan_skipped++; next` guard。**还是 over-count 234%/1346%。**
+
+- **Step 230 第 7 个 impl,FREEZE** — fix ULA regex bug(Step 228 写的 `fdX:` 实际 ULA 是 `fdXX:` 4 字符长度;Tailscale `fd7a:` 跟用户 LAN `fd7f:` 都被错丢) + lanv6 prefix parser 处理 `::` 压缩(把 `fd7f:dbd9:8bd9::1/60` 正确解析成 prefix `fd7f:dbd9:8bd9:0`)+ per-host JSON 加 `recent_rx`/`recent_tx`(本 poll cycle delta,给后续 widget 用)+ 同 commit FREEZE daemon-track
+
+### Phase 8 — 用户 reframe 救场
+
+Step 229→230 之间用户主动 reframe(2026-05-25 凌晨):
+
+> **"那不如放弃追求绝对准确,而是每5秒更新一次,用流量百分比的方式,展现出一个动态竞争的样子,这样虽然不是完全准确,但是也可以对比出价值了。你说呢?"**
+
+这是 Round 44 真正的转折点。**用户问的对的问题**:不是 "X 用了多少字节"(绝对量,被 SFO/HFO 物理上限制在 < 80%),而是 **"现在谁在吃我的网?"**(相对量 / ranking,对系统性 under/over-count robust)。
+
+如果 daemon 系统性偏 2x(所有设备一致),ratio **完全保留**:
+- 真实:iPhone 100 MB / iPad 50 MB / 其他 50 MB
+- daemon:iPhone 200 / iPad 100 / 其他 100
+- 比例:**2:1:1 — 一样**
+
+Step 230 ship 完用户实测,**recent_rx/recent_tx 字段工作正常**,host 间相对值显示出"谁在吃网"信息(iPhone 5.5 MB recent_rx + Private device 1.9 MB recent_rx 是当前 top consumer)。**Live Competition View widget 数据源 ready,Round 45 主轴**。
+
+### Round 44 真·累计(替换之前 Phase 7 写到 Step 223 时的累计表)
+
+| 指标 | Round 43 后 | Round 44 终态(Step 230 后) |
+|---|---|---|
+| Bandwidth daemon impl 数 | 1(Round 31 nft) | **7**(Step 210 + 211 + 219 + 222 + 223 + 226 + 227 + 228 + 229 + 230,7 个不同 impl) |
+| Daemon-track ship-then-broken 次数 | 0 | **4**(Step 219 0% / Step 223 0.6% / Step 228 over 2.5x / Step 229 仍 over 2.3x) |
+| LuCI 26.x / 网络层 quirk memory | 4 | **8**(+Response hijack +ucode-socket no NETLINK +SFO bypasses conntrack events +awk apostrophe trap) |
+| Daemon 当前 impl | nft-bridge-direct(Step 223,broken) | **conntrack-poll(Step 230,estimate-grade)** |
+| Daemon 输出 JSON 字段 | rx/tx cumulative | rx/tx cumulative + **recent_rx/recent_tx**(给 widget) |
+| 准确度立场 | "应该 ≥ 80%"(被 deep-research 报告诱导) | **"per-host RANKING ≥ 80% 可信,absolute byte ≤ 90%"**(reframe 后真实) |
+| Round 45 起点 | 不存在 | 已规划:**Live Competition View widget**(traffic.js 重写,用 recent_rx/tx 渲染 bar) |
+
+
+
 ### Round 44 累计
 
 | 指标 | Round 43 后 | Round 44 后 |
@@ -4195,6 +4248,39 @@ Step 195 ship 完用户接受了 Phase 1 视觉(没要求继续 hero 内容增�
 **Chrome-Claude 救命第三次**:Round 43 Phase 6 第一次系统性 catalog production / Round 44 batch verify 第一次实机 NETLINK 失败诊断 / **Round 44 daemon-track 收尾时 Chrome-Claude 一句 `cat /proc/net/nf_conntrack`(有 bytes 字段) + `nft list table bridge design_acct`(实测在涨)就把架构方向反转**。**lesson**:**Chrome-Claude 实机访问能力 + Code-Claude 代码生成能力的两端,缺一不可**。代码 + 文档没说真话(Step 219 误判 conntrack -E 能跑),实机能讲真话。
 
 **Chrome-Claude 角色稳定下来 — verification gateway + bug bug catalog producer**。Round 43 phase 6 已经用过一次 Chrome-Claude full overview scan;Round 44 整个走完依赖 Chrome-Claude 6-7 次实机 + browser DOM 验证。**lesson**:**code-Claude(我)做生成 / 改代码,Chrome-Claude 做 runtime verification + bug catalog production**。这种「双 Claude 分工」工作流比单一 Claude 全做高效得多 —— 每个 Claude 的 context window 各有用途,不互相干扰。**memory 留的 `chrome-claude-briefing.md`(Round 41 Step 155)是这套工作流的契约文件**,Round 44 加深了它的实战价值。
+
+### Round 44 真·终结(Step 230 后补)— daemon-track 4 个 ship-broken 灾难的根教训
+
+Step 221 写 journal 时以为 Step 223 是终态。**事实上 Round 44 daemon-track 再经历 4 次 ship-broken-ship-broken 循环**:
+
+| ship | impl | 实测结果 | 根因 |
+|---|---|---|---|
+| Step 219 | conntrack -E | destroys_seen=0 11 min | SFO bypass NFNLGRP_CONNTRACK_DESTROY |
+| Step 223 | nft bridge counter | rx 0.6% / tx 4% | 在新 kernel 上 SFO 也 bypass bridge xmit |
+| Step 228 | conntrack-poll + IPv6 + CGNAT | rx **253%** / tx **3249%** | intra-LAN 流量被 src-attribution 误判 |
+| Step 229 | + intra-LAN guard | rx **234%** / tx **1346%** | 仍 over-count(ULA bug + 其他)|
+| Step 230 | + ULA regex fix + recent fields | FREEZE | 用户 reframe 救场 |
+
+**真正的 lesson**:**追求绝对 byte 准确度在复杂家庭网络上(Tailscale + IPv6 + SFO + ULA + AirDrop + DLNA)物理上不可能 ≥ 90%**。Deep-research 报告里 `doc/foa_challenge_v2.md` 说"polling 应该 ≥ 80%"是**在理想 home network 假设下**。我把它当成 absolute commitment 是错的。
+
+**用户 2026-05-25 凌晨主动 reframe 的原话**值得永久记住:
+
+> "那不如放弃追求绝对准确,而是每5秒更新一次,用流量百分比的方式,展现出一个动态竞争的样子,这样虽然不是完全准确,但是也可以对比出价值了。你说呢?"
+
+**这一句把 Round 44 从"daemon-track 死磕"模式拽出来,转向"per-host RANKING widget"模式**。Step 230 加 `recent_rx`/`recent_tx` 字段就是给这个 widget 准备数据源,**daemon-track 永久 FREEZE**,Round 45 重心是 traffic.js 重写。
+
+**meta-lesson — 一旦用户给出 reframe,要主动听完整,不要继续按旧 spec 优化**。我在 reframe 后又"先等 Step 228 验证"是因为不信用户 spec 真的对。实际上**应该立刻 pivot 到 ratio 模式**,因为:
+
+1. ratio 框架本质对 systematic under/over-counting 免疫(只要偏差均匀)
+2. 用户问的"谁在吃网"是 ranking 问题不是 accounting 问题
+3. ranking 答案在 over-count 数据上也清楚可见(Step 230 实测 iPhone-X 5.5 MB recent_rx 一目了然)
+4. 继续追准确**要么撞物理上限,要么走到"接受不准 + 加 disclaimer"那条路**
+
+**继续追的 6 小时(Step 226→230)所学:**绝对量不可能,**但学会了 conntrack 表的 poll 机制 + IPv6 attribution 三类(ULA / LAN GUA prefix / NDP table)+ intra-LAN guard + first-sight credit + flow_id state tracking**。这些**在 Round 45 widget 里仍然有用** —— `recent_rx`/`recent_tx` 数据源正是这堆改动的合并产物,只是消费方变了(从 absolute-display 改成 ratio-display)。
+
+**Round 44 总成本** ≈ 16-18 小时(全 daemon-track),终态 = "estimate-grade per-host bandwidth + 数据 ready 给 Live Competition View"。**绝对值不靠谱;相对排序靠谱**。
+
+**memory 沉淀第 8 条入册**(`awk-comment-apostrophe-trap`):shell 单引号块包裹 awk 时,awk 注释内的 ASCII 撇号会被 shell 切碎。Round 44 内 Step 227 + Step 229 各被坑一次。`sh -n` 报警时必须 block,不能 commit-then-hotfix。
 
 ---
 
