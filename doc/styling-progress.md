@@ -5689,6 +5689,75 @@ $ grep -nE "\? E\(.*: null|: null[\])]" devices.js
 
 **值得 memory 沉淀的理由**:跟 React/Mithril/lit-html 习惯反差大,**任何来自现代框架的人都会撞这坑**。Memory 是项目里 default-include 的 context,future-me 加新 conditional UI 时会先看到这条警告。
 
+## Step 250 — Speedtest gauge 静态 "Avg · Peak" 行(消除视觉 transition 歧义)
+
+**时间**:2026-05-26(Step 249 同 session)
+**文件**:
+- `htdocs/luci-static/resources/design-x/speedtest.js`(makeGauge 加 summary div / `setGaugeSummary` helper / 3 处 wiring)
+- `htdocs/luci-static/design-x/css/features.css`(`.speedtest-gauge-summary` 样式)
+
+**事件起源**:用户报告 "speedtest gauge 停在最后一刻的速度,应该是平均"。verify-first console 一行检测:
+
+```js
+JSON.parse(localStorage.getItem('design-speedtest-history-v1'))[0]
+// → { download: 251.95, upload: 282.26, peakDownload: 340.40, peakUpload: 321.41, ... }
+```
+
+跟 gauge 显示的 `252 / 282` 对比 → **gauge 已经显示的就是平均**。Bug **不存在**,**视觉歧义**才是真问题:CSS transition 把 bar 从 peak (340) 滑到 avg (252) ~300ms,用户看不出"最终停在 avg"。
+
+**Step 250 不修 bug**(没有 bug),**而是优化 UX**:在 gauge 下面加一行**静态文字** `"Avg X · Peak Y"`,**无 transition,无歧义**,直接读两个数字。
+
+#### 做了什么
+
+1. **`makeGauge()` 加 `<div id="st-summary-{kind}">`**,initial 空,放在 `.speedtest-gauge-scale`(max range 行)下面
+2. **新 method `setGaugeSummary(kind, avg, peak)`** — 写 "Avg 252.0 Mbps · Peak 340.4 Mbps" 文字。`avg=null` 清空(测试开始时调一下让旧 summary 不残留)
+3. **3 处 wiring**:
+   - `runTest()` 开始:`setGaugeSummary('download', null)` + `setGaugeSummary('upload', null)` 清旧值
+   - download 完:`.then` 里调 `setGaugeSummary('download', avgMbps, peakDownload)`
+   - upload 完:`.then` 里调 `setGaugeSummary('upload', avgMbps, peakUpload)`
+4. **CSS** `.speedtest-gauge-summary`:mono / text-muted / tabular-nums / center / `min-height: 1em` 防 layout shift / **无 transition**
+
+视觉效果:测试中 summary 空,测试完后下面出现:
+```
+                  ↓252 Mbps
+                  max 500 Mbps
+                  Avg 252.0 Mbps · Peak 340.4 Mbps
+```
+
+#### Verify-first 教训(本 step 印证)
+
+**verify-first 不止防 bug,也防"假 bug 修真 bug"**。如果我没让用户跑 `JSON.parse(...history-v1)[0]` 那一行,我会直接相信 "gauge 停在最后一刻速度",然后:
+- (错路 A) 改 testDownload 结尾再加一次 setGauge — 多余,因为 .then 已经在调
+- (错路 B) 改 CSS transition 关掉 — 破坏 live 期视觉反馈
+- (错路 C) 找一个根本不存在的 bug,改了一些代码,但没解决用户感受的问题
+
+**正解**:**验证 → 发现 code 是对的 → 用户的痛点 是 UX 而非 bug → 加静态文字消除歧义**。
+
+**Memory 沉淀候选**:**不**沉淀。verify-first memory 已经覆盖这条 — "verify before implement",包含"verify 报告的 bug 真不真"也是这条规则。
+
+#### Break change
+
+零。测试期间 UI 不变,测完多一行 "Avg X · Peak Y" 文字。
+
+#### 验证(用户实测)
+
+```bash
+ssh luci-router 'wget -O /www/luci-static/resources/design-x/speedtest.js "$BASE/htdocs/luci-static/resources/design-x/speedtest.js"'
+ssh luci-router 'wget -O /www/luci-static/design-x/css/features.css "$BASE/htdocs/luci-static/design-x/css/features.css"'
+```
+
+或者直接用之前那段 `BASE=` 模板。
+
+刷新 Overview,**测一次 Speedtest**:
+1. 测试中:gauge 实时跳动,summary 行**空白**(留 1em 空间)
+2. 下载完:summary 行出 `Avg 252.0 Mbps · Peak 340.4 Mbps`
+3. 上传完:upload gauge 下面也出 summary
+4. 数字跟 localStorage 一致(权威 source)
+
+#### Round 47 update
+
+Step 250 严格说是 **Round 48 起飞 step**(Round 47 是 doc grooming,Step 249 是其 hotfix,Step 250 是新功能)。但 Round 48 还没正式 open declaration,先归在 "Round 47 余波" 里,journal 角度等下次 round 开局再 reclassify。
+
 #### 教训
 
 **Verify-first 第四层教训**:**verification 的覆盖面不能只看自己定义的 PASS 条件,要看 DOM 实际 state**。Step 243 的 verification clip 写得很细(13 项 ssh 检查 + UI 流程),但**所有 check 都聚焦在 "功能 work" 而不是 "没多余东西"**。Chrome-Claude 这种 DOM 全扫的 audit 是必要补充。

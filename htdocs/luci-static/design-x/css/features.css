@@ -1171,6 +1171,26 @@
     letter-spacing: 0.02em;
 }
 
+/* Step 250 (Round 48): static "Avg X · Peak Y" summary line shown
+   after each test completes. Distinct from .speedtest-gauge-scale
+   above (which shows max gauge range "max 500 Mbps") — this one
+   shows the actual measured result, so the user can read avg + peak
+   side-by-side without interpreting the gauge bar's CSS transition.
+   Sits right under the scale label. Mono + tabular nums for stable
+   width when digits change. Stays empty (but reserves vertical
+   space via min-height) before the first test completes. */
+.speedtest-gauge-summary {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.25;
+    margin-top: var(--space-2);
+    min-height: 1em;
+    letter-spacing: 0;
+    text-align: center;
+}
+
 /* Step 52: 3 compact stat cards under the gauges — latency / jitter
    / loss. tnum so digits line up between values. */
 .speedtest-stats {

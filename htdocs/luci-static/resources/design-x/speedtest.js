@@ -278,7 +278,16 @@ return baseclass.extend({
 			// of the gauge represents. Without this, 184 Mbps showing at
 			// 18% of the bar is ambiguous (could mean "18% of 1 Gbps" or
 			// "18% of whatever this gauge maxes at").
-			E('div', { 'class': 'speedtest-gauge-scale', 'id': 'st-scale-' + kind }, '')
+			E('div', { 'class': 'speedtest-gauge-scale', 'id': 'st-scale-' + kind }, ''),
+			// Step 250 (Round 48): static "Avg X · Peak Y" line that
+			// appears after a test completes. The gauge bar animates +
+			// snaps to avg on test end (CSS transition makes the visual
+			// trajectory ambiguous — "did it stop at last instant or
+			// average?"). This line is static text with no transition,
+			// unambiguously reporting both the average and the peak
+			// captured during the live run. Empty until first test
+			// completes; cleared at the start of each new run.
+			E('div', { 'class': 'speedtest-gauge-summary', 'id': 'st-summary-' + kind }, '')
 		]);
 	},
 
@@ -366,6 +375,25 @@ return baseclass.extend({
 		this._gaugeScale = { download: 100, upload: 100 };
 	},
 
+	// Step 250 (Round 48) — write the "Avg X · Peak Y" static line
+	// below a gauge. Called from runTest's .then callbacks after each
+	// test phase completes (download / upload). Passing avg=null
+	// clears the line — used at runTest start so a previous test's
+	// summary doesn't linger during the next test's live phase.
+	setGaugeSummary: function (kind, avg, peak) {
+		var el = document.getElementById('st-summary-' + kind);
+		if (!el) return;
+		if (avg === null || !isFinite(avg)) { el.textContent = ''; return; }
+		// Mirror setGauge's precision rule: more decimals under 100 Mbps
+		// so slow links don't drop to "0.0".
+		var fmt = function (n) { return n < 100 ? n.toFixed(1) : n.toFixed(0); };
+		var txt = _('Avg') + ' ' + fmt(avg) + ' Mbps';
+		if (peak !== undefined && peak !== null && isFinite(peak)) {
+			txt += ' · ' + _('Peak') + ' ' + fmt(peak) + ' Mbps';
+		}
+		el.textContent = txt;
+	},
+
 	runTest: function () {
 		var btn = document.getElementById('speedtest-run');
 		btn.disabled = true;
@@ -377,6 +405,11 @@ return baseclass.extend({
 		this.resetGaugeScale();
 		this.setGauge('download', null);
 		this.setGauge('upload',   null);
+		// Step 250: clear prior-run summary so the line goes blank
+		// during the new test's live phase. setGaugeSummary fills it
+		// back in when each phase completes.
+		this.setGaugeSummary('download', null);
+		this.setGaugeSummary('upload',   null);
 		this.setStat('latency', '—');
 		this.setStat('jitter',  '—');
 		this.setStat('loss',    '—');
@@ -441,6 +474,9 @@ return baseclass.extend({
 				if (self._lastTestPeak && isFinite(self._lastTestPeak.download)) {
 					result.peakDownload = self._lastTestPeak.download;
 				}
+				// Step 250: write the static avg + peak summary line.
+				self.setGaugeSummary('download', mbps,
+					(self._lastTestPeak && self._lastTestPeak.download) || null);
 				var verbUL = _('Uploading…');
 				btn.textContent = verbUL + ' 0 / ' + (uploadBytes / 1024 / 1024).toFixed(0) + ' MB (0%)';
 				return self.testUpload(uploadBytes, function (received, total) {
@@ -454,6 +490,9 @@ return baseclass.extend({
 				if (self._lastTestPeak && isFinite(self._lastTestPeak.upload)) {
 					result.peakUpload = self._lastTestPeak.upload;
 				}
+				// Step 250: upload summary line, same pattern as download.
+				self.setGaugeSummary('upload', mbps,
+					(self._lastTestPeak && self._lastTestPeak.upload) || null);
 
 				// Step 46: persist + refresh history.
 				if (result.latency !== null || result.download !== null || result.upload !== null) {
