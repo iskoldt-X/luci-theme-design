@@ -974,15 +974,30 @@ return baseclass.extend({
 				// changes background on hover / expand — matches preview.
 				// Step 243: red dot overlaid on top-right corner when MAC is
 				// blocked. position: absolute inside .devices-icon-wrap.
-				E('div', { 'class': 'devices-icon-wrap' }, [
-					svgEl('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
-						svgUse(self.iconBase + '#' + type.icon)),
-					isBlocked ? E('span', {
-						'class': 'devices-row-blocked-dot',
-						'aria-label': _('Blocked'),
-						'title': _('Blocked — all traffic dropped')
-					}) : null
-				]),
+				// Step 249 (Round 47 hotfix): build the children array
+				// imperatively and push the dot ONLY when blocked. LuCI's
+				// E() helper does NOT skip null entries in the children
+				// array — it stringifies null and inserts a literal "null"
+				// text node. So `[ svg, isBlocked ? E(...) : null ]` was
+				// rendering the word "null" next to the icon on every
+				// unblocked device. The `if (...) push` pattern matches
+				// what the rest of devices.js already does for conditional
+				// children (e.g. Step 180 lbl.secondary handling). Memory:
+				// [[luci-e-helper-no-null-skip]].
+				(function () {
+					var iconKids = [
+						svgEl('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
+							svgUse(self.iconBase + '#' + type.icon))
+					];
+					if (isBlocked) {
+						iconKids.push(E('span', {
+							'class': 'devices-row-blocked-dot',
+							'aria-label': _('Blocked'),
+							'title': _('Blocked — all traffic dropped')
+						}));
+					}
+					return E('div', { 'class': 'devices-icon-wrap' }, iconKids);
+				})(),
 				E('span', { 'class': 'devices-row-name', 'data-mac': mac }, displayName),
 				E('span', { 'class': 'devices-row-ip' }, ipFull || '—'),
 				// Step 148 (Round 40):MAC in main row, mono/tabular like IP

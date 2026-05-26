@@ -5626,6 +5626,95 @@ backlog.md 顶部 + Round 46 candidates 段:
 
 **Round 48 起点**:**无强制候选**。等用户决定方向 — UI 打磨 / Chrome-Claude 全局 audit / 新 feature / 性能优化 / 等等。
 
+## Step 249 — hotfix: LuCI E() 不跳 null,Block dot 把 "null" 字面渲染出来
+
+**时间**:2026-05-26(Round 47 doc grooming 后用户接到 Chrome-Claude 报告)
+**文件**:
+- `htdocs/luci-static/resources/design-x/devices.js`(`buildRow` 内 icon-wrap children 构造,8 行 → 12 行 imperative push 形式)
+- `~/.claude/.../memory/luci-e-helper-no-null-skip.md`(**新 memory entry,第 11 条**)
+- `MEMORY.md`(加 index 链接)
+
+**事件起源**:Round 47 ship 完 doc grooming 后用户跑 Chrome-Claude 跟 "Clients 卡有问题",抓到的 bug 报告非常精确:
+
+> Bug 在 `devices.js` 的 `buildRow` 函数里,具体是:
+> ```js
+> E('div', {'class': 'devices-icon-wrap'}, [
+>     svgEl(...),
+>     isBlocked ? E('span', {...}) : null  // ← 问题在这里
+> ])
+> ```
+> **根本原因**:LuCI 的 `E()` 函数处理 children 数组时,**不会跳过 null,而是把 `null` 转成字符串 "null" 然后作为文本节点插入到 DOM 里**。
+
+**Step 243 自家埋的雷**。Block dot 用了 React 风格 ternary-null-in-children-array,但 LuCI 的 E() 不像 React 那样跳过 falsy 子节点。**每个未 block 的设备**(绝大多数)在 icon 旁边都渲染出字面字符串 "null"。
+
+**为什么前面 verify 没抓到**:Step 243 实测时**只测了 block / unblock 流程**,看红点出来了就 PASS。没特别检查 "non-blocked devices 旁边 是否多了什么不该有的东西"。**Chrome-Claude DOM 扫一眼就看到了** — 它的实机 DOM 检测覆盖面比我们的 "功能性 verification" 更广。
+
+#### 修法
+
+用项目里**已经存在的 imperative push 模式**(Step 180 `nameChildren` 是 canonical example):
+
+```js
+var iconKids = [
+    svgEl('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
+        svgUse(self.iconBase + '#' + type.icon))
+];
+if (isBlocked) {
+    iconKids.push(E('span', {
+        'class': 'devices-row-blocked-dot',
+        'aria-label': _('Blocked'),
+        'title': _('Blocked — all traffic dropped')
+    }));
+}
+return E('div', { 'class': 'devices-icon-wrap' }, iconKids);
+```
+
+IIFE 包一层让它能内联在 children 数组里。**绝对避免任何 ternary 在 array context 出现 null**。
+
+#### 全文件 audit
+
+```bash
+$ grep -nE "\? E\(.*: null|: null[\])]" devices.js
+# (no live array-context occurrence after fix)
+```
+
+整个项目其他文件也扫了,没有同类模式。Step 243 是唯一一处。
+
+#### Memory 第 11 条
+
+`luci-e-helper-no-null-skip.md`(127 行)详细记录:
+- 触发原因(LuCI E() vs React 行为差异)
+- 3 个修复模式(imperative push / `.filter(Boolean)` / 不在 children array 里用 ternary)
+- DevTools console 一行复现:`E('div', {}, ['ok', null, false]).textContent` → `"oknullfalse"`
+- 项目里 `svgEl()` helper IS null-safe(`if (c)` filter),所以 SVG children 没这坑;**bug 只对 `E()` 触发**
+
+**值得 memory 沉淀的理由**:跟 React/Mithril/lit-html 习惯反差大,**任何来自现代框架的人都会撞这坑**。Memory 是项目里 default-include 的 context,future-me 加新 conditional UI 时会先看到这条警告。
+
+#### 教训
+
+**Verify-first 第四层教训**:**verification 的覆盖面不能只看自己定义的 PASS 条件,要看 DOM 实际 state**。Step 243 的 verification clip 写得很细(13 项 ssh 检查 + UI 流程),但**所有 check 都聚焦在 "功能 work" 而不是 "没多余东西"**。Chrome-Claude 这种 DOM 全扫的 audit 是必要补充。
+
+下次新 UI 加 verification 模板:**至少加 1 个 "DOM 里有没有意外字符串 / 字面 'null' / 错位元素" 的扫描**。Chrome-Claude `document.querySelectorAll('*').forEach(el => el.childNodes.forEach(n => n.nodeValue && n.nodeValue.trim() === 'null' && console.log(el)))` 一行就能跑。
+
+#### Break change(可见)
+
+- Clients 卡里所有未 block 设备的 icon 旁边的字面 "null" 字符串**消失**
+- 已 block 设备的红点继续正常显示(代码逻辑不变,只是构造方式换了)
+
+#### 验证
+
+scp:
+```bash
+scp htdocs/luci-static/resources/design-x/devices.js luci-router:/www/luci-static/resources/design-x/devices.js
+```
+
+刷新 Overview,Clients 卡所有 row 的 icon 旁边都该**干净**(无 "null" 字面字)。block 一个设备,红点在 icon 右上角正常出现。
+
+#### Round 47 update
+
+- Step 249 加进 Round 47 收尾的 step 列表(Round 47 = 5 steps:245/246/247/248/**249**)
+- Memory 总数 10 → **11**
+- 时间成本:doc grooming ~1.5h + 这次 hotfix ~15min = ~1.75h
+
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
 
 | 指标 | 第二轮后 | 第三轮 Step 21 后 | 第三轮 Step 22 后 |
