@@ -76,7 +76,7 @@ function changeRowsForOne(c) {
 			val !== undefined
 				? E('span', { 'class': 'apply-diff-val' }, val)
 				: null
-		]);
+		].filter(Boolean));
 	}
 
 	if (c.op === 'add') {

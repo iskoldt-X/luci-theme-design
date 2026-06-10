@@ -1858,7 +1858,7 @@
        User-reported bug: cbi-section grid stacking context on Overview
        was painting WAN Hero / sparkline tiles over the popover. Anything
        a LuCI page can render lives below 9999, so this is unambiguous. */
-    z-index: 9999 !important;
+    z-index: var(--z-overlay) !important;
     /* Step 134 (Round 35): min-width 280 → 220. Chrome-Claude noted
        four short action labels (Restart Wi-Fi, Renew DHCP, Reload
        firewall, Run speedtest) only need ~190px; 280px left a lot of

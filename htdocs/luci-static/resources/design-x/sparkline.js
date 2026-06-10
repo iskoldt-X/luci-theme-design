@@ -443,8 +443,8 @@ function fetchTempZones() {
 			// Sanity-filter to zones reporting a plausible temp (≥1°C
 			// and ≤200°C). If nothing survives, return null → tile hides.
 			var live = data.zones.filter(function (z) {
-				if (!z || typeof z.temp !== 'number') return false;
-				return z.temp >= 1 && z.temp <= 200;
+				if (typeof z !== 'number') return false;
+				return z >= 1 && z <= 200;
 			});
 			return live.length ? live : null;
 		})
