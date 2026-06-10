@@ -95,9 +95,9 @@ function getProtoLabel(w) {
 //   - ISP lookup opt-in (third-party API with consent modal)
 // ─────────────────────────────────────────────────────────────────────────────
 
-var PING_SAMPLES = 5;
+var PING_SAMPLES = 2;
 var PING_TIMEOUT_MS = 1500;
-var REFRESH_MS = 30000;   // re-check WAN state every 30s
+var REFRESH_MS = 60000;   // re-check WAN state every 60s
 
 function median(arr) {
 	if (!arr.length) return null;
@@ -225,7 +225,7 @@ return baseclass.extend({
 				]),
 				// Stat #3: Gateway latency — 5-bar signal + ms text inline in <dd>
 				E('div', { 'class': 'wan-hero-stat' }, [
-					E('dt', {}, _('Latency')),
+					E('dt', {}, _('Response Time')),
 					E('dd', {}, [
 						E('span', { 'class': 'wan-hero-ping-bars', 'id': 'wan-hero-ping-bars', 'data-bars': '0' }, [
 							E('span'), E('span'), E('span'), E('span'), E('span')
@@ -304,7 +304,7 @@ return baseclass.extend({
 			}
 		}
 
-		network.getWANNetworks().then(function (wans) {
+		return network.getWANNetworks().then(function (wans) {
 			if (!wans || !wans.length) {
 				self.setStatus('offline', _('Internet · Offline'));
 				self._taglinePrefix = _('No WAN configured');

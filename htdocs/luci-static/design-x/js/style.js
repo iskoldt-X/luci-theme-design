@@ -5,6 +5,32 @@
 (function () {
 	'use strict';
 
+	// ── 0. Global polling throttle (doc/fix.md Batch 2)
+	// Pauses all intervals when page is hidden. Provides in-flight protection
+	// (skips tick if previous promise hasn't resolved). "一处实现，所有模块受益"
+	var _origSetInterval = window.setInterval;
+	window.setInterval = function (fn, delay) {
+		var inFlight = false;
+		var args = Array.prototype.slice.call(arguments, 2);
+		return _origSetInterval(function () {
+			if (document.hidden) return;
+			if (inFlight) return;
+			try {
+				var res = (typeof fn === 'string') ? eval(fn) : fn.apply(this, args);
+				if (res && typeof res.finally === 'function') {
+					inFlight = true;
+					res.finally(function () { inFlight = false; });
+				} else if (res && typeof res.then === 'function') {
+					inFlight = true;
+					res.then(function () { inFlight = false; }, function (e) { inFlight = false; throw e; });
+				}
+			} catch (e) {
+				inFlight = false;
+				throw e;
+			}
+		}, delay);
+	};
+
 	// ── 1. Indicators icon (MutationObserver replaces deprecated DOMSubtreeModified)
 	//      Step 109 (Round 25): walk ALL children, not just firstElementChild —
 	//      LuCI can attach multiple [data-indicator] siblings (uci-changes +

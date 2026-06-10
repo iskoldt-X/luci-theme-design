@@ -654,12 +654,13 @@ return baseclass.extend({
 
 	tick: function () {
 		var self = this;
+		var promises = [];
 
 		// ── Memory via ubus (CPU has moved to /cgi-bin/design/cpustat — see
 		//    next block). sysInfo().load[] is still emitted but we no longer
 		//    consume it: CPU% from raw /proc/stat counters is the right
 		//    primitive for a 0-100% display.
-		sysInfo().then(function (info) {
+		promises.push(sysInfo().then(function (info) {
 			if (!info || !info.memory || !info.memory.total) return;
 			var used    = info.memory.total - (info.memory.available || info.memory.free || 0);
 			var pct     = (used / info.memory.total) * 100;
@@ -675,14 +676,14 @@ return baseclass.extend({
 			// Round 44 Step 197: Memory is a stable-load metric — pass
 			// minRange=10 so 0.5% noise doesn't amplify to full-height.
 			renderTileSpark(self.tileMem, self.rings.mem, null, 10);
-		}).catch(function () { /* keep stale display */ });
+		}).catch(function () { /* keep stale display */ }));
 
 		// ── CPU% (Step 90, Round 15): replaces the old loadavg-based display.
 		//    Read raw cumulative counters from /proc/stat via theme CGI, diff
 		//    against the previous sample to derive busyDiff / totalDiff =
 		//    percentage utilisation over that ~5 s window. First poll just
 		//    anchors the counters; second poll onwards renders a real %.
-		fetchCpuStat().then(function (stat) {
+		promises.push(fetchCpuStat().then(function (stat) {
 			if (!stat) return;
 			var prev = self._lastCpuStat;
 			self._lastCpuStat = stat;
@@ -705,11 +706,11 @@ return baseclass.extend({
 				meta:     _('Past 5 min · Avg %s%%').format(self.rings.cpu.avg().toFixed(1))
 			});
 			renderTileSpark(self.tileCpu, self.rings.cpu);
-		}).catch(function () { /* keep stale display */ });
+		}).catch(function () { /* keep stale display */ }));
 
 		// ── Temperature
 		if (self.tileTemp.style.display !== 'none') {
-			fetchTempZones().then(function (zones) {
+			promises.push(fetchTempZones().then(function (zones) {
 				if (!zones || !zones.length) return;
 				var t        = Math.max.apply(null, zones);
 				var prevTemp = self.rings.temp.last();
@@ -731,7 +732,9 @@ return baseclass.extend({
 					]
 				});
 				renderTileSpark(self.tileTemp, self.rings.temp);
-			});
+			}).catch(function () { /* keep stale display */ }));
 		}
+
+		return Promise.all(promises);
 	}
 });

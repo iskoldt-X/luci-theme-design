@@ -546,7 +546,8 @@ return baseclass.extend({
 		// runs in parallel with the rest of Overview rendering; by the
 		// time the user expands a LAN Clients row to see the Vendor field,
 		// the lookup is cached.
-		L.require('design-x.vendor').then(function (v) { v.preload(); });
+		// (Batch 2: Disabled preload to save bandwidth on dashboard load; lazy loaded on expand)
+		// L.require('design-x.vendor').then(function (v) { v.preload(); });
 		this.tryInject();
 	},
 
@@ -740,12 +741,15 @@ return baseclass.extend({
 		//   - no leases → empty list with "Unable to read DHCP leases"
 		//   - no wifi   → "Wired" pill for all
 		//   - no presence → fall back to lease.expires (Round 38 path)
-		Promise.all([
+		// list-blocks: only fetch once at startup, local actions mutate the cached map.
+		if (!this._pBlockedMacs) this._pBlockedMacs = fetchBlockedMacs();
+
+		return Promise.all([
 			getDHCPLeases().then(function (d) { return d; }, function () { return null; }),
 			fetchWifiStations(),
 			fetchHostPresence(),
 			getHostHints().then(function (d) { return d; }, function () { return null; }),
-			fetchBlockedMacs()
+			this._pBlockedMacs
 		]).then(function (results) {
 			var leasesData = results[0];
 			var wifiData   = results[1];
@@ -1379,6 +1383,7 @@ return baseclass.extend({
 			// Optimistic state update + immediate re-render. Also kicks a
 			// real refresh() so list-blocks is re-fetched from kernel.
 			self.blockedMacs[mac] = true;
+			self._pBlockedMacs = null; // Force fetch on next refresh
 			self.refresh();
 		}).catch(function (err) {
 			toastSafe('error', _('Block failed') + ': ' +
@@ -1400,6 +1405,7 @@ return baseclass.extend({
 			}
 			toastSafe('success', _('Unblocked') + ' ' + displayName);
 			delete self.blockedMacs[mac];
+			self._pBlockedMacs = null; // Force fetch on next refresh
 			self.refresh();
 		}).catch(function (err) {
 			toastSafe('error', _('Unblock failed') + ': ' +
