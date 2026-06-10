@@ -345,7 +345,25 @@ return baseclass.extend({
 				this.close();
 				break;
 			case 'Tab':
-				ev.preventDefault();
+				if (!this.overlay) break;
+				var focusable = this.overlay.querySelectorAll('a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])');
+				if (!focusable.length) {
+					ev.preventDefault();
+					break;
+				}
+				var first = focusable[0];
+				var last = focusable[focusable.length - 1];
+				if (ev.shiftKey) {
+					if (document.activeElement === first || document.activeElement === this.overlay) {
+						last.focus();
+						ev.preventDefault();
+					}
+				} else {
+					if (document.activeElement === last) {
+						first.focus();
+						ev.preventDefault();
+					}
+				}
 				break;
 		}
 	},

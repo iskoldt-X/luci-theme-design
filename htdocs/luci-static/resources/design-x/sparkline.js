@@ -584,7 +584,7 @@ return baseclass.extend({
 		});
 
 		this.tick();
-		this._timer = setInterval(L.bind(this.tick, this), SAMPLE_INTERVAL_MS);
+		this._timer = window.DXScheduler.every(SAMPLE_INTERVAL_MS, L.bind(this.tick, this));
 	},
 
 	// Step 43 + 89 + 139:callback for design-x.wan-stats.subscribe.

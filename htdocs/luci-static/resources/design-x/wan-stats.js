@@ -167,7 +167,7 @@ function startTimer() {
 	// Kick off detection + first poll asap so subscribers don't stare at "—"
 	// for 2 s on a fresh page load.
 	poll().then(function () {
-		state.timer = setInterval(poll, POLL_INTERVAL_MS);
+		state.timer = window.DXScheduler.every(POLL_INTERVAL_MS, poll);
 	});
 }
 

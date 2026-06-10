@@ -71,18 +71,18 @@
 	<link rel="apple-touch-icon" sizes="192x192" href="{{ media }}/images/icon.png">
 	<link rel="shortcut icon" type="image/png" href="{{ media }}/images/icon.png">
 
-	<link rel="stylesheet" href="{{ media }}/css/style.css?v=1">
+	<link rel="stylesheet" href="{{ media }}/css/style.css?v=@@PKG_VERSION@@-@@PKG_RELEASE@@">
 	{#- Step 67 (Round 11) — features.css split out of style.css so @import
 	    can sit at the top of style.css (CSS spec); browsers stopped honoring
 	    trailing @import on 2026-05-23. -#}
-	<link rel="stylesheet" href="{{ media }}/css/features.css?v=1">
+	<link rel="stylesheet" href="{{ media }}/css/features.css?v=@@PKG_VERSION@@-@@PKG_RELEASE@@">
 	{% if (node?.css): %}
-	<link rel="stylesheet" href="{{ resource }}/{{ node.css }}?v=1">
+	<link rel="stylesheet" href="{{ resource }}/{{ node.css }}?v=@@PKG_VERSION@@-@@PKG_RELEASE@@">
 	{% endif %}
 
-	<script src="{{ dispatcher.build_url('admin/translations', dispatcher.lang) }}?v=1"></script>
-	<script src="{{ resource }}/cbi.js?v=1"></script>
-	<script src="{{ resource }}/luci.js?v=1"></script>
+	<script src="{{ dispatcher.build_url('admin/translations', dispatcher.lang) }}"></script>
+	<script src="{{ resource }}/cbi.js"></script>
+	<script src="{{ resource }}/luci.js"></script>
 	{% if (css): %}
 	<style title="text/css">{{ css }}</style>
 	{% endif %}
@@ -220,4 +220,4 @@
 				</noscript>
 
 				<div id="tabmenu" style="display:none"></div>
-	<script src="{{ media }}/js/style.js?v=1"></script>
+	<script src="{{ media }}/js/style.js?v=@@PKG_VERSION@@-@@PKG_RELEASE@@"></script>

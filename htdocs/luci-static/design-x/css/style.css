@@ -79,6 +79,7 @@
     --z-header:  20;
     --z-sidebar: 30;
     --z-overlay: 40;
+    --z-drawer:  45;
     --z-modal:   50;
     --z-toast:   60;
     --z-tooltip: 70;
@@ -787,7 +788,7 @@ header {
     height: 55px;
     float: left;
     position: fixed;
-    z-index: 101;
+    z-index: var(--z-header);
 }
 
 /* Replaces the JS resize handler that used to toggle box-shadow on small viewports */
@@ -956,7 +957,7 @@ small {
 
 .main-right > #maincontent {
 	position: relative;
-    z-index: 50;
+    z-index: var(--z-base);
 }
 
 
@@ -2913,7 +2914,7 @@ div.cbi-value > .cbi-value-description {
 
 .cbi-dropdown[open] > ul.dropdown {
 	position: absolute;
-	z-index: 1100;
+	z-index: var(--z-tooltip);
 	display: block;
 	width: auto;
 	max-height: 200px !important;
@@ -3093,7 +3094,7 @@ div.cbi-value > .cbi-value-description {
 
 #modal_overlay {
 	position: fixed;
-	z-index: 900;
+	z-index: var(--z-modal);
 	top: 4rem;
 	right: 10000px;
 	bottom: 0;
@@ -3804,7 +3805,7 @@ span[data-tooltip] .label {
  * IP 列表 / 长状态字串撑出屏幕。 */
 .cbi-tooltip {
 	position: absolute;
-	z-index: 1000;
+	z-index: var(--z-tooltip);
 	left: -1000px;
 	max-width: 280px;
 	padding: var(--space-2) var(--space-3);
@@ -3903,7 +3904,7 @@ label[data-index][data-depends] {
 
 .darkMask {
 	position: fixed;
-	z-index: 99;
+	z-index: var(--z-overlay);
 	width: 100%;
 	height: 100%;
 	content: "";
@@ -4479,7 +4480,6 @@ input[name="nslookup"] {
     /* img[src*="/images/logo.png"] {
     background-color: var(--mainleftbgcolor);
     height: 50px;
-    background-image: var(--mlogo);
     background-size: 310px;
     background-repeat: no-repeat;
     padding: 0 0 0 310px;
@@ -4491,7 +4491,7 @@ input[name="nslookup"] {
     .main-left {
         width: 17rem;
         position: fixed;
-        z-index: 100;
+        z-index: var(--z-drawer);
     }
 
     .main-right {
@@ -4741,7 +4741,6 @@ input[name="nslookup"] {
     /* img[src*="/images/logo.png"]
     {    
     height: 45px;
-    background-image: var(--mlogo);
     background-size: 310px;
     background-repeat: no-repeat;
     padding: 0 0 0 310px;
@@ -4931,7 +4930,7 @@ input[name="nslookup"] {
         preview's iOS-style nav), .navbar-tab flex-column children, and
         per-section active state keyed off body[data-page^="..."]. */
 .navbar {
-	z-index: 200;
+	z-index: var(--z-sticky);
 	overflow: hidden;
 	position: fixed;
 	bottom: 0;

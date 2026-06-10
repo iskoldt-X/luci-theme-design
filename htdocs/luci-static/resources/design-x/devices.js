@@ -523,8 +523,7 @@ function fetchBlockedMacs() {
 				r.macs.forEach(function (m) { map[String(m).toUpperCase()] = true; });
 			}
 			return map;
-		})
-		.catch(function () { return {}; });
+		});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -562,7 +561,7 @@ return baseclass.extend({
 		this.startHideStorageDockerOverlay();
 		this.injectCard();
 		this.refresh();
-		this._timer = setInterval(L.bind(this.refresh, this), 30000);
+		this._timer = window.DXScheduler.every(30000, L.bind(this.refresh, this));
 	},
 
 	// Round 43 Step 190 — Bug #3 (Chrome-Claude). The Storage card on
@@ -742,7 +741,12 @@ return baseclass.extend({
 		//   - no wifi   → "Wired" pill for all
 		//   - no presence → fall back to lease.expires (Round 38 path)
 		// list-blocks: only fetch once at startup, local actions mutate the cached map.
-		if (!this._pBlockedMacs) this._pBlockedMacs = fetchBlockedMacs();
+		if (!this._pBlockedMacs) {
+			this._pBlockedMacs = fetchBlockedMacs().catch(function () {
+				self._pBlockedMacs = null;
+				return {};
+			});
+		}
 
 		return Promise.all([
 			getDHCPLeases().then(function (d) { return d; }, function () { return null; }),

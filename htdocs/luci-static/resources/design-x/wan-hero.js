@@ -180,11 +180,11 @@ return baseclass.extend({
 		}
 		this.injectCard();
 		this.refresh();
-		this._timer = setInterval(L.bind(this.refresh, this), REFRESH_MS);
+		this._timer = window.DXScheduler.every(REFRESH_MS, L.bind(this.refresh, this));
 		// Step 92 (Round 16): the "Last check Xs ago" portion of the
 		// tagline updates every 5 s independently of the 30 s WAN-state
 		// refresh. Cheap text swap, no network calls — pure UI ticker.
-		this._taglineTimer = setInterval(L.bind(this.updateTagline, this), 5000);
+		this._taglineTimer = window.DXScheduler.every(5000, L.bind(this.updateTagline, this));
 	},
 
 	injectCard: function () {

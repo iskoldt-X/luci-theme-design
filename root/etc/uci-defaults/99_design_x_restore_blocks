@@ -6,15 +6,19 @@ NFT_FILE="/usr/share/nftables.d/ruleset-post/design_x.nft"
 elems=""
 sep=""
 for m in $(cat /etc/design-x/blocked_macs); do
-	elems="$elems$sep$m"
-	sep=", "
+	case "$m" in
+		[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F])
+			elems="$elems$sep$m"
+			sep=", "
+			;;
+	esac
 done
 
 elems_clause=""
 [ -n "$elems" ] && elems_clause="
 		elements = { $elems }"
 
-cat > "$NFT_FILE" <<EOF
+cat > "$NFT_FILE.tmp" <<EOF
 # luci-theme-design-x — Restored from /etc/design-x/blocked_macs
 table inet design_x
 delete table inet design_x
@@ -41,5 +45,7 @@ table inet design_x {
 	}
 }
 EOF
+
+mv "$NFT_FILE.tmp" "$NFT_FILE"
 
 exit 0

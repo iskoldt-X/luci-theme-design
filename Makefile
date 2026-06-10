@@ -44,6 +44,8 @@ LUCI_DEPENDS:=+luci-base +luci-lua-runtime
 # Round 42 Step 163: rpcd ubus object script needs +x. The IPKG_INSTROOT
 # guard around the rpcd reload ensures we only call /etc/init.d/rpcd at
 # real install time (target), not at ipk pack time (fakeroot).
+
+
 define Package/$(PKG_NAME)/postinst-pkg
 #!/bin/sh
 [ -f "$${IPKG_INSTROOT}/usr/libexec/rpcd/luci-theme-design-x" ] && \
@@ -90,5 +92,11 @@ exit 0
 endef
 
 include $(TOPDIR)/feeds/luci/luci.mk
+
+define theme_sed_version
+	sed -i 's/@@PKG_VERSION@@-@@PKG_RELEASE@@/$(PKG_VERSION)-$(PKG_RELEASE)/g' \
+		$(PKG_BUILD_DIR)/root/usr/share/ucode/luci/template/themes/design-x/header.ut
+endef
+Hooks/Prepare/Post += theme_sed_version
 
 # call BuildPackage - OpenWrt buildroot signature

@@ -65,6 +65,10 @@ regenerate_state_file() {
 	(
 		flock -x 9
 
+		if ! nft list set inet design_x blocked_macs >/dev/null 2>&1; then
+			exit 1
+		fi
+
 		elems=""
 		sep=""
 		: > /etc/design-x/blocked_macs.tmp
