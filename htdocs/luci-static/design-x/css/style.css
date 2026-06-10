@@ -196,11 +196,12 @@
 @media (prefers-color-scheme: dark) {
     :root {
         /* —— 主色提一档亮度保对比 —— */
-        --color-accent-400: #6ee7b7;
-        --color-accent-500: #34d399;
-        --color-accent-600: #10b981;
-        --color-accent-500-12: rgba(52, 211, 153, 0.12);
-        --color-accent-500-35: rgba(52, 211, 153, 0.4);
+        --color-accent-400: #34d399;
+        --color-accent-500: #10b981;
+        --color-accent-600: #059669;
+        --color-accent-700: #047857;
+        --color-accent-500-12: rgba(16, 185, 129, 0.12);
+        --color-accent-500-35: rgba(16, 185, 129, 0.4);
 
         /* —— 分层灰阶（不用纯黑） —— */
         --color-bg:           #0a0a0b;
@@ -209,8 +210,8 @@
         --color-surface-2:    #3f3f46;
 
         --color-text:         #fafafa;
-        --color-text-muted:   #a1a1aa;
-        --color-text-subtle:  #71717a;
+        --color-text-muted:   #d4d4d8;
+        --color-text-subtle:  #a1a1aa;
         --color-text-onaccent:#ffffff;
 
         --color-border-subtle:  #27272a;
@@ -218,15 +219,15 @@
         --color-border-strong:  #52525b;
 
         /* —— 语义色深色版（更亮） —— */
-        --color-success: #34d399;
-        --color-warning: #fbbf24;
-        --color-danger:  #f87171;
-        --color-info:    #60a5fa;
+        --color-success: #10b981;
+        --color-warning: #f59e0b;
+        --color-danger:  #ef4444;
+        --color-info:    #3b82f6;
 
-        --color-success-bg: rgba(52, 211, 153, 0.12);
-        --color-warning-bg: rgba(251, 191, 36, 0.12);
-        --color-danger-bg:  rgba(248, 113, 113, 0.12);
-        --color-info-bg:    rgba(96, 165, 250, 0.12);
+        --color-success-bg: rgba(16, 185, 129, 0.12);
+        --color-warning-bg: rgba(245, 158, 11, 0.12);
+        --color-danger-bg:  rgba(239, 68, 68, 0.12);
+        --color-info-bg:    rgba(59, 130, 246, 0.12);
 
         /* —— 阴影改 1px 边框（深色下阴影不可见） —— */
         --shadow-xs: none;
@@ -409,11 +410,12 @@ html[data-theme="light"] {
 html[data-theme="dark"] {
     color-scheme: dark;
     /* 把 prefers-color-scheme: dark 的所有 token 在这里也覆盖一遍 */
-    --color-accent-400: #6ee7b7;
-    --color-accent-500: #34d399;
-    --color-accent-600: #10b981;
-    --color-accent-500-12: rgba(52, 211, 153, 0.12);
-    --color-accent-500-35: rgba(52, 211, 153, 0.4);
+    --color-accent-400: #34d399;
+    --color-accent-500: #10b981;
+    --color-accent-600: #059669;
+    --color-accent-700: #047857;
+    --color-accent-500-12: rgba(16, 185, 129, 0.12);
+    --color-accent-500-35: rgba(16, 185, 129, 0.4);
 
     --color-bg:           #0a0a0b;
     --color-surface-0:    #18181b;
@@ -421,23 +423,23 @@ html[data-theme="dark"] {
     --color-surface-2:    #3f3f46;
 
     --color-text:         #fafafa;
-    --color-text-muted:   #a1a1aa;
-    --color-text-subtle:  #71717a;
+    --color-text-muted:   #d4d4d8;
+    --color-text-subtle:  #a1a1aa;
     --color-text-onaccent:#ffffff;
 
     --color-border-subtle:  #27272a;
     --color-border-default: #3f3f46;
     --color-border-strong:  #52525b;
 
-    --color-success: #34d399;
-    --color-warning: #fbbf24;
-    --color-danger:  #f87171;
-    --color-info:    #60a5fa;
+    --color-success: #10b981;
+    --color-warning: #f59e0b;
+    --color-danger:  #ef4444;
+    --color-info:    #3b82f6;
 
-    --color-success-bg: rgba(52, 211, 153, 0.12);
-    --color-warning-bg: rgba(251, 191, 36, 0.12);
-    --color-danger-bg:  rgba(248, 113, 113, 0.12);
-    --color-info-bg:    rgba(96, 165, 250, 0.12);
+    --color-success-bg: rgba(16, 185, 129, 0.12);
+    --color-warning-bg: rgba(245, 158, 11, 0.12);
+    --color-danger-bg:  rgba(239, 68, 68, 0.12);
+    --color-info-bg:    rgba(59, 130, 246, 0.12);
 
     /* Dark-mode chart palette — same hues, +brightness for contrast on dark bg */
     --chart-1: #34d399;
@@ -454,11 +456,12 @@ html[data-theme="dark"] {
 }
 /* light 模式覆盖 prefers-color-scheme: dark（强制亮色） */
 html[data-theme="light"] {
-    --color-accent-400: #34d399;
-    --color-accent-500: #10b981;
-    --color-accent-600: #059669;
-    --color-accent-500-12: rgba(16, 185, 129, 0.12);
-    --color-accent-500-35: rgba(16, 185, 129, 0.35);
+    --color-accent-400: #10b981;
+    --color-accent-500: #059669;
+    --color-accent-600: #047857;
+    --color-accent-700: #064e3b;
+    --color-accent-500-12: rgba(5, 150, 105, 0.12);
+    --color-accent-500-35: rgba(5, 150, 105, 0.35);
 
     --color-bg:           #fafafa;
     --color-surface-0:    #ffffff;
@@ -466,17 +469,17 @@ html[data-theme="light"] {
     --color-surface-2:    #e4e4e7;
 
     --color-text:         #18181b;
-    --color-text-muted:   #52525b;
-    --color-text-subtle:  #a1a1aa;
+    --color-text-muted:   #3f3f46;
+    --color-text-subtle:  #71717a;
 
     --color-border-subtle:  #e4e4e7;
     --color-border-default: #d4d4d8;
     --color-border-strong:  #a1a1aa;
 
-    --color-success: #10b981;
-    --color-warning: #f59e0b;
-    --color-danger:  #ef4444;
-    --color-info:    #3b82f6;
+    --color-success: #059669;
+    --color-warning: #d97706;
+    --color-danger:  #dc2626;
+    --color-info:    #2563eb;
 
     --color-success-bg: #d1fae5;
     --color-warning-bg: #fef3c7;
@@ -503,13 +506,7 @@ html[data-theme="dark"]  .theme-toggle .icon-dark  { display: block; }
 /* icomoon font removed 2026-05-22 — 仅为 1 个汉堡菜单图标加载 4 个文件
  * (font.eot/.ttf/.woff/.svg = ~8 KB)；现在用 CSS 绘制 3 条线代替。
  * 详见 doc/styling-progress.md Step 12 */
-
-@font-face {
-    font-family: 'design';
-    src: url('../fonts/iconfont-Regular.woff2') format('woff2'),
-         url('../fonts/iconfont-Regular.woff') format('woff'),
-         url('../fonts/iconfont-Regular.ttf') format('truetype');
-}
+/* font-face removed for sidebar arrow (Fix 24) */
 
 /* Cocon-Regular-Font removed 2026-05-22 — 1970s 装饰字体与现代 dashboard 风格冲突
  * 详见 doc/claude_style.md §3.1。brand 改用系统字体 + semibold 字重区分。 */
@@ -546,8 +543,9 @@ a:focus-visible,
 button:focus-visible,
 [role="button"]:focus-visible,
 [tabindex]:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus);
+    outline: 2px solid var(--color-accent-600);
+    outline-offset: 2px;
+    box-shadow: none;
     border-radius: var(--radius-md);
 }
 
@@ -1370,21 +1368,20 @@ span[data-indicator="uci-changes"] {
 }
 
 .main > .main-left > .nav > .slide > .menu::after {
-    right: 0.5rem;
-    top: 0.8rem;
-    font-family: "design" !important;
-    font-style: normal !important;
-    font-variant: normal !important;
-    content: "\eb03";
+    content: '';
+    display: inline-block;
+    width: 16px;
+    height: 16px;
     float: right;
-    padding-right: 5px;
-    line-height: 1.6;
-    /* Better Font Rendering =========== */
-    -moz-osx-font-smoothing: grayscale;
-    transition: all 0.15s ease;
-    text-rendering: auto;
-    -webkit-font-smoothing: antialiased;
-    transition: all 0.3s;
+    margin-right: 5px;
+    margin-top: 14px;
+    background-color: currentColor;
+    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>') no-repeat center / contain;
+    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>') no-repeat center / contain;
+    transition: transform 0.3s ease;
+}
+.main > .main-left > .nav > .slide.active > .menu::after {
+    transform: rotate(180deg);
 }
 
 /* Menu icons — upgrade.md §4.C2 — Lucide SVG migration.
@@ -4236,23 +4233,23 @@ input[name="nslookup"] {
 
 /* wireless overview */
 #cbi-wireless > #wifi_assoclist_table > .tr {
-	box-shadow: inset 1px -1px 0 #ddd, inset -1px -1px 0 #ddd;
+	box-shadow: inset 1px -1px 0 var(--color-border-subtle), inset -1px -1px 0 var(--color-border-subtle);
 }
 
 #cbi-wireless > #wifi_assoclist_table > .tr.placeholder > .td {
 	right: 33px;
 	bottom: 33px;
 	left: 33px;
-	border-top: thin solid #ddd !important;
+	border-top: thin solid var(--color-border-subtle) !important;
 }
 
 #cbi-wireless > #wifi_assoclist_table > .tr.table-titles {
-	box-shadow: inset 1px 0 0 #ddd, inset -1px 0 0 #ddd;
+	box-shadow: inset 1px 0 0 var(--color-border-subtle), inset -1px 0 0 var(--color-border-subtle);
 }
 
 #cbi-wireless > #wifi_assoclist_table > .tr.table-titles > .th {
-	border-bottom: thin solid #ddd;
-	box-shadow: 0 -1px 0 0 #ddd;
+	border-bottom: thin solid var(--color-border-subtle);
+	box-shadow: 0 -1px 0 0 var(--color-border-subtle);
 }
 
 #wifi_assoclist_table > .tr > .td[data-title="RX Rate / TX Rate"] {

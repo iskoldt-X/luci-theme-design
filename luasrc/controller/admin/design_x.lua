@@ -57,7 +57,7 @@ function action_download()
 
 	local bytes = tonumber(http.formvalue("bytes")) or 52428800
 	if bytes < 1024       then bytes = 1024       end
-	if bytes > 1073741824 then bytes = 1073741824 end
+	if bytes > 104857600  then bytes = 104857600  end -- Cap at 100MB
 
 	http.prepare_content("application/octet-stream")
 	http.header("Content-Length", tostring(bytes))

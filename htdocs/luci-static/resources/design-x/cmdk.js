@@ -344,6 +344,9 @@ return baseclass.extend({
 				ev.preventDefault();
 				this.close();
 				break;
+			case 'Tab':
+				ev.preventDefault();
+				break;
 		}
 	},
 

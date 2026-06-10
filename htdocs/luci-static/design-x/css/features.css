@@ -1,7 +1,7 @@
 /*
  * features.css — luci-theme-design Phase 1-4 feature rules
  * Split out of style.css per upgrade.md §4.C1 for maintainability.
- * Loaded via @import at the end of style.css; the runtime cascade is
+ * Loaded via two <link> tags in header.ut; the runtime cascade is
  * identical to the pre-split version.
  */
 
@@ -1875,14 +1875,17 @@
     box-shadow: var(--shadow-lg);
     padding: var(--space-2);
     opacity: 0;
+    visibility: hidden;
     transform: translateY(-4px);
     pointer-events: none;
     transition: opacity var(--motion-fast) var(--ease-out),
+                visibility var(--motion-fast) var(--ease-out),
                 transform var(--motion-fast) var(--ease-out);
 }
 
 .quick-actions-dropdown.open {
     opacity: 1;
+    visibility: visible;
     transform: translateY(0);
     pointer-events: auto;
 }
@@ -2176,4 +2179,14 @@
 .speedtest-card:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-md);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ACCESSIBILITY
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after {
+        animation: none !important;
+    }
 }

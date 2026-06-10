@@ -825,12 +825,22 @@ return baseclass.extend({
 			return;
 		}
 
+		var activeMac = null;
+		if (document.activeElement && document.activeElement.getAttribute('data-mac')) {
+			activeMac = document.activeElement.getAttribute('data-mac');
+		}
+
 		// Step 44: build all rows ONCE with detail embedded, then toggle a
 		// class on click — no DOM rebuild on every expand.
 		rowsEl.innerHTML = '';
 		unique.forEach(function (l) {
 			rowsEl.appendChild(self.buildRow(l));
 		});
+
+		if (activeMac) {
+			var toFocus = rowsEl.querySelector('[data-mac="' + activeMac + '"]');
+			if (toFocus && toFocus.focus) toFocus.focus();
+		}
 
 		// Step 235: refresh header indicators (arrows / active class)
 		// in case sortState changed since last render.
@@ -962,6 +972,8 @@ return baseclass.extend({
 		var isBlocked = !!self.blockedMacs[mac];
 
 		return E('div', {
+			'role':     'button',
+			'tabindex': '0',
 			'class':    'devices-row' + (isOpen ? ' devices-row-expanded' : '')
 			            + (seen.stale ? ' devices-row-offline' : '')
 			            + (isBlocked ? ' devices-row-blocked' : ''),
@@ -971,6 +983,13 @@ return baseclass.extend({
 				// was clicked. closest() walks up the tree.
 				if (e.target.closest && e.target.closest('.devices-action')) return;
 				self.toggleRow(mac);
+			},
+			'keydown': function (e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					if (e.target.closest && e.target.closest('.devices-action')) return;
+					self.toggleRow(mac);
+				}
 			}
 		}, [
 			E('div', { 'class': 'devices-summary' }, [
@@ -1350,8 +1369,15 @@ return baseclass.extend({
 			// silent no-op that surprises the user.
 			return self._doBlock(mac, displayName);
 		}
-		ui.showModal(_('Block this device?'), [
-			E('p', {}, _('All network traffic to and from %s will be dropped immediately. The device will lose internet access and cannot reach the router admin page.').replace('%s', '“' + displayName + '”')),
+		var macKey = String(mac).toUpperCase().replace(/:/g, '');
+		var isMgmt = self.presence[macKey] && self.presence[macKey].is_mgmt;
+		var warningTitle = isMgmt ? _('Block your own device?') : _('Block this device?');
+		var warningBody = isMgmt ?
+			E('p', { 'style': 'color: var(--color-danger); font-weight: bold;' }, _('WARNING: This device appears to be the one you are currently using to manage the router. If you block it, you will immediately lose access to this admin page and may need to use a different device or SSH to unblock it!')) :
+			E('p', {}, _('All network traffic to and from %s will be dropped immediately. The device will lose internet access and cannot reach the router admin page.').replace('%s', '“' + displayName + '”'));
+
+		ui.showModal(warningTitle, [
+			warningBody,
 			E('p', { 'class': 'devices-modal-mac' }, mac),
 			E('p', {}, _('You can undo this from the Clients card later by clicking Unblock on the same row.')),
 			E('div', { 'class': 'right' }, [
