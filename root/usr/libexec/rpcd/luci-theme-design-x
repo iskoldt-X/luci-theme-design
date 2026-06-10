@@ -122,8 +122,8 @@ NFT_EOF
 }
 
 run_method() {
-	local _method="$1"
-	local _input="$2"
+	_method="$1"
+	_input="$2"
 	case "$_method" in
 		devstats)
 			DEV=$(echo "$_input" | jsonfilter -e '@.dev' 2>/dev/null)
@@ -186,9 +186,9 @@ run_method() {
 			if command -v ubus >/dev/null 2>&1; then
 				wifi_cache="/tmp/dx-cache/wifi-stations"
 				if [ ! -f "$wifi_cache" ] || [ "$(( $(date +%s) - $(stat -c %Y "$wifi_cache" 2>/dev/null || echo 0) ))" -ge 30 ]; then
-					mkdir -p /tmp/dx-cache
-					run_method "wifi-stations" "" > "${wifi_cache}.tmp"
-					mv "${wifi_cache}.tmp" "$wifi_cache"
+					[ -d /tmp/dx-cache ] || mkdir -p /tmp/dx-cache
+					run_method "wifi-stations" "" > "${wifi_cache}.tmp.$$"
+					mv "${wifi_cache}.tmp.$$" "$wifi_cache"
 				fi
 				iwinfo_devices=$(ubus call iwinfo devices 2>/dev/null | jsonfilter -e '@.devices[*]' 2>/dev/null)
 				for dev in $iwinfo_devices; do
@@ -328,7 +328,7 @@ case "$1" in
 		esac
 		if [ -n "$TTL" ]; then
 			CACHE_DIR="/tmp/dx-cache"
-			mkdir -p "$CACHE_DIR"
+			[ -d "$CACHE_DIR" ] || mkdir -p "$CACHE_DIR"
 			CACHE_KEY="$METHOD"
 			if [ "$METHOD" = "devstats" ]; then
 				DEV=$(echo "$INPUT" | jsonfilter -e '@.dev' 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
@@ -344,8 +344,8 @@ case "$1" in
 					exit 0
 				fi
 			fi
-			run_method "$METHOD" "$INPUT" > "${CACHE_FILE}.tmp"
-			mv "${CACHE_FILE}.tmp" "$CACHE_FILE"
+			run_method "$METHOD" "$INPUT" > "${CACHE_FILE}.tmp.$$"
+			mv "${CACHE_FILE}.tmp.$$" "$CACHE_FILE"
 			cat "$CACHE_FILE"
 		else
 			run_method "$METHOD" "$INPUT"
