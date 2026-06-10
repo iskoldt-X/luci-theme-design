@@ -57,15 +57,14 @@ var POLL_INTERVAL_MS = 2000;
 // fallback while the new path is being verified against production.
 // A later Sub-B2 cleanup Step will rm root/www/cgi-bin/design/devstats
 // once the user confirms the new path works on the MTK build.
-var callDevstats = rpc.declare({
-	object: 'luci-theme-design-x',
-	method: 'devstats',
-	params: [ 'dev' ],
+var callNetworkDevices = rpc.declare({
+	object: 'luci-rpc',
+	method: 'getNetworkDevices',
 	expect: { '': {} }
 });
 
-function fetchDevStats(deviceName) {
-	return callDevstats(deviceName);
+function fetchDevStats() {
+	return callNetworkDevices();
 }
 
 function warn(msg, obj) {
@@ -144,17 +143,18 @@ function poll() {
 		});
 	}
 
-	return fetchDevStats(state.wanDevice).then(function (data) {
-		if (!data || data.error) {
+	return fetchDevStats().then(function (data) {
+		var devData = data && data[state.wanDevice];
+		if (!devData) {
 			warn('devstats error', data);
 			emit({ rxBitsPerSec: null, txBitsPerSec: null, deviceName: state.wanDevice, online: false });
 			return;
 		}
-		// Convert the CGI's flat response into the shape processStats expects
-		// (same as what the old rpc returned).
+		
+		var stats = devData.stats || devData.statistics || {};
 		processStats({
-			statistics: { rx_bytes: data.rx_bytes, tx_bytes: data.tx_bytes },
-			up:         data.up
+			statistics: { rx_bytes: stats.rx_bytes, tx_bytes: stats.tx_bytes },
+			up:         devData.up
 		});
 	}).catch(function (err) {
 		warn('devstats fetch failed', err);

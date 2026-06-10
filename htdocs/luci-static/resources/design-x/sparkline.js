@@ -429,37 +429,12 @@ var sysInfo = L.rpc.declare({ object: 'system', method: 'info' });
 // luci-theme-design-x ubus methods. Backend impls preserve the legacy
 // CGI response shapes verbatim ({zones:[...]} for temp; full /proc/stat
 // counter object for cpustat). See /usr/libexec/rpcd/luci-theme-design-x.
-var callTemp    = rpc.declare({ object: 'luci-theme-design-x', method: 'temp',    expect: { '': {} } });
-var callCpustat = rpc.declare({ object: 'luci-theme-design-x', method: 'cpustat', expect: { '': {} } });
+var callSysmetrics = rpc.declare({ object: 'luci-theme-design-x', method: 'sysmetrics', expect: { '': {} } });
 
-function fetchTempZones() {
-	return callTemp()
+function fetchSysmetrics() {
+	return callSysmetrics()
 		.then(function (data) {
-			if (!data || !Array.isArray(data.zones) || !data.zones.length) return null;
-			// Round 43 Step 192 — Bug #6 (Chrome-Claude). On VMs (QEMU,
-			// container hosts) the ACPI thermal_zone* nodes exist but
-			// report 0 or fixed garbage. fetchTempZones used to return
-			// the array as-is, so the tile rendered with "—" forever.
-			// Sanity-filter to zones reporting a plausible temp (≥1°C
-			// and ≤200°C). If nothing survives, return null → tile hides.
-			var live = data.zones.filter(function (z) {
-				if (typeof z !== 'number') return false;
-				return z >= 1 && z <= 200;
-			});
-			return live.length ? live : null;
-		})
-		.catch(function () { return null; });
-}
-
-// Step 90 (Round 15): raw cumulative CPU counters from /proc/stat (now
-// via ubus per Step 165). Browser-side computes delta-over-delta to get
-// percentage utilisation between two polls. Returns null on transport
-// error so the caller can skip this tick gracefully.
-function fetchCpuStat() {
-	return callCpustat()
-		.then(function (data) {
-			if (!data || typeof data.total !== 'number' || typeof data.busy !== 'number') return null;
-			if (data.total <= 0) return null;
+			if (!data || !data.cpu || !data.zones) return null;
 			return data;
 		})
 		.catch(function () { return null; });
@@ -566,7 +541,12 @@ return baseclass.extend({
 		// inline style.display, so any later code that touches
 		// .style.display can't accidentally un-hide. Grid layout
 		// auto-reflows; the remaining 3 tiles flex-fill the row.
-		fetchTempZones().then(function (zones) {
+		fetchSysmetrics().then(function (data) {
+			var zones = null;
+			if (data && Array.isArray(data.zones) && data.zones.length > 0) {
+				var live = data.zones.filter(function (z) { return typeof z === 'number' && z >= 1 && z <= 200; });
+				if (live.length) zones = live;
+			}
 			if (!zones && self.tileTemp) {
 				self.tileTemp.style.display = 'none';
 				self.tileTemp.dataset.designHidden = '1';
@@ -678,62 +658,59 @@ return baseclass.extend({
 			renderTileSpark(self.tileMem, self.rings.mem, null, 10);
 		}).catch(function () { /* keep stale display */ }));
 
-		// ── CPU% (Step 90, Round 15): replaces the old loadavg-based display.
-		//    Read raw cumulative counters from /proc/stat via theme CGI, diff
-		//    against the previous sample to derive busyDiff / totalDiff =
-		//    percentage utilisation over that ~5 s window. First poll just
-		//    anchors the counters; second poll onwards renders a real %.
-		promises.push(fetchCpuStat().then(function (stat) {
-			if (!stat) return;
-			var prev = self._lastCpuStat;
-			self._lastCpuStat = stat;
-			if (!prev) return;  // first sample — anchor only, no display yet
+		promises.push(fetchSysmetrics().then(function (data) {
+			if (!data) return;
 
-			var totalDiff = stat.total - prev.total;
-			var busyDiff  = stat.busy  - prev.busy;
-			// Counter wrap / process reset / impossibly-short window — skip
-			// this sample, anchor stays put for the next diff.
-			if (totalDiff <= 0 || busyDiff < 0) return;
+			// ── CPU%
+			var stat = data.cpu;
+			if (stat && stat.total > 0) {
+				var prev = self._lastCpuStat;
+				self._lastCpuStat = stat;
+				if (prev) {
+					var totalDiff = stat.total - prev.total;
+					var busyDiff  = stat.busy  - prev.busy;
+					if (totalDiff > 0 && busyDiff >= 0) {
+						var pct     = Math.max(0, Math.min(100, (busyDiff / totalDiff) * 100));
+						var prevPct = self.rings.cpu.last();
+						self.rings.cpu.push(pct);
+						setTile(self.tileCpu, {
+							num:      pct.toFixed(0),
+							unit:     '%',
+							trend:    deltaToTrend(pct, prevPct, { threshold: 1.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
+							progress: pct,
+							meta:     _('Past 5 min · Avg %s%%').format(self.rings.cpu.avg().toFixed(1))
+						});
+						renderTileSpark(self.tileCpu, self.rings.cpu);
+					}
+				}
+			}
 
-			var pct     = Math.max(0, Math.min(100, (busyDiff / totalDiff) * 100));
-			var prevPct = self.rings.cpu.last();
-			self.rings.cpu.push(pct);
-			setTile(self.tileCpu, {
-				num:      pct.toFixed(0),
-				unit:     '%',
-				trend:    deltaToTrend(pct, prevPct, { threshold: 1.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
-				progress: pct,
-				meta:     _('Past 5 min · Avg %s%%').format(self.rings.cpu.avg().toFixed(1))
-			});
-			renderTileSpark(self.tileCpu, self.rings.cpu);
+			// ── Temperature
+			if (self.tileTemp.style.display !== 'none' && Array.isArray(data.zones) && data.zones.length > 0) {
+				var live = data.zones.filter(function (z) { return typeof z === 'number' && z >= 1 && z <= 200; });
+				if (live.length > 0) {
+					var t        = Math.max.apply(null, live);
+					var prevTemp = self.rings.temp.last();
+					self.rings.temp.push(t);
+
+					var dotCls, statusText;
+					if (t >= 80)      { dotCls = 'design-tile-status-dot-hot';  statusText = _('Hot'); }
+					else if (t >= 65) { dotCls = 'design-tile-status-dot-warm'; statusText = _('Warm'); }
+					else              { dotCls = 'design-tile-status-dot-ok';   statusText = _('Normal'); }
+
+					setTile(self.tileTemp, {
+						num:   t,
+						unit:  '°C',
+						trend: deltaToTrend(t, prevTemp, { threshold: 0.5, suffix: '°C', format: function (v) { return v.toFixed(1); } }),
+						meta:  [
+							E('span', { 'class': 'design-tile-status-dot ' + dotCls }, '●'),
+							' ' + statusText
+						]
+					});
+					renderTileSpark(self.tileTemp, self.rings.temp);
+				}
+			}
 		}).catch(function () { /* keep stale display */ }));
-
-		// ── Temperature
-		if (self.tileTemp.style.display !== 'none') {
-			promises.push(fetchTempZones().then(function (zones) {
-				if (!zones || !zones.length) return;
-				var t        = Math.max.apply(null, zones);
-				var prevTemp = self.rings.temp.last();
-				self.rings.temp.push(t);
-
-				// Threshold + label + dot color all keyed off the same bands.
-				var dotCls, statusText;
-				if (t >= 80)      { dotCls = 'design-tile-status-dot-hot';  statusText = _('Hot'); }
-				else if (t >= 65) { dotCls = 'design-tile-status-dot-warm'; statusText = _('Warm'); }
-				else              { dotCls = 'design-tile-status-dot-ok';   statusText = _('Normal'); }
-
-				setTile(self.tileTemp, {
-					num:   t,
-					unit:  '°C',
-					trend: deltaToTrend(t, prevTemp, { threshold: 0.5, suffix: '°C', format: function (v) { return v.toFixed(1); } }),
-					meta:  [
-						E('span', { 'class': 'design-tile-status-dot ' + dotCls }, '●'),
-						' ' + statusText
-					]
-				});
-				renderTileSpark(self.tileTemp, self.rings.temp);
-			}).catch(function () { /* keep stale display */ }));
-		}
 
 		return Promise.all(promises);
 	}
