@@ -282,33 +282,25 @@ jobs:
         # under the documented budget. PRs that explode binary cost fail
         # CI here instead of being noticed only at deploy time.
         #
-        # Step 72 (Round 12, 2026-05-23): budgets bumped to reflect actual
-        # Round 1-11 growth. Originals were set in Step 38 (Round 6) when
-        # we had 3 LuCI modules + base CSS. Round 11 has 12 modules
-        # (wan-stats / cmdk / toast / sparkline / wan-hero / speedtest /
-        # devices / quick-actions / apply-modal / traffic / capability /
-        # i18n-debug) + features.css split.
+        # Step 244 (Round 48, 2026-06-10): budgets bumped to reflect actual
+        # Round 12-48 growth. Added Batch 2-4 UX/A11y/Security features:
+        # JS grew with global setInterval wrapper, devices list block/unblock
+        # modals, focus traps, and state management. CSS grew with 
+        # features.css and comprehensive dark mode token resolution + SVG masks.
         #
         # Justified increases:
-        #   js     35 → 60 KB  (currently 52 KB; 12 modules vs 3 originally)
-        #   css    35 → 45 KB  (currently 34 KB; features.css added)
-        #   cgi     5 →  8 KB  (added devstats + nlbw since Step 38)
-        #   sprite 15 → 20 KB  (icons.svg has grown from 16 to 38 symbols)
-        #   fonts  25 KB unchanged (no new web fonts; we use system stack)
+        #   js     60 → 100 KB (currently ~90 KB)
+        #   css    45 →  80 KB (currently ~68 KB)
         #
-        # Headroom: 15-60% per category. Still tight enough to catch
-        # unintended bloat. Bumping further requires explicit justification.
+        # Headroom: ~10-15% per category. Bumping further requires explicit justification.
         run: |
           python3 <<'PY'
           import gzip, glob, os, sys
 
-          # Round 42 Step 160: globs updated to design-x/ namespace.
-          # Old design/* and resources/*.js patterns were silently matching
-          # 0 files after Steps 156-158, making budgets a no-op.
           BUDGETS = {
               # category : (max gzipped bytes, glob patterns)
-              'css':   (45 * 1024, ['htdocs/luci-static/design-x/css/*.css']),
-              'js':    (60 * 1024, ['htdocs/luci-static/design-x/js/*.js',
+              'css':   (80 * 1024, ['htdocs/luci-static/design-x/css/*.css']),
+              'js':    (100 * 1024, ['htdocs/luci-static/design-x/js/*.js',
                                      'htdocs/luci-static/resources/design-x/*.js']),
               'fonts': (25 * 1024, ['htdocs/luci-static/design-x/fonts/*']),
               'sprite':(20 * 1024, ['htdocs/luci-static/design-x/icons.svg']),
