@@ -1,0 +1,45 @@
+#!/bin/sh
+[ -f /etc/design-x/blocked_macs ] || exit 0
+NFT_FILE="/usr/share/nftables.d/ruleset-post/design_x.nft"
+[ -d /usr/share/nftables.d/ruleset-post ] || exit 0
+
+elems=""
+sep=""
+for m in $(cat /etc/design-x/blocked_macs); do
+	elems="$elems$sep$m"
+	sep=", "
+done
+
+elems_clause=""
+[ -n "$elems" ] && elems_clause="
+		elements = { $elems }"
+
+cat > "$NFT_FILE" <<EOF
+# luci-theme-design-x — Restored from /etc/design-x/blocked_macs
+table inet design_x
+delete table inet design_x
+
+table inet design_x {
+	set blocked_macs {
+		type ether_addr$elems_clause
+	}
+
+	chain block_forward {
+		type filter hook forward priority filter; policy accept;
+		ether saddr @blocked_macs counter drop
+		ether daddr @blocked_macs counter drop
+	}
+
+	chain block_input {
+		type filter hook input priority filter; policy accept;
+		ether saddr @blocked_macs counter drop
+	}
+
+	chain block_output {
+		type filter hook output priority filter; policy accept;
+		ether daddr @blocked_macs counter drop
+	}
+}
+EOF
+
+exit 0
