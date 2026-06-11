@@ -1884,6 +1884,34 @@ table.table:not(.cbi-section-table) .cbi-button-negative:hover {
 	color: #fff !important;
 }
 
+/* Round 51 (Task 4) — UPnP table font-size chaos ("卡片里的字体有大有小").
+   Active UPnP (and other cbi .table surfaces) mixed default ~14px sans cells
+   with 12px mono cells, reading as jarring. Establish ONE baseline body size
+   on every data cell, then apply mono only to the genuinely-technical columns
+   by exact data-title (English titles as emitted in the DOM). "Client Name" /
+   "Protocol" intentionally stay sans 13px. No !important — these are our own
+   .td styles, not inline-style fights. */
+table.table:not(.cbi-section-table) > tbody > tr > td,
+table.table:not(.cbi-section-table) > thead > tr > th,
+.table:not(.cbi-section-table) > .tbody > .tr > .td,
+.table:not(.cbi-section-table) > .tr > .td {
+	font-size: var(--text-body);
+}
+
+table.table:not(.cbi-section-table) td[data-title="Client Address"],
+table.table:not(.cbi-section-table) td[data-title="Client Port"],
+table.table:not(.cbi-section-table) td[data-title="External Port"],
+table.table:not(.cbi-section-table) td[data-title="Expires"],
+table.table:not(.cbi-section-table) td[data-title="Description"],
+.table:not(.cbi-section-table) .td[data-title="Client Address"],
+.table:not(.cbi-section-table) .td[data-title="Client Port"],
+.table:not(.cbi-section-table) .td[data-title="External Port"],
+.table:not(.cbi-section-table) .td[data-title="Expires"],
+.table:not(.cbi-section-table) .td[data-title="Description"] {
+	font-family: var(--font-mono);
+	font-size: var(--text-mono);
+}
+
 /* ═══════════ End Round 43 Step 185 universal table upgrade ═══════════ */
 
 /* div > table > tbody > tr:nth-of-type(2n),
@@ -3333,31 +3361,34 @@ td > .ifacebadge,
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- * Round 49 (redesign-2026-06 §三.5) — Port status: left-aligned horizontal
- * chips. The stock LuCI port-status table floats boxes in a centered "sea of
- * whitespace"; left-align the wrap and let chips size to content so ports
- * read as a tidy left-anchored chip row. Link state carries the only color
- * (green = up, neutral = down); speed is the neutral badge handled above.
- * CSS-only — DOM stays 100% upstream LuCI.
+ * Network (IPv4 / IPv6 upstream) status panels — Status / Overview
+ *
+ * VERIFIED DOM (30_network.js): `.network-status-table` is the NETWORK
+ * upstream container (NOT port status — that's the anonymous minmax(100px)
+ * grid handled in the Round 51 Task 2 block below). It holds two .ifacebox
+ * panels (one IPv4, one IPv6), each with .ifacebox-head.center.active +
+ * .ifacebox-body.left.
+ *
+ * Round 51 (Task 3) — undo Round 50's damage: the old
+ * `justify-content: flex-start !important` + content-sizing squeezed the two
+ * panels into the LEFT HALF of the row with dead space on the right (user
+ * complaint). User prefers FILLING the row. Make the container a plain flex
+ * wrap and let each panel flex:1 1 320px so the two share the full width
+ * evenly and wrap to stacked on narrow viewports.
  * ═══════════════════════════════════════════════════════════════════════ */
 .network-status-table {
-	/* Round 50 (Task 4): the LuCI ports partial sets centering via an INLINE
-	   style on this container, which wins the cascade over our flex-start/gap.
-	   Force them with !important so the chips left-anchor even with the inline
-	   style present. */
-	display: flex !important;
-	flex-wrap: wrap !important;
-	justify-content: flex-start !important;   /* left-anchor, kill the centered sea */
-	gap: var(--space-2) !important;
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--card-gap);
 	align-items: stretch;
 }
 
-.network-status-table .ifacebox {
-	flex-grow: 0;                  /* size to content, don't stretch to fill */
-	margin: 0;                     /* gap on the container owns the spacing */
+.network-status-table > .ifacebox {
+	flex: 1 1 320px;   /* share the row evenly; wrap+stack under ~320px each */
+	margin: 0;         /* gap on the container owns the spacing */
 }
 
-/* tx/rx counters under each port — small mono (machine numbers, §一.1). */
+/* tx/rx counters under each panel — small mono (machine numbers, §一.1). */
 .network-status-table .ifacebox-body {
 	font-family: var(--font-mono);
 	font-variant-numeric: tabular-nums;
@@ -3365,19 +3396,20 @@ td > .ifacebadge,
 	color: var(--color-text-muted);
 }
 
-/* Link-state color: green = up (head.active rule above already does this);
-   down = neutral. Defensive: neutralize any upstream LuCI red applied to a
-   port-speed / link-down badge — speed is never red (§一.3 color roles). */
+/* Link-state color: green = active upstream (head.active rule above already
+   does this); inactive = neutral. Defensive: neutralize any upstream LuCI red
+   applied to a link-down badge — link state is never red (§一.3 color roles). */
 .network-status-table .ifacebox-head:not(.active) {
 	color: var(--color-text-muted);
 	background: var(--color-surface-1);
 }
-/* Round 50 (Task 4): the speed bar's red comes from an inline `background`
-   on the bar element, not a hex the old narrow [style*="ef4444"]/"dc2626"
-   matchers could catch. Replace them with a general neutralizer scoped to the
-   port boxes — ANY inline background inside an .ifacebox-body becomes neutral.
-   Port speed is conveyed by the text badge and link-state by the head's green
-   stripe, so the bar can go neutral in all cases without losing information. */
+/* Round 51 (Task 3): inside the Network panels the only inline-`background`
+   elements are the zone badges around the Device / MAC sub-box. They carry an
+   upstream firewall-zone color (which can be a saturated lightcoral/red) on an
+   inline style. Neutralize ANY inline background under .ifacebox-body so the
+   Network panels stay on the theme palette — zone identity here is conveyed by
+   the label text, not a colored slab. !important is required to beat the
+   inline style. */
 .network-status-table .ifacebox-body [style*="background"] {
 	background: var(--color-border-default) !important;
 	color: var(--color-text-muted) !important;
@@ -3650,23 +3682,11 @@ td > .ifacebadge,
 	box-shadow: var(--shadow-sm);
 }
 
-/* Round 50 (Task 4): the Network card's IPv4 / IPv6 upstream panels render as
-   two .ifacebox siblings inside a .cbi-value-field (NOT inside the port-status
-   .network-status-table). Their base inline-flex + min-width:100px sizing made
-   them huddle at ~55% of the row with dead space on the right. Make the wrapper
-   a flex row and let each panel flex:1 so the two share the full row width.
-   Scoped to Overview and explicitly NOT the port-status chips (those stay
-   content-sized via the .network-status-table rules above). */
-.node-admin-status-overview .cbi-value-field:has(> .ifacebox) {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--space-2);
-	align-items: stretch;
-}
-.node-admin-status-overview .cbi-value-field > .ifacebox {
-	flex: 1 1 0;
-	min-width: 220px;
-}
+/* Round 51 (Task 3): removed Round 50's `.cbi-value-field:has(> .ifacebox)`
+   wrapper block — it was a wrong guess at the Network panels' DOM. Verified
+   structure puts the two IPv4/IPv6 panels directly inside .network-status-table
+   (handled in the Network block above), so this wrapper rule was a no-op that
+   only risked collateral on other .cbi-value-field/.ifacebox pairings. */
 
 .ifacebox-body {
 	padding: var(--space-3);
@@ -3732,6 +3752,79 @@ html[data-theme="dark"] img[src*="/luci-static/resources/icons/bridge"],
 html[data-theme="dark"] img[src*="/luci-static/resources/icons/tunnel"],
 html[data-theme="dark"] img[src*="/luci-static/resources/icons/vlan"] {
 	filter: brightness(1.15);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * Round 51 (Task 2) — Port status section restyle (Status / Overview)
+ *
+ * VERIFIED DOM (29_ports.js): the port-status grid is an ANONYMOUS div with
+ * NO class — only an inline `style` carrying the substring "minmax(100px".
+ * Each port is a `.ifacebox` (head = name, body = img + speed, head = zone
+ * badge, body = tx/rx). We hook the container by attribute-substring match
+ * scoped to Overview; nothing else on Overview emits that inline style.
+ *
+ * Goals (all need !important to beat the inline styles on the container/box,
+ * and to beat the global zonebadge color overrides above):
+ *   - container: fixed-150px columns, left-anchored, real card gap — kills
+ *     the "one chip centered in an ocean of whitespace" look.
+ *   - boxes: 150px wide, no margin (gap owns spacing).
+ *   - UGLY ICON ("网口图标真的丑"): hide the upstream <img> and paint a clean
+ *     Lucide-style ethernet-jack glyph via an inline-SVG mask + currentcolor
+ *     pattern (same technique as the sidebar chevron ::after, ~L1357).
+ *     Up = success green, down = subtle muted.
+ *   - RED ZONE BAR: the .zonebadge carries an INLINE firewall-zone color
+ *     (wan = red). Theme color law = red is danger only, so under the ports
+ *     container the badge background goes neutral; opacity (carrier signal)
+ *     is left untouched.
+ * ═══════════════════════════════════════════════════════════════════════ */
+.node-admin-status-overview div[style*="minmax(100px"] {
+	grid-template-columns: repeat(auto-fit, 150px) !important;
+	justify-content: start !important;
+	justify-items: stretch !important;
+	gap: var(--card-gap) !important;
+}
+
+.node-admin-status-overview div[style*="minmax(100px"] .ifacebox {
+	width: 150px !important;
+	margin: 0 !important;
+}
+
+/* Hide the upstream port_up / port_down image (even though it's been
+   content:url()'d to our own SVG above, the user still finds the glyph ugly).
+   display:none wins over content:url(); scoped to the ports container so the
+   Network IPv4/IPv6 panel icons are untouched. */
+.node-admin-status-overview div[style*="minmax(100px"] img[src*="port_up.svg"],
+.node-admin-status-overview div[style*="minmax(100px"] img[src*="port_down.svg"] {
+	display: none;
+}
+
+/* Replacement ethernet-jack glyph painted on the body that contains the img.
+   currentcolor-filled box masked by an inline SVG (rounded jack housing + 4
+   pin stubs, stroke 2 Lucide style). Color comes from the link state via the
+   head img's src, resolved on the body's parent .ifacebox. */
+.node-admin-status-overview div[style*="minmax(100px"] .ifacebox-body:has(> img[src*="port_"])::before {
+	content: "";
+	display: block;
+	width: 22px;
+	height: 22px;
+	margin: 0 auto;
+	background-color: var(--color-text-subtle);
+	-webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 18v2"/><path d="M11 18v2"/><path d="M13 18v2"/><path d="M17 18v2"/></svg>') no-repeat center / contain;
+	mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 18v2"/><path d="M11 18v2"/><path d="M13 18v2"/><path d="M17 18v2"/></svg>') no-repeat center / contain;
+}
+.node-admin-status-overview div[style*="minmax(100px"] .ifacebox:has(> .ifacebox-body > img[src*="port_up"]) .ifacebox-body:has(> img[src*="port_"])::before {
+	background-color: var(--color-success);
+}
+.node-admin-status-overview div[style*="minmax(100px"] .ifacebox:has(> .ifacebox-body > img[src*="port_down"]) .ifacebox-body:has(> img[src*="port_"])::before {
+	background-color: var(--color-text-subtle);
+}
+
+/* Neutralize the inline firewall-zone color on the port badge (wan = red →
+   neutral). Higher specificity than the global .zonebadge[style*=...] color
+   overrides because of the container ancestor chain, so this wins. Opacity
+   (the carrier-strength signal) is deliberately left alone. */
+.node-admin-status-overview div[style*="minmax(100px"] .zonebadge {
+	background: var(--color-border-default) !important;
 }
 
 /* Round 33 / Step 125 — dark mode invert for upstream LuCI hardcoded-black

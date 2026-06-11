@@ -1603,7 +1603,25 @@
            one filler. User's "use full width" goal met.
 
            Principle 10 in claude_style.md updated this Step to
-           reflect the corrected rule. */
+           reflect the corrected rule.
+
+   Round 51 (Task 1) — user preference override: DEVICE stays left,
+   but IP / MAC / CONNECTION / LAST SEEN are switched to CENTER (header
+   AND data) so each header sits over the MIDDLE of its column's content.
+   Two gotchas that broke prior rounds:
+     1. Grid items stretch by default; the alignment that matters is the
+        cell's own justify-self (and, for an inline-flex sortable header,
+        justify-content) — NOT text-align. Text-align never moved the
+        inline-flex sortable label, which is why .devices-col-seen's old
+        `text-align:right` had no visible effect.
+     2. Sortable headers (.devices-col-sortable) are display:inline-flex,
+        so they pack their label LEFT regardless of text-align. They need
+        justify-content (on the flex box) plus justify-self (on the grid
+        cell) to truly center. Plain-span headers (MAC / CONNECTION) just
+        need justify-self + text-align.
+   The chevron keeps its own 24px column untouched. Mobile (≤640px below)
+   hides the thead and re-flows the summary, so this centering is desktop
+   grid only. */
 .devices-thead {
     display: grid;
     grid-template-columns: 32px minmax(160px, 1.4fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(80px, 0.6fr) minmax(90px, 0.7fr) 24px;
@@ -1623,13 +1641,19 @@
     border-bottom: 1px solid var(--color-border-subtle);
 }
 
-/* Per-column header alignment — matches the data cell alignment
-   in the corresponding column. */
-.devices-col-name { grid-column: 2 / 3;    text-align: left;  }  /* over name cell only (not spanning icon — Chrome-Claude fix) */
-.devices-col-ip   {                        text-align: left;  }
-.devices-col-mac  {                        text-align: left;  }
-.devices-col-sig  {                        text-align: left;  }  /* pill is left-anchored within its cell */
-.devices-col-seen {                        text-align: right; }  /* lease "10h 33m ↓" is right-anchored */
+/* Per-column header alignment — matches the data cell alignment in the
+   corresponding column (Round 51 Task 1). Each header is a grid item, so
+   justify-self places the whole cell within its track. The sortable cells
+   (name / ip / seen) are also display:inline-flex, so they need
+   justify-content too — otherwise the inline-flex box packs its label LEFT
+   regardless of justify-self/text-align (the bug behind the old seen
+   right-align that never showed). Plain-span headers (mac / sig) take
+   justify-self + text-align. DEVICE = start; everything else = center. */
+.devices-col-name { grid-column: 2 / 3; justify-self: start;  justify-content: flex-start; }  /* over name cell only (not spanning icon — Chrome-Claude fix) */
+.devices-col-ip   {                     justify-self: center; justify-content: center; }
+.devices-col-mac  {                     justify-self: center; text-align: center; }
+.devices-col-sig  {                     justify-self: center; text-align: center; }
+.devices-col-seen {                     justify-self: center; justify-content: center; }
 
 /* Step 235 (Round 45) — clickable sortable column headers.
    .devices-col-sortable is applied to Device / IP / Lease (MAC + Signal
@@ -1808,7 +1832,8 @@
 }
 
 /* IP + MAC = mono (mono rule §一.1: machine identifiers mono). Both are
- * network identifier strings that benefit from fixed-width digits. */
+ * network identifier strings that benefit from fixed-width digits.
+ * Round 51 (Task 1): CENTER the text so it sits under the centered header. */
 .devices-row-ip,
 .devices-row-mac {
     font-family: var(--font-mono);
@@ -1818,13 +1843,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: center;
 }
 
 /* Signal column — flex container hosts either signal-bars + dBm text
-   (Wi-Fi clients) or the wired pill (default until Step 94). */
+   (Wi-Fi clients) or the wired pill (default until Step 94).
+   Round 51 (Task 1): center the connection content under the centered
+   CONNECTION header. Mobile (≤640px) overrides this to flex-end below. */
 .devices-row-sig {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: var(--space-2);
     font-size: var(--text-xs);
     font-family: var(--font-mono);
@@ -1898,7 +1927,7 @@
    text, the stale variant slightly subtler. No double-encoding. */
 .devices-row-seen {
     font-size: var(--text-body);
-    text-align: right;
+    text-align: center;   /* Round 51 (Task 1): center under centered LAST SEEN header */
     font-variant-numeric: tabular-nums;
     color: var(--color-text-muted);
 }
