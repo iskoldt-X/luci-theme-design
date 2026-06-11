@@ -2652,8 +2652,15 @@ div.cbi-value > .cbi-value-description {
 	word-wrap: break-word;
 }
 
+/* Round 50 (Task 5): kill the alternating zebra stripe on cbi tables (seen
+   persisting on Active UPnP). The hairline row borders already separate rows;
+   the surface-1 stripe on every even row read as visual noise. Neutralize to
+   the card surface so all cbi tables go hairline-only. rowstyle-1 (odd rows)
+   has no upstream background here, but pin it transparent defensively in case
+   a future LuCI/base rule reintroduces one. */
+.cbi-rowstyle-1,
 .cbi-rowstyle-2 {
-    background-color: var(--sectionbgcolor2);
+    background-color: transparent;
 }
 
 .cbi-section-table .cbi-section-table-titles .cbi-section-table-cell {
@@ -3022,6 +3029,14 @@ div.cbi-value > .cbi-value-description {
     color: var(--color-text-onaccent) !important;
     background: var(--color-accent-500) !important;
     border-radius: inherit;
+    /* Round 50 (Task 6c): LuCI renders the percentage label as text INSIDE
+       this fill div on some rows (seen overlapping on the Docker storage row).
+       When the fill is narrow the text spilled past the fill edge. Clamp it so
+       the label can't escape the bar — the ::after below carries the readable
+       centered percentage; this inner text just needs to not overflow. */
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
     /* Round 44 Step 196 — Bug #9 (Chrome-Claude). When LuCI sets the
        fill width to literally 0% (Buffered when there's no buffered
        memory, fresh Active Connections after reboot, Swap on swap-
@@ -3326,10 +3341,14 @@ td > .ifacebadge,
  * CSS-only — DOM stays 100% upstream LuCI.
  * ═══════════════════════════════════════════════════════════════════════ */
 .network-status-table {
-	display: flex;
-	flex-wrap: wrap;
-	justify-content: flex-start;   /* left-anchor, kill the centered sea */
-	gap: var(--space-2);
+	/* Round 50 (Task 4): the LuCI ports partial sets centering via an INLINE
+	   style on this container, which wins the cascade over our flex-start/gap.
+	   Force them with !important so the chips left-anchor even with the inline
+	   style present. */
+	display: flex !important;
+	flex-wrap: wrap !important;
+	justify-content: flex-start !important;   /* left-anchor, kill the centered sea */
+	gap: var(--space-2) !important;
 	align-items: stretch;
 }
 
@@ -3353,13 +3372,14 @@ td > .ifacebadge,
 	color: var(--color-text-muted);
 	background: var(--color-surface-1);
 }
-.network-status-table .ifacebadge[style*="background"],
-.network-status-table .ifacebox [style*="ef4444"],
-.network-status-table .ifacebox [style*="dc2626"] {
-	/* Override inline red LuCI may set on a down/error port speed chip.
-	   Use a neutral surface; link-up state is signalled by .ifacebox-head
-	   .active, not by reddening the speed. */
-	background-color: var(--color-surface-1) !important;
+/* Round 50 (Task 4): the speed bar's red comes from an inline `background`
+   on the bar element, not a hex the old narrow [style*="ef4444"]/"dc2626"
+   matchers could catch. Replace them with a general neutralizer scoped to the
+   port boxes — ANY inline background inside an .ifacebox-body becomes neutral.
+   Port speed is conveyed by the text badge and link-state by the head's green
+   stripe, so the bar can go neutral in all cases without losing information. */
+.network-status-table .ifacebox-body [style*="background"] {
+	background: var(--color-border-default) !important;
 	color: var(--color-text-muted) !important;
 }
 
@@ -3628,6 +3648,24 @@ td > .ifacebadge,
 .ifacebox:hover {
 	transform: translateY(-1px);
 	box-shadow: var(--shadow-sm);
+}
+
+/* Round 50 (Task 4): the Network card's IPv4 / IPv6 upstream panels render as
+   two .ifacebox siblings inside a .cbi-value-field (NOT inside the port-status
+   .network-status-table). Their base inline-flex + min-width:100px sizing made
+   them huddle at ~55% of the row with dead space on the right. Make the wrapper
+   a flex row and let each panel flex:1 so the two share the full row width.
+   Scoped to Overview and explicitly NOT the port-status chips (those stay
+   content-sized via the .network-status-table rules above). */
+.node-admin-status-overview .cbi-value-field:has(> .ifacebox) {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	align-items: stretch;
+}
+.node-admin-status-overview .cbi-value-field > .ifacebox {
+	flex: 1 1 0;
+	min-width: 220px;
 }
 
 .ifacebox-body {
@@ -5314,99 +5352,32 @@ td.cbi-button, .cbi-button-apply,
     grid-column: 1 / -1;
 }
 
-/* Theme-injected feature cards. WAN Hero + the sparkline tile band
-   are visual anchors and stay full-width. Step 114 (Round 30):
-   devices / speedtest NO LONGER force full-width — they auto-fit
-   into the parent's grid tracks. On wide screens they land
-   side-by-side, on narrow they stack. `order` arranges visual
-   sequence regardless of DOM insertion timing (multiple L.require
-   modules race to inject; load order isn't guaranteed).
-   Step 232 (Round 45): .traffic-card removed from the extras band. */
-.node-admin-status-overview #view > .conn-card,
-.node-admin-status-overview #view > .design-tile-grid {
+/* Round 50 (unified small-card grid): wan-hero / speedtest / sparkline all
+   inject into ONE wrapping grid (#dx-cards) which is the single full-width
+   #view grid item that used to be split across .conn-card + .design-tile-grid
+   + the row-1 3-track placement. The five small cards (Connection, Speedtest
+   summary, CPU, Memory, Temp) live inside #dx-cards as approximately-fixed
+   180px-tall cells, as many per row as fit, wrapping to the next line.
+   `order` (in features.css, on the card classes) decides the visual sequence
+   independent of the inject race. */
+.node-admin-status-overview #view > .dx-cards {
     grid-column: 1 / -1;
+    order: -3;
 }
-.node-admin-status-overview #view > .conn-card        { order: -3; }
-.node-admin-status-overview #view > .design-tile-grid { order: -2; }
 /* LuCI's .cbi-section elements default to order: 0 — Status/Memory/
    Storage/UPnP/Wireless etc. all share that. Step 233 (Round 45):
    .devices-card promoted from order:10 (below everything) to order:-1
-   (above all cbi-sections, just below the WAN+tile band). Users open
+   (above all cbi-sections, just below the small-card band). Users open
    Overview to see "who's on my network" first, not to read system
-   uptime — promoting the Clients card matches that mental model.
-   Speedtest stays at order:11 so it sits at the bottom of the page,
-   in line with its on-demand (not always-needed) nature. */
+   uptime — promoting the Clients card matches that mental model. */
 .node-admin-status-overview #view > .devices-card      { order: -1; }
-/* Round 49: speedtest summary card lifts to top-right of row 1 (order
-   matches .conn-card's row); the explicit grid-column placement below
-   pairs them. It is no longer parked at the page bottom. */
-.node-admin-status-overview #view > .speedtest-summary { order: -3; }
 
-/* ═══════════════════════════════════════════════════════════════════════
- * Round 44 Step 195 — first-row "2/3 hero + 1/3 speedtest" layout
- *
- * Chrome-Claude Round 43 audit found the speedtest card was orphaned at
- * the bottom (auto-fit dropped it next to traffic in a 644+644 row),
- * which wastes the wide viewport's right-side real estate. User wants
- * speedtest at top-right of fold 1, hero spanning the rest.
- *
- * Architecture is already friendly to this:
- *   #view is a grid; every full-width card uses grid-column: 1/-1.
- *   Switching to an explicit 3-track grid + grid-column overrides on
- *   hero (1-2) and speedtest (3) places them on row 1 without touching
- *   any HTML or JS.
- *
- * Heights match via align-self: stretch — the taller card (speedtest at
- * ~470 px with gauges) decides the row height, hero stretches to match.
- * Hero currently renders ~239 px of content; expect ~230 px whitespace
- * below the throughput row on first deploy. Two follow-up routes if
- * that whitespace looks bad:
- *   Phase 2 — enrich hero (sparkline + status badge + microrow)
- *   Phase 3 — compact speedtest gauges (200 px → ~120 px each)
- * Both deferred until user has seen Phase 1 visual.
- *
- * Triggered only at min-width: 1280 px (where 3 cols × 400 px is
- * comfortable). Below that, the original auto-fit (1 or 2 tracks)
- * layout applies — speedtest falls back to its old position.
- *
- * Step 232 (Round 45): .traffic-card pull — the full-width override
- * that used to sit at the bottom of this media query is gone with it.
- * ═══════════════════════════════════════════════════════════════════════ */
-/* Round 49 (redesign-2026-06 §二): row 1 = Connection card (2/3) +
-   Speedtest summary (1/3). Both cards are FIXED equal height so the
-   stretch-coupling problem (a tall card forcing the other to whitespace)
-   is physically impossible — fixed-size law §一.5. Applies at ≥769px
-   (the existing max-width:768 single-column rule below owns ≤768px); below
-   that the base grid stacks everything single-column. */
-@media (min-width: 769px) {
-    .node-admin-status-overview #view {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .node-admin-status-overview #view > .conn-card {
-        grid-column: 1 / 3;
-        grid-row: 1;
-        height: 200px;          /* fixed; matches .conn-card base height */
-    }
-
-    .node-admin-status-overview #view > .speedtest-summary {
-        grid-column: 3 / 4;
-        grid-row: 1;
-        height: 200px;          /* equal fixed height — no stretch coupling */
-    }
-}
-
-/* ≤768px: row-1 grid placement is off, so `order` decides the stack. Both
-   row-1 cards sit at order:-3 and module injection order is a race — the
-   speedtest summary could land ABOVE the Connection card nondeterministically.
-   Pin it: on-demand tooling goes to the page bottom on phones (the same
-   philosophy as its pre-redesign order:11 parking spot). */
-@media (max-width: 768px) {
-    .node-admin-status-overview #view > .speedtest-summary {
-        order: 1;
-        height: auto;           /* single column: let content size it */
-    }
-}
+/* Round 50: the explicit ≥769px 3-track row-1 grid (Connection 2/3 +
+   Speedtest 1/3, both height:200px) and its ≤768px speedtest order/height
+   patch are GONE. Layout now lives inside #dx-cards (features.css §11A): one
+   auto-fill grid of approximately-fixed 180px small cards that wrap. #view
+   stays the responsive auto-fit grid for the full-width cbi-sections + the
+   Clients card + the #dx-cards band — no row-1 special-casing needed. */
 
 /* Step 147 (Round 40): LAN Clients (Clients in Step 233) deserves the
    full row width since Round 40 made it the canonical device list
@@ -5586,8 +5557,13 @@ td.cbi-button, .cbi-button-apply,
    values force the column wider than its allotted track. min-width:0
    lets the column actually respect the grid template + word-break on
    the cell reflows long values into multiple lines. NOT using
-   overflow:hidden — that would clip future LuCI hover tooltips. */
-.node-admin-status-overview #view > .cbi-section {
+   overflow:hidden — that would clip future LuCI hover tooltips.
+   Round 50 (Task 3): broadened from `> .cbi-section` to `> *` — at ≤768px
+   #view is a single 1fr track, and the Clients card's mono MAC columns were
+   forcing min-content WIDER than the viewport (horizontal page overflow). With
+   min-width:0 on every grid item the track respects the viewport; the Clients
+   card scrolls internally instead (see .devices-table overflow-x in features.css). */
+.node-admin-status-overview #view > * {
     min-width: 0;
 }
 

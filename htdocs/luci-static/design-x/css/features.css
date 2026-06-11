@@ -366,17 +366,13 @@
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * §11 LIVE METRICS TILES — upgrade.md §1.S3
- * 3-card grid (CPU / Memory / Temperature) injected by sparkline.js into
- * the Status > Overview page above the LuCI-rendered sections.
+ * 3 tiles (CPU / Memory / Temperature) injected by sparkline.js into the shared
+ * #dx-cards grid (§11A) on the Status > Overview page.
  * Each tile: label + current value + meta + 60-point SVG sparkline.
+ * Round 50: the old .design-tile-grid wrapper is GONE — the three tiles are now
+ * direct children of #dx-cards, sized by `.dx-cards > *` (180px). The wrapper's
+ * own grid rules were deleted with it.
  * ═══════════════════════════════════════════════════════════════════════════ */
-
-.design-tile-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: var(--card-gap);
-    margin-bottom: var(--card-gap);
-}
 
 .design-tile {
     background: var(--color-surface-0);
@@ -664,11 +660,39 @@
 .design-tile-status-dot-hot  { color: var(--color-danger); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * §12 CONNECTION CARD (merged) — redesign-2026-06 §三.1
- * Left column: status dot + title, meta (uptime · proto · iface), IP (mono,
- * click-to-copy), latency number + threshold dot. Right area: 5-min live area
- * chart (up=--chart-up blue, down=--chart-down green) + current ↓/↑ readouts.
- * FIXED outer height (~200px) in all states — fixed-size law §一.5.
+ * §11A UNIFIED SMALL-CARD GRID (#dx-cards) — Round 50
+ * wan-hero / speedtest / sparkline all inject into this ONE wrapping grid. It
+ * holds five approximately-fixed small cards that wrap to as many per row as
+ * fit. Every card is the SAME fixed 180px height at every viewport (supersedes
+ * the old 200px). Visual order is by CSS class (NOT inject order):
+ *   1 .conn-card · 2 .speedtest-summary · 3 CPU · 4 Memory · 5 Temp
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.dx-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--card-gap);
+    grid-column: 1 / -1;
+    order: -3;
+}
+.dx-cards > * {
+    height: 180px;
+    min-width: 0;
+    overflow: hidden;
+}
+/* Deterministic order inside #dx-cards — independent of the inject race. */
+.dx-cards > .conn-card             { order: 1; }
+.dx-cards > .speedtest-summary     { order: 2; }
+.dx-cards > .design-tile-cpu-card  { order: 3; }
+.dx-cards > .design-tile-mem-card  { order: 4; }
+.dx-cards > .design-tile-temp-card { order: 5; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §12 CONNECTION CARD (merged) — redesign-2026-06 §三.1 / Round 50 compaction
+ * Vertical 300×180 layout: row1 status dot + "Internet · Online" (heading,
+ * ellipsis) · row2 meta (uptime · proto · iface, caption) · row3 ↓/↑ current
+ * rates (mono, direction colors — the anchor) · row4 compact area chart
+ * (flex:1) · row5 Public IP (mono, click-to-copy) + latency num + dot.
+ * FIXED outer height (180px) in all states — fixed-size law §一.5.
  * Data: design-x.wan-stats singleton + local ring buffer. No new RPC.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -678,23 +702,18 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
     padding: var(--card-padding);
-    margin-bottom: 0;          /* the row-1 grid owns the gap */
-    display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(0, 1.4fr);
-    gap: var(--card-gap);
-    align-items: stretch;
-    height: 200px;             /* fixed height — never reflows on state change */
-    overflow: hidden;
-}
-
-.conn-left {
+    margin-bottom: 0;          /* the #dx-cards grid owns the gap */
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
-    min-width: 0;
+    gap: var(--space-1);
+    overflow: hidden;          /* lock the chart needle inside the card */
+    /* height:180px comes from .dx-cards > * — single source of truth */
 }
 
-/* Status line: dot + "Internet · Online" (heading scale). */
+/* Status line: dot + "Internet · Online" (heading scale, single line).
+   The label is a direct text node; the dot is a ::before pseudo. nowrap +
+   overflow:hidden keep it to one line; min-width:0 lets it clip rather than
+   force the card wider (text is short — "Internet · Online" fits 300px). */
 .conn-status {
     display: flex;
     align-items: center;
@@ -703,6 +722,11 @@
     line-height: var(--leading-heading);
     font-weight: var(--weight-semibold);
     color: var(--color-text);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex-shrink: 0;
 }
 .conn-status::before {
     content: '';
@@ -739,102 +763,14 @@
     white-space: nowrap;
 }
 
-/* IP row: caption label above, mono click-to-copy value. */
-.conn-ip-row {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin-top: var(--space-1);
-}
-.conn-ip-label,
-.conn-latency-label {
-    font-size: var(--text-caption);
-    line-height: var(--leading-caption);
-    color: var(--color-text-subtle);
-    text-transform: uppercase;
-    letter-spacing: var(--caption-tracking);
-    font-weight: var(--weight-medium);
-}
-.conn-ip {
-    font-family: var(--font-mono);
-    font-size: var(--text-mono);
-    line-height: var(--leading-mono);
-    font-variant-numeric: tabular-nums;
-    color: var(--color-text);
-    background: transparent;
-    border: 0;
-    padding: 2px 0;
-    text-align: left;
-    cursor: pointer;
-    word-break: break-all;
-    overflow-wrap: anywhere;
-    transition: color var(--motion-fast) var(--ease-out);
-}
-.conn-ip:hover { color: var(--color-accent-600); }
-.conn-ip:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus);
-    border-radius: var(--radius-sm);
-}
-
-/* Latency row: caption label + number + threshold dot. The 5-bar signal
-   metaphor is GONE (it was WiFi-strength muscle memory — §三.1). */
-.conn-latency-row {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin-top: auto;           /* pin latency to the bottom of the left column */
-}
-.conn-latency {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-}
-.conn-latency-num {
-    font-family: var(--font-mono);
-    font-size: var(--text-mono);
-    line-height: var(--leading-mono);
-    font-variant-numeric: tabular-nums;
-    color: var(--color-text);
-    font-weight: var(--weight-medium);
-}
-.conn-latency-dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--color-text-subtle);
-    border: 0;
-    padding: 0;
-    cursor: help;
-    flex-shrink: 0;
-}
-.conn-latency-dot[data-tier="good"] { background: var(--color-success); }
-.conn-latency-dot[data-tier="warn"] { background: var(--color-warning); }
-.conn-latency-dot[data-tier="bad"]  { background: var(--color-danger); }
-.conn-latency-dot:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus);
-}
-
-/* ── Right area: live 5-min area chart + current readouts ─────────────────── */
-.conn-chart-wrap {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    transition: opacity var(--motion-normal) var(--ease-out);
-}
-/* Offline state dims the chart area (status dot already turns red). */
-.conn-chart-wrap.conn-chart-offline {
-    opacity: 0.4;
-    filter: grayscale(1);
-}
-
+/* row 3: current ↓/↑ rates — the card's visual anchor (mono, direction
+   colors). Left-aligned so it reads as the primary number under the meta. */
 .conn-readouts {
     display: flex;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: var(--space-4);
     font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
 }
 .conn-readout {
     display: inline-flex;
@@ -862,12 +798,25 @@
     display: inline-block;
 }
 
-.conn-chart {
+/* ── row 4: compact live area chart. Task 2c: lock the chart area so the
+   needle can never poke through the card's bottom border. The wrap takes the
+   remaining flex space and clips; the svg fills it 100%. ─────────────────── */
+.conn-chart-wrap {
+    position: relative;
     flex: 1 1 auto;
-    width: 100%;
     min-height: 0;
+    overflow: hidden;
+    transition: opacity var(--motion-normal) var(--ease-out);
+}
+/* Offline state dims the chart area (status dot already turns red). */
+.conn-chart-wrap.conn-chart-offline {
+    opacity: 0.4;
+    filter: grayscale(1);
+}
+.conn-chart {
+    width: 100%;
+    height: 100%;
     display: block;
-    margin-top: var(--space-2);
 }
 .conn-chart-baseline {
     stroke: var(--color-border-subtle);
@@ -880,14 +829,68 @@
 .conn-chart-area-down { fill: var(--chart-down); opacity: 0.16; }
 .conn-chart-area-up   { fill: var(--chart-up);   opacity: 0.14; }
 
-@media (max-width: 768px) {
-    .conn-card {
-        grid-template-columns: 1fr;
-        height: auto;            /* stacked: let it size to content, but
-                                    each sub-area still fixed enough not to
-                                    jump on data churn */
-    }
-    .conn-chart { min-height: 90px; }
+/* row 5: footer — Public IP (mono, click-to-copy) left + latency num + dot
+   right. Labels dropped (mono IP + "ms" are self-describing). */
+.conn-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    flex-shrink: 0;
+}
+.conn-ip {
+    font-family: var(--font-mono);
+    font-size: var(--text-mono);
+    line-height: var(--leading-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color var(--motion-fast) var(--ease-out);
+}
+.conn-ip:hover { color: var(--color-accent-600); }
+.conn-ip:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+    border-radius: var(--radius-sm);
+}
+.conn-latency {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-shrink: 0;
+}
+.conn-latency-num {
+    font-family: var(--font-mono);
+    font-size: var(--text-mono);
+    line-height: var(--leading-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+    font-weight: var(--weight-medium);
+}
+.conn-latency-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--color-text-subtle);
+    border: 0;
+    padding: 0;
+    cursor: help;
+    flex-shrink: 0;
+}
+.conn-latency-dot[data-tier="good"] { background: var(--color-success); }
+.conn-latency-dot[data-tier="warn"] { background: var(--color-warning); }
+.conn-latency-dot[data-tier="bad"]  { background: var(--color-danger); }
+.conn-latency-dot:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -898,24 +901,29 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Summary card ─────────────────────────────────────────────────────────── */
+/* Round 50: now a 180px fixed card in #dx-cards. Budget = 180 − 2×16 padding
+   = 148px. Stack must fit: head + last + when + mini + Run button. Tightened
+   the inter-row gap to --space-1 and the head margin to 0 so the Run button
+   NEVER clips under overflow:hidden. */
 .speedtest-summary {
     background: var(--color-surface-0);
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
     padding: var(--card-padding);
-    margin-bottom: 0;          /* row-1 grid owns the gap */
+    margin-bottom: 0;          /* #dx-cards grid owns the gap */
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
+    gap: var(--space-1);
     overflow: hidden;
+    /* height:180px comes from .dx-cards > * */
 }
 
 .speedtest-head {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    margin-bottom: var(--space-2);
+    margin-bottom: 0;
 }
 
 .speedtest-icon {
@@ -979,12 +987,13 @@
     display: flex;
     align-items: flex-end;
     gap: var(--space-2);
-    /* 32px (was 44): the 200px fixed card minus 2×16px padding leaves a
-       168px budget; at 44px the head+last+when+mini+run stack computes to
-       ~178px and overflow:hidden clips the Run button's bottom edge. */
-    height: 32px;
+    /* Round 50: 24px (was 32). The card shrank from 200px → 180px, so the
+       budget is now 180 − 2×16 padding = 148px. Stack: head (~22) + last (~22)
+       + when (~16) + mini (24) + Run (~30) + 4×4px gaps (16) ≈ 130px < 148px —
+       the Run button clears overflow:hidden with headroom. */
+    height: 24px;
     margin-top: auto;          /* push chart + button to the bottom */
-    margin-bottom: var(--space-1);
+    margin-bottom: 0;
 }
 .speedtest-mini-bar {
     flex: 1 1 0;
@@ -1549,11 +1558,17 @@
 }
 
 /* Step 93: outer wrapper around header + rows. Border + radius give the
-   table a "panel" feel without needing a stripe per row. */
+   table a "panel" feel without needing a stripe per row.
+   Round 50 (Task 3): scroll the wide MAC/IP columns INTERNALLY on narrow
+   viewports instead of forcing the whole page wider. overflow-x:auto lets the
+   table pan horizontally; overflow-y:hidden preserves the radius clip on the
+   vertical edges. -webkit-overflow-scrolling:touch keeps momentum scroll on iOS. */
 .devices-table {
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-md);
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
 }
 
 /* Column header strip — must match .devices-summary grid EXACTLY so

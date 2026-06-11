@@ -83,7 +83,28 @@ var REFRESH_MS = 60000;   // re-check WAN state every 60s (state, not throughput
 // Chart geometry. wan-stats emits every 2s → 150 samples = 5 minutes.
 var CHART_RING = 150;
 var CHART_W = 300;
-var CHART_H = 120;
+var CHART_H = 56;
+
+// Scale floor: idle traffic shouldn't autoscale to full height. wan-stats
+// emits bits/sec, so 100 Kbps = 100 * 1000 bps is the minimum upper bound.
+var CHART_HI_FLOOR = 100 * 1000;
+
+// ── Shared small-card host (#dx-cards) ──────────────────────────────────────
+// Round 50 (unified small-card grid): wan-hero / speedtest / sparkline all
+// inject their cards into ONE wrapping grid (#dx-cards) instead of being
+// independent #view grid items. getElementById-or-create is race-safe enough
+// for this single-threaded DOM — whichever module wins the race creates the
+// host; the others find it. CSS `order` (not injection order) decides the
+// visual sequence, so the race is harmless.
+function dxCardsHost() {
+	var host = document.getElementById('dx-cards');
+	if (host) return host;
+	var view = document.getElementById('view');
+	if (!view) return null;
+	host = E('div', { 'id': 'dx-cards', 'class': 'dx-cards' });
+	view.insertBefore(host, view.firstChild);
+	return host;
+}
 
 function median(arr) {
 	if (!arr.length) return null;
@@ -136,7 +157,14 @@ function pingTier(ms) {
 }
 
 // ── Ring buffer for the live chart ─────────────────────────────────────────
-function RateRing(max) { this.max = max; this.data = []; }
+// Round 50 fix (2a): pre-fill with zeros so the chart spans the full x-axis
+// width from t=0 — no "spike-needle" where the first few samples cram into a
+// few px because the data is right-aligned over a 150-slot axis.
+function RateRing(max) {
+	this.max = max;
+	this.data = [];
+	for (var i = 0; i < max; i++) this.data.push(0);
+}
 RateRing.prototype.push = function (v) {
 	this.data.push((v === null || v === undefined || !isFinite(v)) ? 0 : v);
 	if (this.data.length > this.max) this.data.shift();
@@ -150,12 +178,19 @@ function ringPaths(ring, hi, w, h) {
 	if (n < 2) return null;
 	if (!(hi > 0)) hi = 1;
 	var stepX = w / (CHART_RING - 1);
-	// Right-align the data so the newest sample sits at the right edge.
+	// Right-align the data so the newest sample sits at the right edge. With
+	// the zero-prefill (Round 50 2a) n === CHART_RING so offset is 0 and the
+	// curve spans the full width; the offset math stays for the <CHART_RING
+	// edge case.
 	var offset = w - (n - 1) * stepX;
 	var line = '';
 	for (var i = 0; i < n; i++) {
 		var x = offset + i * stepX;
-		var y = h - Math.min(1, ring.data[i] / hi) * h * 0.92 - h * 0.04;
+		// Round 50 fix (2b): sqrt-scale the magnitude so idle noise doesn't
+		// flatline AND a single burst doesn't spike to a needle — bursts stay
+		// readable while low traffic still registers above the baseline.
+		var frac = Math.min(1, Math.sqrt(ring.data[i] / hi));
+		var y = h - frac * h * 0.92 - h * 0.04;
 		line += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
 	}
 	var firstX = offset.toFixed(1);
@@ -191,56 +226,57 @@ return baseclass.extend({
 	},
 
 	injectCard: function () {
+		// Round 50 (redesign — unified small-card grid): vertical 300×180
+		// layout. row1 status · row2 meta · row3 ↓/↑ rates (anchor) · row4
+		// compact area chart · row5 IP + latency. The old left-column +
+		// big-right-chart 2-up grid is gone; the card now lives in #dx-cards.
 		var card = E('div', { 'class': 'conn-card', 'id': 'conn-card' }, [
-			// ── Left column: status + identity ──────────────────────────────
-			E('div', { 'class': 'conn-left' }, [
-				E('div', { 'class': 'conn-status', 'id': 'conn-status' }, _('Checking…')),
-				E('div', { 'class': 'conn-meta', 'id': 'conn-meta' }, ''),
-				E('div', { 'class': 'conn-ip-row' }, [
-					E('span', { 'class': 'conn-ip-label' }, _('Public IP')),
-					E('button', {
-						'type': 'button',
-						'class': 'conn-ip',
-						'id': 'conn-ip',
-						'title': _('Click to copy'),
-						'click': L.bind(this.copyIp, this)
-					}, '—')
+			// row 1: status dot + "Internet · Online" (heading, ellipsis).
+			E('div', { 'class': 'conn-status', 'id': 'conn-status' }, _('Checking…')),
+			// row 2: uptime · proto · iface (caption).
+			E('div', { 'class': 'conn-meta', 'id': 'conn-meta' }, ''),
+			// row 3: current ↓/↑ rates — the card's visual anchor (mono,
+			// direction colors).
+			E('div', { 'class': 'conn-readouts' }, [
+				E('span', { 'class': 'conn-readout conn-readout-down' }, [
+					E('span', { 'class': 'conn-readout-arrow' }, '↓'),
+					E('span', { 'class': 'conn-readout-num', 'id': 'conn-down' }, '—'),
+					E('span', { 'class': 'conn-readout-unit', 'id': 'conn-down-unit' }, '')
 				]),
-				E('div', { 'class': 'conn-latency-row' }, [
-					E('span', { 'class': 'conn-latency-label' }, _('Latency')),
-					E('span', { 'class': 'conn-latency', 'id': 'conn-latency' }, [
-						E('span', { 'class': 'conn-latency-num', 'id': 'conn-latency-num' }, '—'),
-						E('span', {
-							'class': 'conn-latency-dot',
-							'id': 'conn-latency-dot',
-							'data-tier': 'unknown',
-							'tabindex': '0',
-							'title': _('Latency: < 50 ms good · < 100 ms fair · ≥ 100 ms poor')
-						}, '')
-					])
+				E('span', { 'class': 'conn-readout conn-readout-up' }, [
+					E('span', { 'class': 'conn-readout-arrow' }, '↑'),
+					E('span', { 'class': 'conn-readout-num', 'id': 'conn-up' }, '—'),
+					E('span', { 'class': 'conn-readout-unit', 'id': 'conn-up-unit' }, '')
 				])
 			]),
-
-			// ── Right area: live 5-min chart + current readouts ─────────────
+			// row 4: compact live area chart.
 			E('div', { 'class': 'conn-chart-wrap', 'id': 'conn-chart-wrap' }, [
-				E('div', { 'class': 'conn-readouts' }, [
-					E('span', { 'class': 'conn-readout conn-readout-down' }, [
-						E('span', { 'class': 'conn-readout-arrow' }, '↓'),
-						E('span', { 'class': 'conn-readout-num', 'id': 'conn-down' }, '—'),
-						E('span', { 'class': 'conn-readout-unit', 'id': 'conn-down-unit' }, '')
-					]),
-					E('span', { 'class': 'conn-readout conn-readout-up' }, [
-						E('span', { 'class': 'conn-readout-arrow' }, '↑'),
-						E('span', { 'class': 'conn-readout-num', 'id': 'conn-up' }, '—'),
-						E('span', { 'class': 'conn-readout-unit', 'id': 'conn-up-unit' }, '')
-					])
-				]),
 				this.makeChart()
+			]),
+			// row 5: Public IP (mono, click-to-copy) + latency num + dot,
+			// right-aligned. Labels dropped — mono IP + "ms" are self-describing.
+			E('div', { 'class': 'conn-footer' }, [
+				E('button', {
+					'type': 'button',
+					'class': 'conn-ip',
+					'id': 'conn-ip',
+					'title': _('Click to copy'),
+					'click': L.bind(this.copyIp, this)
+				}, '—'),
+				E('span', { 'class': 'conn-latency', 'id': 'conn-latency' }, [
+					E('span', { 'class': 'conn-latency-num', 'id': 'conn-latency-num' }, '—'),
+					E('span', {
+						'class': 'conn-latency-dot',
+						'id': 'conn-latency-dot',
+						'data-tier': 'unknown',
+						'tabindex': '0',
+						'title': _('Latency: < 50 ms good · < 100 ms fair · ≥ 100 ms poor')
+					}, '')
+				])
 			])
 		]);
 
-		var view = document.getElementById('view');
-		view.insertBefore(card, view.firstChild);
+		dxCardsHost().appendChild(card);
 
 		// Subscribe to the wan-stats singleton — same stream sparkline used.
 		// One RPC stream, shared. NO new polling.
@@ -293,7 +329,10 @@ return baseclass.extend({
 		var svg = document.getElementById('conn-chart');
 		if (!svg) return;
 		// Shared upper bound across both series so magnitude reads honestly.
-		var hi = 1;
+		// Round 50 fix (2b): clamp the upper bound to a floor (100 Kbps) so
+		// idle-line noise doesn't autoscale to full height — a quiet link
+		// reads as a quiet link, not a busy one.
+		var hi = CHART_HI_FLOOR;
 		var i;
 		for (i = 0; i < this.ringRx.data.length; i++) if (this.ringRx.data[i] > hi) hi = this.ringRx.data[i];
 		for (i = 0; i < this.ringTx.data.length; i++) if (this.ringTx.data[i] > hi) hi = this.ringTx.data[i];

@@ -56,6 +56,22 @@ function svgEl(tag, attrs, children) {
 	return el;
 }
 
+// ── Shared small-card host (#dx-cards) ──────────────────────────────────────
+// Round 50 (unified small-card grid): the CPU / Memory / Temp tiles go DIRECTLY
+// into the shared #dx-cards grid alongside the Connection card and Speedtest
+// summary — no separate .design-tile-grid wrapper. Whichever of the three
+// modules (wan-hero / speedtest / sparkline) wins the inject race creates the
+// host; the others find it. CSS `order` decides the visual sequence.
+function dxCardsHost() {
+	var host = document.getElementById('dx-cards');
+	if (host) return host;
+	var view = document.getElementById('view');
+	if (!view) return null;
+	host = E('div', { 'id': 'dx-cards', 'class': 'dx-cards' });
+	view.insertBefore(host, view.firstChild);
+	return host;
+}
+
 // ── Ring buffer for sparkline data ────────────────────────────────────────────
 function MetricRing(max) { this.max = max; this.data = []; }
 MetricRing.prototype.push = function (v) {
@@ -133,7 +149,7 @@ MetricRing.prototype.path = function (w, h, sharedHi, minRange) {
 //    — the browser doesn't paint that as SVG, so even perfectly-attributed
 //    <path> children render to nothing. Same fix the menu icons needed in
 //    Step 77; we missed it here.
-function makeTile(id, iconName, label, iconBase, hasProgress, dualValue) {
+function makeTile(id, iconName, label, iconBase, hasProgress, dualValue, tileClass) {
 	var baseY = (SPARK_H / 2).toFixed(1);
 	var initPath = 'M 0,' + baseY + ' L ' + SPARK_W + ',' + baseY;
 
@@ -255,8 +271,12 @@ function makeTile(id, iconName, label, iconBase, hasProgress, dualValue) {
 
 	children.push(E('div', { 'class': 'design-tile-meta' }, ''));
 
-	// Tile container stays HTML — only the SVG bits need namespace fix
-	return E('div', { 'class': 'design-tile', 'id': id }, children);
+	// Tile container stays HTML — only the SVG bits need namespace fix.
+	// Round 50: tileClass adds a stable per-tile class (e.g. design-tile-cpu)
+	// so the shared #dx-cards grid can order CPU/Mem/Temp deterministically via
+	// CSS, independent of the inject race between the three card modules.
+	var cls = 'design-tile' + (tileClass ? ' ' + tileClass : '');
+	return E('div', { 'class': cls, 'id': id }, children);
 }
 
 function renderTileSpark(tileEl, ring, ringSecondary, minRange) {
@@ -498,7 +518,6 @@ return baseclass.extend({
 	},
 
 	injectTiles: function () {
-		var view = document.getElementById('view');
 		// Step 89 + 90 (Round 15): CPU and memory both opt into the progress
 		// bar — both are natural 0-100% utilisation metrics. Net is throughput
 		// (no upper bound) and temp doesn't have a meaningful 0-100 range, so
@@ -508,12 +527,16 @@ return baseclass.extend({
 		// Round 49: WAN Traffic tile removed — the merged Connection card
 		// (wan-hero.js) now owns live throughput. Remaining tiles: CPU /
 		// Memory / Temperature.
-		var grid = E('div', { 'class': 'design-tile-grid' }, [
-			makeTile('design-tile-cpu',  'i-cpu',         _('CPU Usage'),   this.iconBase, /*hasProgress*/ true),
-			makeTile('design-tile-mem',  'i-memory',      _('Memory'),      this.iconBase, /*hasProgress*/ true),
-			makeTile('design-tile-temp', 'i-thermometer', _('Temperature'), this.iconBase)
-		]);
-		view.insertBefore(grid, view.firstChild);
+		// Round 50 (unified small-card grid): the three tiles go DIRECTLY into
+		// the shared #dx-cards grid (no .design-tile-grid wrapper). Stable
+		// per-tile classes drive CSS `order` (CPU 3 · Memory 4 · Temp 5).
+		var host = dxCardsHost();
+		host.appendChild(
+			makeTile('design-tile-cpu',  'i-cpu',         _('CPU Usage'),   this.iconBase, /*hasProgress*/ true,  false, 'design-tile-cpu-card'));
+		host.appendChild(
+			makeTile('design-tile-mem',  'i-memory',      _('Memory'),      this.iconBase, /*hasProgress*/ true,  false, 'design-tile-mem-card'));
+		host.appendChild(
+			makeTile('design-tile-temp', 'i-thermometer', _('Temperature'), this.iconBase, /*hasProgress*/ false, false, 'design-tile-temp-card'));
 
 		this.tileCpu  = document.getElementById('design-tile-cpu');
 		this.tileMem  = document.getElementById('design-tile-mem');
@@ -566,7 +589,9 @@ return baseclass.extend({
 			setTile(self.tileMem, {
 				num:      pct.toFixed(0),
 				unit:     '%',
-				trend:    deltaToTrend(pct, prevMem, { threshold: 1.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
+				// Round 50 (6a): threshold 1.0 → 3.0 so small memory drift
+				// doesn't print a trend chip every 5s tick.
+				trend:    deltaToTrend(pct, prevMem, { threshold: 3.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
 				progress: pct,
 				meta:     formatBytes(used) + ' / ' + formatBytes(info.memory.total)
 			});
@@ -593,7 +618,9 @@ return baseclass.extend({
 						setTile(self.tileCpu, {
 							num:      pct.toFixed(0),
 							unit:     '%',
-							trend:    deltaToTrend(pct, prevPct, { threshold: 1.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
+							// Round 50 (6a): threshold 1.0 → 5.0 so ±1% CPU
+							// sampling noise doesn't flash a red chip every tick.
+							trend:    deltaToTrend(pct, prevPct, { threshold: 5.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
 							progress: pct,
 							// redesign-2026-06 §三.3 / §四: CPU meta must read
 							// "5 min avg" to disambiguate the tile's instantaneous

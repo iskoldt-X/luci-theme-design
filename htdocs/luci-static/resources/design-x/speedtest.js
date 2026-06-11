@@ -103,6 +103,20 @@ function fmtAgo(ts) {
 	return Math.floor(s / 86400) + _(' d ago');
 }
 
+// ── Shared small-card host (#dx-cards) ──────────────────────────────────────
+// Round 50: wan-hero / speedtest / sparkline share ONE wrapping grid. Whichever
+// module wins the inject race creates the host; the others find it. CSS `order`
+// decides the visual sequence so the race is harmless (single-threaded DOM).
+function dxCardsHost() {
+	var host = document.getElementById('dx-cards');
+	if (host) return host;
+	var view = document.getElementById('view');
+	if (!view) return null;
+	host = E('div', { 'id': 'dx-cards', 'class': 'dx-cards' });
+	view.insertBefore(host, view.firstChild);
+	return host;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 return baseclass.extend({
@@ -166,10 +180,9 @@ return baseclass.extend({
 				])
 			])
 		]);
-		var view = document.getElementById('view');
-		// Append at END of the natural flow; the grid wrapper (style.css)
-		// re-flows the Connection card + this summary into row 1.
-		view.appendChild(card);
+		// Round 50: append into the shared #dx-cards grid; CSS `order` places
+		// this summary second (after the Connection card).
+		dxCardsHost().appendChild(card);
 
 		this.renderSummary();
 	},
