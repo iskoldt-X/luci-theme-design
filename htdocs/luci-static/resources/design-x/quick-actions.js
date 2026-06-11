@@ -299,11 +299,11 @@ return baseclass.extend({
 				});
 				break;
 
-			// Step 51: Run speedtest — scroll the speedtest card into view
-			// and click its Run button. Cheap deep-link without coupling
-			// the modules.
+			// Step 51: Run speedtest — scroll the speedtest summary card into
+			// view and click its Run button (which opens the drawer in the
+			// Round 49 redesign). Cheap deep-link without coupling the modules.
 			case 'speedtest':
-				var card = document.getElementById('speedtest-card');
+				var card = document.getElementById('speedtest-summary');
 				if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
 				setTimeout(function () {
 					var btn = document.getElementById('speedtest-run');

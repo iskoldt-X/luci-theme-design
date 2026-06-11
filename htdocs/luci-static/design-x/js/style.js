@@ -31,25 +31,18 @@
 	};
 
 	// ── 1. Indicators icon (MutationObserver replaces deprecated DOMSubtreeModified)
-	//      Step 109 (Round 25): walk ALL children, not just firstElementChild —
-	//      LuCI can attach multiple [data-indicator] siblings (uci-changes +
-	//      poll-status + sometimes more). Also adds a title attribute to the
-	//      poll-status dot so the (otherwise undiscoverable) "click to pause
-	//      auto-refresh" affordance shows up on hover. Observer now also
-	//      listens for attribute changes on data-style so the title text
-	//      stays in sync as LuCI toggles polling state.
+	//      redesign-2026-06 §六: the spinning poll-status refresh button was
+	//      removed from the topbar (CSS hides [data-indicator="poll-status"]),
+	//      so the poll-status annotation/title wiring is gone with it. This
+	//      block now only clears stray text on non-uci-changes indicators so
+	//      LuCI's raw indicator labels don't leak into the topbar; the
+	//      uci-changes pill keeps its text (styled in style.css).
 	var indicators = document.getElementById('indicators');
 	if (indicators) {
 		function annotateIndicator(el) {
 			if (!el || !el.getAttribute) return;
 			var indType = el.getAttribute('data-indicator');
-			if (indType === 'poll-status') {
-				var style = el.getAttribute('data-style');
-				el.setAttribute('title', style === 'active'
-					? 'Auto-refresh active — click to pause'
-					: 'Auto-refresh paused — click to resume');
-				el.textContent = '';
-			} else if (indType !== 'uci-changes') {
+			if (indType !== 'uci-changes') {
 				el.textContent = '';
 			}
 		}
@@ -60,9 +53,7 @@
 			}
 		}).observe(indicators, {
 			childList: true,
-			subtree: true,
-			attributes: true,
-			attributeFilter: ['data-style']
+			subtree: true
 		});
 		// Annotate any children already present at script-load time.
 		for (var i = 0; i < indicators.children.length; i++) {

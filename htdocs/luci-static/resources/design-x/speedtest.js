@@ -2,11 +2,8 @@
 'require baseclass';
 'require ui';
 
-// Step 83 (Round 13): SVG namespace helpers. The rogue 'i-activity' that
-// Chrome-Claude found in HTML namespace was this file's speedtest-icon
-// in the card header. Same fix applied to the gauge SVGs (semi-circle
-// dials) which were also E('svg'/'path',...) and thus rendering blank
-// stroke patterns even when their attrs are set.
+// SVG namespace helpers (see sparkline.js for the full rationale — LuCI's
+// E('svg',…) makes HTMLUnknownElement which the browser won't paint as SVG).
 var __SVG_NS   = 'http://www.w3.org/2000/svg';
 var __XLINK_NS = 'http://www.w3.org/1999/xlink';
 function svgEl(tag, attrs, children) {
@@ -26,45 +23,32 @@ function svgUse(href) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Wi-Fi / LAN link speedtest — upgrade.md §2.A5
+// Wi-Fi / LAN link speedtest — redesign-2026-06 §三.2
 //
-// Tests browser ↔ router throughput (NOT browser ↔ internet). Useful for:
-//   - "is my Wi-Fi slow?" (vs WAN)
-//   - "is 5GHz really better than 2.4GHz from where I'm standing?"
-//   - "did changing the antenna / channel help?"
+// Tests browser ↔ router throughput (NOT browser ↔ internet).
 //
-// Three phases per run:
-//   1. Latency  — N × /cgi-bin/design/ping, median + stddev (jitter)
-//   2. Download — 1 × /cgi-bin/design/download?bytes=N (default 50MB)
-//   3. Upload   — 1 × /cgi-bin/design/upload (POST blob, default 25MB)
+// Round 49 STRUCTURAL CHANGE (redesign §三.2): the card collapses to a SUMMARY
+// CARD + a single [Run] button. The summary shows the last run's ↓/↑/latency
+// (mono + direction colors), relative time, and a mini bar chart of the last 5
+// runs. The Wired/size dropdowns and the live gauges/progress move into a
+// RIGHT-SIDE DRAWER that opens on Run. The drawer has a focus trap (copied from
+// cmdk.js's Tab handler), Escape-to-close, a reduced-motion-safe slide, and an
+// independent Cancel button. On completion: write history, update summary, the
+// drawer stays open until dismissed. The Overview summary card NEVER changes
+// height (fixed-size law §一.5) because the live machinery is in the overlay.
 //
-// Lives in a card injected into Overview. Trigger is a button — not auto —
-// because hammering /dev/urandom + tens of MB stream is not free.
-//
-// Step 46: history + label. Each run is stored in localStorage with a
-// user-chosen label (Auto / Wired / 5 GHz / 2.4 GHz / custom). Last 6
-// entries show below the current results. Lets users do a manual 2.4 vs
-// 5 comparison by running twice with different labels — no automated
-// SSID switching, but the visible side-by-side makes the comparison easy.
-//
-// Still deferred:
-//   - Automated SSID switching (browser can't do this anyway — Wi-Fi is
-//     a router config, not a browser action)
-//   - Theoretical-link-rate overlay (needs iwinfo channel/bandwidth)
+// The three-phase state machine is UNCHANGED:
+//   1. testLatency()  — N × ping → median + jitter + loss
+//   2. testDownload() — stream-read, live gauge, avg + peak
+//   3. testUpload()   — XHR upload progress, live gauge, avg + peak
+// runTest() chains them; only the DOM targets (now inside the drawer) and the
+// open/close/cancel wiring are new.
 // ─────────────────────────────────────────────────────────────────────────────
 
 var STORAGE_KEY      = 'design-speedtest-history-v1';
-var STORAGE_KEY_SIZE = 'design-speedtest-size-v1';   // Step 64: persisted file-size preset
+var STORAGE_KEY_SIZE = 'design-speedtest-size-v1';
 var HISTORY_MAX = 6;
 
-// Step 64: user-selectable test size. Default 200 MB hits a balance
-// between "fast enough not to feel slow" and "long enough to saturate
-// gigabit Wi-Fi past TCP slow-start". 1 GB option is honest about being
-// 'thorough' / slow.
-//
-// Upload bytes are derived as half the download size — uploads on real
-// links are typically slower so we don't need as much data to get a
-// stable rate, and it cuts the total test time.
 var SIZE_PRESETS_MB = {
 	'50':   { dl: 50,   ul: 25,  label: '50 MB',  hint: 'quick' },
 	'200':  { dl: 200,  ul: 100, label: '200 MB', hint: 'default' },
@@ -72,13 +56,10 @@ var SIZE_PRESETS_MB = {
 	'1024': { dl: 1024, ul: 512, label: '1 GB',   hint: 'thorough' }
 };
 
-var PING_COUNT      = 20;                 // 20 samples → median is robust to outliers
-var DOWNLOAD_BYTES  = 50 * 1024 * 1024;   // 50 MB — at 1 Gbps wired = 400ms (post TCP slow-start),
-                                          // at 5 GHz Wi-Fi ≈ 1s, at 2.4 GHz Wi-Fi ≈ 4s
-                                          // User feedback: 10 MB was finished before the
-                                          // browser even rendered progress on gigabit LAN.
-var UPLOAD_BYTES    = 25 * 1024 * 1024;   // 25 MB — same logic, upload is typically slower
-var TIMEOUT_MS      = 60000;              // 60 s per phase covers worst-case 2.4 GHz on a busy AP
+var PING_COUNT      = 20;
+var DOWNLOAD_BYTES  = 50 * 1024 * 1024;
+var UPLOAD_BYTES    = 25 * 1024 * 1024;
+var TIMEOUT_MS      = 60000;
 
 function median(arr) {
 	if (!arr.length) return null;
@@ -94,18 +75,7 @@ function stddev(arr) {
 	return Math.sqrt(sq / (arr.length - 1));
 }
 
-function fmtMbps(bps) {
-	return (bps / 1e6).toFixed(1);
-}
-
-function withTimeout(promise, ms) {
-	var ctrl = new AbortController();
-	var t = setTimeout(function () { ctrl.abort(); }, ms);
-	return { signal: ctrl.signal, promise: promise(ctrl.signal).finally(function () { clearTimeout(t); }) };
-}
-
-// Step 46: history persistence — localStorage, best-effort, fails silent
-// on quota / private-mode.
+// History persistence — localStorage, best-effort, fails silent.
 function loadHistory() {
 	try {
 		var raw = localStorage.getItem(STORAGE_KEY);
@@ -152,94 +122,210 @@ return baseclass.extend({
 		this.injectCard();
 	},
 
-	// Step 52: rebuilt to match upgrade-preview.html §A5 — two semicircle
-	// gauges for download/upload (SVG arc with stroke-dashoffset animation)
-	// + 3 small stat cards for latency / jitter / loss.
+	// ── Summary card (redesign §三.2) ──────────────────────────────────────
+	// Compact, always-static-height card: head, last-run line, relative time,
+	// mini bar chart of last 5 runs, primary [Run] button. No controls
+	// clutter — the dropdowns live in the drawer.
 	injectCard: function () {
-		var self = this;
-		var card = E('div', { 'class': 'speedtest-card', 'id': 'speedtest-card' }, [
+		var card = E('div', { 'class': 'speedtest-summary', 'id': 'speedtest-summary' }, [
 			E('div', { 'class': 'speedtest-head' }, [
 				svgEl('svg', { 'class': 'svg-icon speedtest-icon', 'aria-hidden': 'true' },
 					svgUse(this.iconBase + '#i-activity')),
-				E('span', { 'class': 'speedtest-title' }, _('Wi-Fi / LAN Link Test')),
+				E('span', { 'class': 'speedtest-title' }, _('Speed test')),
 				E('span', { 'class': 'speedtest-meta' }, _('Browser ↔ router'))
 			]),
-			// Step 52: 2 semicircle gauges (download / upload)
+			// Last-run readout line: ↓ / ↑ / latency, mono + direction colors.
+			E('div', { 'class': 'speedtest-last', 'id': 'speedtest-last' }, [
+				E('span', { 'class': 'speedtest-last-metric speedtest-last-down' }, [
+					E('span', { 'class': 'speedtest-last-arrow' }, '↓'),
+					E('span', { 'class': 'speedtest-last-num', 'id': 'speedtest-last-down' }, '—'),
+					E('span', { 'class': 'speedtest-last-unit' }, ' Mbps')
+				]),
+				E('span', { 'class': 'speedtest-last-metric speedtest-last-up' }, [
+					E('span', { 'class': 'speedtest-last-arrow' }, '↑'),
+					E('span', { 'class': 'speedtest-last-num', 'id': 'speedtest-last-up' }, '—'),
+					E('span', { 'class': 'speedtest-last-unit' }, ' Mbps')
+				]),
+				E('span', { 'class': 'speedtest-last-metric speedtest-last-lat' }, [
+					E('span', { 'class': 'speedtest-last-num', 'id': 'speedtest-last-lat' }, '—'),
+					E('span', { 'class': 'speedtest-last-unit' }, ' ms')
+				])
+			]),
+			E('div', { 'class': 'speedtest-last-when', 'id': 'speedtest-last-when' }, _('No runs yet')),
+			// Mini bar chart of last 5 runs (download Mbps).
+			E('div', { 'class': 'speedtest-mini', 'id': 'speedtest-mini' }, []),
+			E('div', { 'class': 'speedtest-summary-actions' }, [
+				E('button', {
+					'type':  'button',
+					'class': 'cbi-button cbi-button-action cbi-button-positive speedtest-run',
+					'id':    'speedtest-run',
+					'click': L.bind(this.openDrawer, this)
+				}, [
+					svgEl('svg', { 'class': 'svg-icon', 'aria-hidden': 'true' }, svgUse(this.iconBase + '#i-play')),
+					E('span', {}, _('Run'))
+				])
+			])
+		]);
+		var view = document.getElementById('view');
+		// Append at END of the natural flow; the grid wrapper (style.css)
+		// re-flows the Connection card + this summary into row 1.
+		view.appendChild(card);
+
+		this.renderSummary();
+	},
+
+	// ── Right-side drawer (redesign §三.2) ─────────────────────────────────
+	// Built once, lazily, on first Run. Contains the label/size controls,
+	// the gauges + stats + progress, and Cancel/Close. focus trap + Escape.
+	buildDrawer: function () {
+		if (this.drawer) return;
+		var self = this;
+
+		var labelSelect = E('select', {
+			'id': 'speedtest-label', 'class': 'speedtest-label-select', 'aria-label': _('Test label')
+		}, [
+			E('option', { 'value': 'Wired'   }, _('Wired')),
+			E('option', { 'value': '5 GHz', 'selected': 'selected' }, _('Wi-Fi 5 GHz')),
+			E('option', { 'value': '2.4 GHz' }, _('Wi-Fi 2.4 GHz')),
+			E('option', { 'value': 'Other'   }, _('Other'))
+		]);
+		var sizeSelect = E('select', {
+			'id': 'speedtest-size', 'class': 'speedtest-label-select', 'aria-label': _('Test size')
+		}, Object.keys(SIZE_PRESETS_MB).map(function (mb) {
+			var p = SIZE_PRESETS_MB[mb];
+			var text = p.label + (p.hint ? ' · ' + _(p.hint) : '');
+			return E('option', { 'value': mb }, text);
+		}));
+
+		var panel = E('div', {
+			'class': 'speedtest-drawer-panel',
+			'role': 'dialog',
+			'aria-modal': 'true',
+			'aria-label': _('Speed test')
+		}, [
+			E('div', { 'class': 'speedtest-drawer-head' }, [
+				E('span', { 'class': 'speedtest-drawer-title' }, _('Speed test')),
+				E('button', {
+					'type': 'button',
+					'class': 'speedtest-drawer-close',
+					'aria-label': _('Close'),
+					'click': L.bind(this.closeDrawer, this)
+				}, [
+					svgEl('svg', { 'class': 'svg-icon', 'aria-hidden': 'true' }, svgUse(this.iconBase + '#i-x'))
+				])
+			]),
+			// Controls (moved out of the summary card per §三.2).
+			E('div', { 'class': 'speedtest-drawer-controls' }, [
+				E('label', { 'class': 'speedtest-control' }, [
+					E('span', { 'class': 'speedtest-control-label' }, _('Link')), labelSelect
+				]),
+				E('label', { 'class': 'speedtest-control' }, [
+					E('span', { 'class': 'speedtest-control-label' }, _('Size')), sizeSelect
+				])
+			]),
+			// Gauges.
 			E('div', { 'class': 'speedtest-gauges' }, [
 				this.makeGauge('download', _('Download'), 'st-down-num', '↓'),
 				this.makeGauge('upload',   _('Upload'),   'st-up-num',   '↑')
 			]),
-			// Step 52: 3 small stat cards under the gauges
+			// Stats.
 			E('div', { 'class': 'speedtest-stats' }, [
 				this.makeStat(_('Latency'), 'st-latency', 'ms'),
 				this.makeStat(_('Jitter'),  'st-jitter',  'ms'),
 				this.makeStat(_('Loss'),    'st-loss',    '%')
 			]),
-			E('div', { 'class': 'speedtest-actions' }, [
-				// Step 46: label select lets the user tag the run.
-				E('select', {
-					'id':    'speedtest-label',
-					'class': 'speedtest-label-select',
-					'aria-label': _('Test label')
-				}, [
-					E('option', { 'value': 'Wired'   }, _('Wired')),
-					E('option', { 'value': '5 GHz', 'selected': 'selected' }, _('Wi-Fi 5 GHz')),
-					E('option', { 'value': '2.4 GHz' }, _('Wi-Fi 2.4 GHz')),
-					E('option', { 'value': 'Other'   }, _('Other'))
-				]),
-				// Step 64: file-size selector. Persists last choice to
-				// localStorage so the user doesn't re-pick every test.
-				E('select', {
-					'id':    'speedtest-size',
-					'class': 'speedtest-label-select',
-					'aria-label': _('Test size')
-				}, Object.keys(SIZE_PRESETS_MB).map(function (mb) {
-					var p = SIZE_PRESETS_MB[mb];
-					var text = p.label + (p.hint ? ' · ' + _(p.hint) : '');
-					return E('option', { 'value': mb }, text);
-				})),
+			// Live progress text + the run/cancel control. The control is a
+			// SEPARATE Cancel button during a run — it no longer morphs into a
+			// status bar (redesign §三.2: "控件不再变身状态条").
+			E('div', { 'class': 'speedtest-progress', 'id': 'speedtest-progress' }, ''),
+			E('div', { 'class': 'speedtest-drawer-actions' }, [
 				E('button', {
-					'type':  'button',
-					'class': 'cbi-button cbi-button-action cbi-button-positive speedtest-run',
-					'id':    'speedtest-run',
+					'type': 'button',
+					'class': 'cbi-button cbi-button-action cbi-button-positive speedtest-drawer-run',
+					'id': 'speedtest-drawer-run',
 					'click': L.bind(this.runTest, this)
-				}, _('Run test'))
-			]),
-			// Step 46: history strip below the actions, hidden if empty.
-			E('div', { 'class': 'speedtest-history', 'id': 'speedtest-history' }, [])
+				}, _('Run test')),
+				E('button', {
+					'type': 'button',
+					'class': 'cbi-button speedtest-drawer-cancel',
+					'id': 'speedtest-drawer-cancel',
+					'disabled': 'disabled',
+					'click': L.bind(this.cancelTest, this)
+				}, _('Cancel'))
+			])
 		]);
-		var view = document.getElementById('view');
-		view.appendChild(card);     // append at END (not first-fold)
 
-		this.renderHistory();
+		var overlay = E('div', { 'class': 'speedtest-drawer-overlay', 'id': 'speedtest-drawer' }, [panel]);
+		document.body.appendChild(overlay);
 
-		// Step 64: restore last-used file size from localStorage + persist
-		// future changes. Defaults to 200 MB if no preference saved or the
-		// saved value isn't in the current SIZE_PRESETS_MB map (so retiring
-		// a preset doesn't break existing users).
-		var sizeEl = document.getElementById('speedtest-size');
-		if (sizeEl) {
-			var saved = '';
-			try { saved = localStorage.getItem(STORAGE_KEY_SIZE) || ''; }
-			catch (e) { /* localStorage disabled — fall through to default */ }
-			if (saved && SIZE_PRESETS_MB[saved]) {
-				sizeEl.value = saved;
-			} else {
-				sizeEl.value = '200';
-			}
-			sizeEl.addEventListener('change', function () {
-				try { localStorage.setItem(STORAGE_KEY_SIZE, sizeEl.value); } catch (e) {}
-			});
+		this.drawer = overlay;
+		this.drawerPanel = panel;
+
+		// Click on the dimmed backdrop (outside the panel) closes.
+		overlay.addEventListener('mousedown', function (ev) {
+			if (ev.target === overlay) self.closeDrawer();
+		});
+		// Escape + focus trap (Tab handling copied from cmdk.js).
+		overlay.addEventListener('keydown', L.bind(this.onDrawerKeydown, this));
+
+		// Restore last-used size from localStorage + persist changes.
+		var saved = '';
+		try { saved = localStorage.getItem(STORAGE_KEY_SIZE) || ''; } catch (e) {}
+		sizeSelect.value = (saved && SIZE_PRESETS_MB[saved]) ? saved : '200';
+		sizeSelect.addEventListener('change', function () {
+			try { localStorage.setItem(STORAGE_KEY_SIZE, sizeSelect.value); } catch (e) {}
+		});
+	},
+
+	openDrawer: function () {
+		this.buildDrawer();
+		this.lastFocus = document.activeElement;
+		this.drawer.classList.add('open');
+		// rAF so focus lands after the slide-in paint (and so iOS doesn't
+		// scroll the page on focus).
+		var self = this;
+		requestAnimationFrame(function () {
+			var firstBtn = document.getElementById('speedtest-drawer-run');
+			if (firstBtn) firstBtn.focus();
+		});
+	},
+
+	closeDrawer: function () {
+		if (!this.drawer) return;
+		// Don't abandon an in-flight test silently — cancel it first.
+		if (this._running) this.cancelTest();
+		this.drawer.classList.remove('open');
+		if (this.lastFocus && this.lastFocus.focus) {
+			try { this.lastFocus.focus(); } catch (e) {}
 		}
 	},
 
-	// Step 52: build one gauge — semicircle SVG track + animated bar +
-	// big text below with arrow + number + unit. valueId is the span id
-	// for setGauge() to update.
+	// Tab focus trap + Escape — same shape as cmdk.js's onKeydown Tab case.
+	onDrawerKeydown: function (ev) {
+		if (ev.key === 'Escape') {
+			ev.preventDefault();
+			this.closeDrawer();
+			return;
+		}
+		if (ev.key !== 'Tab' || !this.drawer) return;
+		var focusable = this.drawer.querySelectorAll(
+			'a[href], button:not([disabled]), input, textarea, select, [tabindex]:not([tabindex="-1"])');
+		if (!focusable.length) { ev.preventDefault(); return; }
+		var first = focusable[0];
+		var last  = focusable[focusable.length - 1];
+		if (ev.shiftKey) {
+			if (document.activeElement === first || document.activeElement === this.drawer) {
+				last.focus(); ev.preventDefault();
+			}
+		} else {
+			if (document.activeElement === last) {
+				first.focus(); ev.preventDefault();
+			}
+		}
+	},
+
+	// ── Gauge / stat builders (unchanged structure from prior version) ─────
 	makeGauge: function (kind, label, valueId, arrow) {
-		// Arc path: M 20,100 A 80,80 0 0 1 180,100 — semicircle, radius 80,
-		// total path length ≈ 251 (π × 80). dasharray=251 dashoffset=251 →
-		// fully hidden, animate to dashoffset=0 for full.
 		return E('div', { 'class': 'speedtest-gauge speedtest-gauge-' + kind }, [
 			E('div', { 'class': 'speedtest-gauge-label' }, label),
 			svgEl('svg', {
@@ -252,7 +338,6 @@ return baseclass.extend({
 					'class': 'speedtest-gauge-track',
 					'd':     'M 20,100 A 80,80 0 0 1 180,100',
 					'fill':  'none',
-					'stroke': '#d4d4d8',     // border-default light, dark via CSS
 					'stroke-width': '10',
 					'stroke-linecap': 'round'
 				}),
@@ -261,7 +346,6 @@ return baseclass.extend({
 					'id':                 'st-bar-' + kind,
 					'd':                  'M 20,100 A 80,80 0 0 1 180,100',
 					'fill':               'none',
-					'stroke':             (kind === 'download') ? '#10b981' : '#3b82f6',
 					'stroke-width':       '10',
 					'stroke-linecap':     'round',
 					'stroke-dasharray':   '251',
@@ -273,25 +357,11 @@ return baseclass.extend({
 				E('span', { 'class': 'speedtest-gauge-num', 'id': valueId }, '—'),
 				E('span', { 'class': 'speedtest-gauge-unit' }, ' Mbps')
 			]),
-			// Step 145 (Round 39):scale indicator. setGauge() writes
-			// "max 1 Gbps" / "max 2.5 Gbps" etc. so users know what 100%
-			// of the gauge represents. Without this, 184 Mbps showing at
-			// 18% of the bar is ambiguous (could mean "18% of 1 Gbps" or
-			// "18% of whatever this gauge maxes at").
 			E('div', { 'class': 'speedtest-gauge-scale', 'id': 'st-scale-' + kind }, ''),
-			// Step 250 (Round 48): static "Avg X · Peak Y" line that
-			// appears after a test completes. The gauge bar animates +
-			// snaps to avg on test end (CSS transition makes the visual
-			// trajectory ambiguous — "did it stop at last instant or
-			// average?"). This line is static text with no transition,
-			// unambiguously reporting both the average and the peak
-			// captured during the live run. Empty until first test
-			// completes; cleared at the start of each new run.
 			E('div', { 'class': 'speedtest-gauge-summary', 'id': 'st-summary-' + kind }, '')
 		]);
 	},
 
-	// Step 52: build one small stat card (latency / jitter / loss).
 	makeStat: function (label, valueId, unit) {
 		return E('div', { 'class': 'speedtest-stat' }, [
 			E('div', { 'class': 'speedtest-stat-label' }, label),
@@ -302,34 +372,7 @@ return baseclass.extend({
 		]);
 	},
 
-	// Step 52 → Step 145 (Round 39):adaptive gauge scale.
-	//
-	// Old design hardcoded SCALE_MBPS = 1000 (1 Gbps = full bar). Worked
-	// for typical home connections (100-940 Mbps lands in the visually
-	// active 10-94% range). Broke on:
-	//   - LAN tests over 2.5GbE / 10GbE wired (1300-9000 Mbps → clamped
-	//     to 100%, gauge needle pegged at right side, displayed Mbps
-	//     could exceed gauge max with no visual feedback)
-	//   - Sub-100Mbps connections at the lower end where a 50 Mbps test
-	//     only fills 5% of the bar — looks like 'nothing happened'.
-	//
-	// New: pick the smallest standard scale from SCALES_MBPS that fits
-	// the current value with ~20% headroom (mbps * 1.2 <= scale). Scale
-	// label below the gauge shows the active range.
-	//
-	// IMPORTANT — monotone-up within a single test
-	// Step 143/144 stream live updates ~10x/sec. If the scale auto-picked
-	// per call, mid-test variations (e.g. TCP slow-start at 50 Mbps →
-	// steady 800 Mbps) would cause the bar to JUMP backward visually
-	// (50/100 = 50% → 800/1000 = 80%) — gauge needle skating sideways.
-	// Instead: scale only INCREASES within a test (peak ratchets up).
-	// runTest() resets the ratchet at the start of every run via
-	// resetGaugeScale().
-	//
-	// The 'rescale-up' transition has a UX benefit: when network is
-	// faster than the gauge initially picked, user sees the gauge
-	// "shift down a notch and keep going" — communicates 'you're faster
-	// than I thought, here's more headroom'. Positive feedback signal.
+	// Adaptive gauge scale (unchanged logic).
 	setGauge: function (kind, mbps) {
 		var SCALES_MBPS = [100, 250, 500, 1000, 2500, 5000, 10000];
 		var bar     = document.getElementById('st-bar-' + kind);
@@ -339,26 +382,22 @@ return baseclass.extend({
 		this._gaugeScale = this._gaugeScale || { download: SCALES_MBPS[0], upload: SCALES_MBPS[0] };
 
 		if (mbps === null || !isFinite(mbps)) {
-			// Reset state
 			if (bar) bar.setAttribute('stroke-dashoffset', 251);
 			if (num) num.textContent = '—';
 			if (scaleEl) scaleEl.textContent = '';
 			return;
 		}
 
-		// Pick smallest scale that fits with 20% headroom
 		var fitScale = SCALES_MBPS[SCALES_MBPS.length - 1];
 		for (var i = 0; i < SCALES_MBPS.length; i++) {
 			if (mbps * 1.2 <= SCALES_MBPS[i]) { fitScale = SCALES_MBPS[i]; break; }
 		}
-		// Monotone-up: ratchet, never decrease during a single test
 		if (fitScale > this._gaugeScale[kind]) this._gaugeScale[kind] = fitScale;
 		var useScale = this._gaugeScale[kind];
 
 		var progress = Math.min(1, Math.max(0, mbps / useScale));
 		var offset = 251 * (1 - progress);
 		if (bar) bar.setAttribute('stroke-dashoffset', offset.toFixed(1));
-		// More precision for sub-100 Mbps so slow links don't drop to "0.0"
 		if (num) num.textContent = mbps < 100 ? mbps.toFixed(1) : mbps.toFixed(0);
 		if (scaleEl) {
 			scaleEl.textContent = useScale >= 1000
@@ -367,25 +406,14 @@ return baseclass.extend({
 		}
 	},
 
-	// Step 145 (Round 39):called by runTest() before each test starts to
-	// reset the gauge-scale ratchet. Without this, a slow test (50 Mbps)
-	// after a fast one (2500 Mbps) would still use the 2500 Mbps scale,
-	// showing the slow test as 2% of the bar.
 	resetGaugeScale: function () {
 		this._gaugeScale = { download: 100, upload: 100 };
 	},
 
-	// Step 250 (Round 48) — write the "Avg X · Peak Y" static line
-	// below a gauge. Called from runTest's .then callbacks after each
-	// test phase completes (download / upload). Passing avg=null
-	// clears the line — used at runTest start so a previous test's
-	// summary doesn't linger during the next test's live phase.
 	setGaugeSummary: function (kind, avg, peak) {
 		var el = document.getElementById('st-summary-' + kind);
 		if (!el) return;
 		if (avg === null || !isFinite(avg)) { el.textContent = ''; return; }
-		// Mirror setGauge's precision rule: more decimals under 100 Mbps
-		// so slow links don't drop to "0.0".
 		var fmt = function (n) { return n < 100 ? n.toFixed(1) : n.toFixed(0); };
 		var txt = _('Avg') + ' ' + fmt(avg) + ' Mbps';
 		if (peak !== undefined && peak !== null && isFinite(peak)) {
@@ -394,35 +422,35 @@ return baseclass.extend({
 		el.textContent = txt;
 	},
 
+	setProgress: function (text) {
+		var el = document.getElementById('speedtest-progress');
+		if (el) el.textContent = text || '';
+	},
+
 	runTest: function () {
-		var btn = document.getElementById('speedtest-run');
-		btn.disabled = true;
+		if (this._running) return;
+		this._running = true;
+		this._cancelled = false;
+
+		var runBtn    = document.getElementById('speedtest-drawer-run');
+		var cancelBtn = document.getElementById('speedtest-drawer-cancel');
+		if (runBtn)    runBtn.disabled = true;
+		if (cancelBtn) cancelBtn.disabled = false;
+
 		var self = this;
 
-		// Step 52: reset both gauges + stats to '—' at the start of a run.
-		// Step 145 (Round 39):also reset the adaptive scale ratchet so a
-		// slow test after a fast one doesn't render at 2% of an oversized bar.
 		this.resetGaugeScale();
 		this.setGauge('download', null);
 		this.setGauge('upload',   null);
-		// Step 250: clear prior-run summary so the line goes blank
-		// during the new test's live phase. setGaugeSummary fills it
-		// back in when each phase completes.
 		this.setGaugeSummary('download', null);
 		this.setGaugeSummary('upload',   null);
 		this.setStat('latency', '—');
 		this.setStat('jitter',  '—');
 		this.setStat('loss',    '—');
 
-		// Step 46: capture label + results so we can save a history entry on
-		// success. Initialised as null sentinels; written inside each phase.
 		var labelEl = document.getElementById('speedtest-label');
 		var label   = labelEl ? labelEl.value : 'Other';
 
-		// Step 64: read selected file size and convert MB → bytes for the
-		// CGI request. Falls back to the legacy DOWNLOAD_BYTES/UPLOAD_BYTES
-		// defaults if the select element isn't present (e.g. some plugin
-		// stripped it) — backwards-compat.
 		var sizeEl = document.getElementById('speedtest-size');
 		var preset = (sizeEl && SIZE_PRESETS_MB[sizeEl.value]) || SIZE_PRESETS_MB['200'];
 		var downloadBytes = preset.dl * 1024 * 1024;
@@ -432,15 +460,9 @@ return baseclass.extend({
 			t: Date.now(), label: label,
 			latency: null, jitter: null, loss: null,
 			download: null, upload: null,
-			sizeLabel: preset.label    // Step 64: track which size was used for history
+			sizeLabel: preset.label
 		};
 
-		btn.textContent = _('Testing latency (%d samples)…').replace('%d', PING_COUNT);
-
-		// Step 146 (Round 39):shared progress-text helper. Builds the live
-		// button label "Downloading… 23.4 / 50 MB (47%)" from received/total.
-		// Verb is i18n'd; numerals are not (no translation needed). Called
-		// at 10fps from testDownload/testUpload via the onProgress callback.
 		function progressText(verb, received, total) {
 			var receivedMB = (received / 1024 / 1024).toFixed(1);
 			var totalMB    = (total    / 1024 / 1024).toFixed(0);
@@ -448,131 +470,133 @@ return baseclass.extend({
 			return verb + ' ' + receivedMB + ' / ' + totalMB + ' MB (' + pct + '%)';
 		}
 
+		this.setProgress(_('Testing latency (%d samples)…').replace('%d', PING_COUNT));
+
 		this.testLatency()
 			.then(function (l) {
+				if (self._cancelled) throw { cancelled: true };
 				if (l.median !== null) {
 					self.setStat('latency', l.median.toFixed(1));
 					self.setStat('jitter',  l.jitter.toFixed(1));
 					result.latency = l.median;
 					result.jitter  = l.jitter;
 				}
-				// Step 52: loss tracked even when no successful samples.
 				self.setStat('loss', l.loss.toFixed(0));
 				result.loss = l.loss;
 
-				// Step 146:live progress text + onProgress callback.
 				var verbDL = _('Downloading…');
-				btn.textContent = verbDL + ' 0 / ' + (downloadBytes / 1024 / 1024).toFixed(0) + ' MB (0%)';
+				self.setProgress(verbDL + ' 0 / ' + (downloadBytes / 1024 / 1024).toFixed(0) + ' MB (0%)');
 				return self.testDownload(downloadBytes, function (received, total) {
-					btn.textContent = progressText(verbDL, received, total);
+					self.setProgress(progressText(verbDL, received, total));
 				});
 			})
 			.then(function (mbps) {
+				if (self._cancelled) throw { cancelled: true };
 				self.setGauge('download', mbps);
 				if (mbps !== null) result.download = mbps;
-				// Step 146:save peak captured during the live test
 				if (self._lastTestPeak && isFinite(self._lastTestPeak.download)) {
 					result.peakDownload = self._lastTestPeak.download;
 				}
-				// Step 250: write the static avg + peak summary line.
 				self.setGaugeSummary('download', mbps,
 					(self._lastTestPeak && self._lastTestPeak.download) || null);
 				var verbUL = _('Uploading…');
-				btn.textContent = verbUL + ' 0 / ' + (uploadBytes / 1024 / 1024).toFixed(0) + ' MB (0%)';
+				self.setProgress(verbUL + ' 0 / ' + (uploadBytes / 1024 / 1024).toFixed(0) + ' MB (0%)');
 				return self.testUpload(uploadBytes, function (received, total) {
-					btn.textContent = progressText(verbUL, received, total);
+					self.setProgress(progressText(verbUL, received, total));
 				});
 			})
 			.then(function (mbps) {
+				if (self._cancelled) throw { cancelled: true };
 				self.setGauge('upload', mbps);
 				if (mbps !== null) result.upload = mbps;
-				// Step 146:same for upload peak
 				if (self._lastTestPeak && isFinite(self._lastTestPeak.upload)) {
 					result.peakUpload = self._lastTestPeak.upload;
 				}
-				// Step 250: upload summary line, same pattern as download.
 				self.setGaugeSummary('upload', mbps,
 					(self._lastTestPeak && self._lastTestPeak.upload) || null);
 
-				// Step 46: persist + refresh history.
 				if (result.latency !== null || result.download !== null || result.upload !== null) {
 					pushHistory(result);
-					self.renderHistory();
+					self.renderSummary();
 				}
+				self.setProgress(_('Done'));
 			})
 			.catch(function (e) {
+				if (e && e.cancelled) {
+					self.setProgress(_('Cancelled'));
+					return;
+				}
 				if (window.toast) toast.error(_('Speed test failed') + ': ' + (e && e.message ? e.message : 'unknown'));
+				self.setProgress('');
 			})
 			.finally(function () {
-				btn.disabled = false;
-				btn.textContent = _('Run test');
+				self._running = false;
+				if (runBtn)    runBtn.disabled = false;
+				if (cancelBtn) cancelBtn.disabled = true;
 			});
 	},
 
-	// Step 46: render the history strip from localStorage. Called once on
-	// inject and after every successful test. Hidden when empty so a fresh
-	// install doesn't waste vertical space.
-	renderHistory: function () {
-		var host = document.getElementById('speedtest-history');
-		if (!host) return;
+	// Abort whatever phase is in flight. The phase promises resolve/reject
+	// promptly once their underlying fetch/xhr aborts; runTest's _cancelled
+	// guard then short-circuits the remaining chain.
+	cancelTest: function () {
+		this._cancelled = true;
+		try { if (this._activeAbort) this._activeAbort.abort(); } catch (e) {}
+		try { if (this._activeXhr)   this._activeXhr.abort();   } catch (e) {}
+		this.setProgress(_('Cancelling…'));
+	},
+
+	// ── Summary render (mini bar chart + last-run line) ───────────────────
+	renderSummary: function () {
 		var history = loadHistory();
-		host.innerHTML = '';
-		if (!history.length) {
-			host.style.display = 'none';
-			return;
+		var last = history.length ? history[0] : null;
+
+		var set = function (id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; };
+		set('speedtest-last-down', last && last.download !== null ? last.download.toFixed(0) : '—');
+		set('speedtest-last-up',   last && last.upload   !== null ? last.upload.toFixed(0)   : '—');
+		set('speedtest-last-lat',  last && last.latency  !== null ? last.latency.toFixed(0)  : '—');
+
+		var whenEl = document.getElementById('speedtest-last-when');
+		if (whenEl) {
+			whenEl.textContent = last
+				? (last.label ? last.label + ' · ' : '') + fmtAgo(last.t)
+				: _('No runs yet');
 		}
-		host.style.display = '';
 
-		var self = this;
-		host.appendChild(E('div', { 'class': 'speedtest-history-head' }, [
-			E('span', { 'class': 'speedtest-history-title' }, _('Recent runs')),
-			E('button', {
-				'type':  'button',
-				'class': 'speedtest-history-clear',
-				'aria-label': _('Clear history'),
-				'click': function () {
-					saveHistory([]);
-					self.renderHistory();
-				}
-			}, _('Clear'))
-		]));
-
-		var list = E('ul', { 'class': 'speedtest-history-list' }, []);
-		history.forEach(function (entry) {
-			// Step 146 (Round 39):peak captured during live test (from
-			// 500ms window max). Show in tooltip so the history row stays
-			// compact but the info is preserved for hover inspection.
-			var dlTip = (entry.peakDownload && isFinite(entry.peakDownload))
-				? _('Avg') + ' ' + (entry.download || 0).toFixed(1) + ' Mbps · ' + _('Peak') + ' ' + entry.peakDownload.toFixed(1) + ' Mbps'
-				: '';
-			var ulTip = (entry.peakUpload && isFinite(entry.peakUpload))
-				? _('Avg') + ' ' + (entry.upload || 0).toFixed(1) + ' Mbps · ' + _('Peak') + ' ' + entry.peakUpload.toFixed(1) + ' Mbps'
-				: '';
-			list.appendChild(E('li', { 'class': 'speedtest-history-item' }, [
-				E('span', { 'class': 'speedtest-history-label' }, entry.label),
-				E('span', { 'class': 'speedtest-history-when' }, fmtAgo(entry.t)),
-				E('span', {
-					'class': 'speedtest-history-metric speedtest-history-metric-d',
-					'title': dlTip
-				}, entry.download !== null ? '↓ ' + entry.download.toFixed(0) + ' Mbps' : '↓ —'),
-				E('span', {
-					'class': 'speedtest-history-metric speedtest-history-metric-u',
-					'title': ulTip
-				}, entry.upload   !== null ? '↑ ' + entry.upload.toFixed(0)   + ' Mbps' : '↑ —'),
-				E('span', { 'class': 'speedtest-history-metric speedtest-history-metric-l' },
-					entry.latency  !== null ? entry.latency.toFixed(1)         + ' ms'   : '— ms')
-			]));
-		});
-		host.appendChild(list);
+		// Mini bar chart of the last 5 runs (download Mbps), newest on the
+		// right. Bars scaled to the max in the window. Tooltips give detail.
+		var mini = document.getElementById('speedtest-mini');
+		if (mini) {
+			mini.innerHTML = '';
+			var recent = history.slice(0, 5).reverse();
+			var maxDl = 1;
+			recent.forEach(function (r) { if (r.download && r.download > maxDl) maxDl = r.download; });
+			if (!recent.length) {
+				mini.appendChild(E('span', { 'class': 'speedtest-mini-empty' }, _('Run a test to see history')));
+			} else {
+				recent.forEach(function (r) {
+					var h = r.download ? Math.max(8, Math.round((r.download / maxDl) * 100)) : 4;
+					var tip = (r.label ? r.label + ' — ' : '')
+						+ '↓ ' + (r.download ? r.download.toFixed(0) : '—') + ' Mbps'
+						+ ' · ↑ ' + (r.upload ? r.upload.toFixed(0) : '—') + ' Mbps'
+						+ ' · ' + (r.latency ? r.latency.toFixed(0) : '—') + ' ms'
+						+ ' · ' + fmtAgo(r.t);
+					mini.appendChild(E('span', {
+						'class': 'speedtest-mini-bar',
+						'style': 'height:' + h + '%',
+						'title': tip
+					}, ''));
+				});
+			}
+		}
 	},
 
 	testLatency: function () {
-		// Step 52: track packet loss (failed pings as % of total) in addition
-		// to median + jitter. .catch() increments failures instead of silently
-		// retrying so the loss metric is meaningful.
+		var self     = this;
 		var samples  = [];
 		var failures = 0;
 		function next() {
+			if (self._cancelled) return { median: null, jitter: 0, loss: 100 };
 			if (samples.length + failures >= PING_COUNT) {
 				return {
 					median: samples.length ? median(samples) : null,
@@ -592,32 +616,12 @@ return baseclass.extend({
 		return Promise.resolve().then(next);
 	},
 
-	// Step 64: testDownload/testUpload now take a bytes argument so the
-	// caller (runTest) can pass the user-selected size. Default args fall
-	// back to the legacy module-level constants for any external callers.
-	//
-	// Step 143 (Round 39):rewrote testDownload to use ReadableStream
-	// instead of r.blob(). The blob() variant waited for the ENTIRE
-	// response body before resolving — so during a 2.3s 50MB download the
-	// gauge needle stayed at empty, then jumped to final value in one
-	// frame. Chrome-Claude's polling recorder confirmed the gauge had ZERO
-	// updates between phase start and finish.
-	//
-	// Now: stream-read in chunks (CGI emits 5-10KB chunks ~5ms apart),
-	// accumulate received bytes, compute instantaneous mbps over a 500ms
-	// sliding window (smoother than per-chunk rate, more responsive than
-	// cumulative average), throttle UI updates to ~10fps, and call
-	// setGauge() each tick. Result: needle visibly moves throughout the
-	// test, matching the "car speedometer" visual metaphor.
-	//
-	// Final mbps returned is the full-test average (more stable than
-	// last-window mbps for history records). Peak tracked separately in
-	// self._lastTestPeak for Step 146 history enrichment.
 	testDownload: function (bytes, onProgress) {
 		bytes = bytes || DOWNLOAD_BYTES;
 		var self = this;
 		var t0 = performance.now();
 		var ctrl = new AbortController();
+		this._activeAbort = ctrl;
 		var to = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
 
 		return fetch('/cgi-bin/luci/admin/design-x/download?bytes=' + bytes + '&t=' + Date.now(), {
@@ -628,15 +632,16 @@ return baseclass.extend({
 			var reader       = r.body.getReader();
 			var received     = 0;
 			var lastUiUpdate = 0;
-			var samples      = [];   // [{ t, bytes }] sliding window
+			var samples      = [];
 			var WINDOW_MS    = 500;
-			var FPS_MS       = 100;  // ~10 fps UI cap
+			var FPS_MS       = 100;
 			var peakMbps     = 0;
 
 			function pump() {
 				return reader.read().then(function (chunk) {
 					if (chunk.done) {
 						clearTimeout(to);
+						self._activeAbort = null;
 						var totalMs = performance.now() - t0;
 						var avgMbps = (received * 8) / (totalMs / 1000) / 1e6;
 						self._lastTestPeak = self._lastTestPeak || {};
@@ -656,25 +661,15 @@ return baseclass.extend({
 						var mbps     = winMs > 0 ? (winBytes * 8) / (winMs / 1000) / 1e6 : 0;
 						if (mbps > peakMbps) peakMbps = mbps;
 						self.setGauge('download', mbps);
-						// Step 146:button progress text. Same throttle as gauge.
 						if (onProgress) onProgress(received, bytes);
 					}
 					return pump();
 				});
 			}
 			return pump();
-		}).catch(function () { clearTimeout(to); return null; });
+		}).catch(function () { clearTimeout(to); self._activeAbort = null; return null; });
 	},
 
-	// Step 144 (Round 39):testUpload via XMLHttpRequest for live gauge.
-	// fetch() doesn't expose upload-side progress events for the request
-	// body — a 10+ year browser-spec gap. XMLHttpRequest's xhr.upload.
-	// onprogress IS the only standard API that gives bytes-sent-so-far
-	// during a POST.
-	//
-	// Same sliding-window + UI-throttle pattern as Step 143's testDownload,
-	// just driven by xhr.upload.onprogress (ev.loaded) instead of by
-	// reader.read() chunks. peakMbps tracked for Step 146.
 	testUpload: function (bytes, onProgress) {
 		bytes = bytes || UPLOAD_BYTES;
 		var self    = this;
@@ -683,8 +678,9 @@ return baseclass.extend({
 
 		return new Promise(function (resolve) {
 			var xhr          = new XMLHttpRequest();
+			self._activeXhr  = xhr;
 			var lastUiUpdate = 0;
-			var samples      = [];   // [{ t, bytes }] sliding window
+			var samples      = [];
 			var WINDOW_MS    = 500;
 			var FPS_MS       = 100;
 			var peakMbps     = 0;
@@ -707,13 +703,13 @@ return baseclass.extend({
 					var mbps     = winMs > 0 ? (winBytes * 8) / (winMs / 1000) / 1e6 : 0;
 					if (mbps > peakMbps) peakMbps = mbps;
 					self.setGauge('upload', mbps);
-					// Step 146:button progress text. Same throttle as gauge.
 					if (onProgress) onProgress(ev.loaded, bytes);
 				}
 			};
 
 			xhr.onload = function () {
 				done = true;
+				self._activeXhr = null;
 				if (xhr.status < 200 || xhr.status >= 300) { resolve(null); return; }
 				var totalMs = performance.now() - t0;
 				var avgMbps = (bytes * 8) / (totalMs / 1000) / 1e6;
@@ -721,9 +717,9 @@ return baseclass.extend({
 				self._lastTestPeak.upload = peakMbps;
 				resolve(avgMbps);
 			};
-			xhr.onerror = function () { done = true; resolve(null); };
-			xhr.ontimeout = function () { done = true; resolve(null); };
-			xhr.onabort = function () { done = true; resolve(null); };
+			xhr.onerror   = function () { done = true; self._activeXhr = null; resolve(null); };
+			xhr.ontimeout = function () { done = true; self._activeXhr = null; resolve(null); };
+			xhr.onabort   = function () { done = true; self._activeXhr = null; resolve(null); };
 
 			xhr.send(payload);
 		});

@@ -2,7 +2,6 @@
 'require baseclass';
 'require ui';
 'require rpc';
-'require design-x.wan-stats';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sparkline / Live Metrics — upgrade.md §1.S3
@@ -15,9 +14,11 @@
 //   CPU / Memory : ubus call system info  (LuCI built-in)
 //   Temperature  : /cgi-bin/design/temp   (theme-provided, see T7)
 //
-// MVP: 3 tiles. Real-time WAN throughput deferred to a follow-up — would
-// need ubus call network.interface dump → find WAN device → poll device
-// status (4 hops vs 1 for the simple metrics).
+// Round 49 (redesign-2026-06 §三): the WAN Traffic tile was REMOVED — its
+// live throughput data moved into the merged Connection card (wan-hero.js),
+// which now owns the wan-stats subscription + the 5-min area chart. This
+// module no longer touches wan-stats at all. Remaining tiles: CPU / Memory /
+// Temperature, each with a trend chip (CPU meta disambiguated as "5 min avg").
 // ─────────────────────────────────────────────────────────────────────────────
 
 var SAMPLE_INTERVAL_MS = 5000;
@@ -447,16 +448,6 @@ function formatBytes(bytes) {
 	return (bytes / 1073741824).toFixed(2) + ' GB';
 }
 
-// Step 43: formatter for throughput rate (bps), broken into number+unit so
-// the tile can present them in two different font sizes / weights.
-function fmtBpsSplit(bps) {
-	if (bps === null || bps === undefined || !isFinite(bps)) return { num: '—', unit: '' };
-	if (bps < 1000)    return { num: bps.toFixed(0),       unit: 'bps' };
-	if (bps < 1e6)     return { num: (bps / 1000).toFixed(1),  unit: 'Kbps' };
-	if (bps < 1e9)     return { num: (bps / 1e6).toFixed(1),   unit: 'Mbps' };
-	return { num: (bps / 1e9).toFixed(2), unit: 'Gbps' };
-}
-
 // Step 89 (Round 15): compute a trend descriptor for the colored pill in
 // tile values. Logic: last-sample vs current-sample (per user choice — the
 // existing ring.delta() semantics). Returns null if either value isn't a
@@ -486,12 +477,7 @@ return baseclass.extend({
 		this.rings = {
 			cpu:   new MetricRing(RING_SIZE),
 			mem:   new MetricRing(RING_SIZE),
-			temp:  new MetricRing(RING_SIZE),
-			// Step 139 (Round 37):split single 'net' ring into rx + tx so
-			// the dual-value WAN tile can show both download and upload as
-			// first-class metrics + sparkline can plot both lines.
-			netRx: new MetricRing(RING_SIZE),
-			netTx: new MetricRing(RING_SIZE)
+			temp:  new MetricRing(RING_SIZE)
 		};
 
 		this.tryInject();
@@ -519,17 +505,18 @@ return baseclass.extend({
 		// those keep just the sparkline. Step 90 also renamed CPU 'Load' →
 		// 'Usage' to match the new data source (CPU% from /proc/stat, no
 		// longer loadavg from ubus).
+		// Round 49: WAN Traffic tile removed — the merged Connection card
+		// (wan-hero.js) now owns live throughput. Remaining tiles: CPU /
+		// Memory / Temperature.
 		var grid = E('div', { 'class': 'design-tile-grid' }, [
 			makeTile('design-tile-cpu',  'i-cpu',         _('CPU Usage'),   this.iconBase, /*hasProgress*/ true),
 			makeTile('design-tile-mem',  'i-memory',      _('Memory'),      this.iconBase, /*hasProgress*/ true),
-			makeTile('design-tile-net',  'i-activity',    _('WAN Traffic'), this.iconBase, /*hasProgress*/ false, /*dualValue*/ true),
 			makeTile('design-tile-temp', 'i-thermometer', _('Temperature'), this.iconBase)
 		]);
 		view.insertBefore(grid, view.firstChild);
 
 		this.tileCpu  = document.getElementById('design-tile-cpu');
 		this.tileMem  = document.getElementById('design-tile-mem');
-		this.tileNet  = document.getElementById('design-tile-net');
 		this.tileTemp = document.getElementById('design-tile-temp');
 	},
 
@@ -553,83 +540,13 @@ return baseclass.extend({
 			}
 		});
 
-		// Step 43: subscribe to the design-x.wan-stats singleton (Step 42). It polls
-		// every 2 s on its own cadence — independent of our 5 s sysInfo poll —
-		// so the Net tile updates twice as fast as CPU/Mem and feels "live".
-		L.require('design-x.wan-stats').then(function (ws) {
-			ws.subscribe(L.bind(self.onWanStats, self));
-		}).catch(function () {
-			// If design-x.wan-stats can't load, hide the Net tile — better than a dead "—"
-			if (self.tileNet) self.tileNet.style.display = 'none';
-		});
+		// Round 49: the wan-stats subscription moved to wan-hero.js (the merged
+		// Connection card). This module no longer drives any live-throughput
+		// tile, so it no longer subscribes — keeping the wan-stats singleton's
+		// subscriber count to exactly the one consumer that needs it.
 
 		this.tick();
 		this._timer = window.DXScheduler.every(SAMPLE_INTERVAL_MS, L.bind(this.tick, this));
-	},
-
-	// Step 43 + 89 + 139:callback for design-x.wan-stats.subscribe.
-	//
-	// Step 139 (Round 37) redesign:WAN tile is now a dual-value tile.
-	// Download (rx) shows in the primary 30px num slot, Upload (tx) in
-	// the secondary 20px slot. No trend pill — its red/green semantics
-	// were inverted for throughput (high = healthy, not concerning) and
-	// its ↑↓ arrows conflicted with the rx/tx direction arrows in the
-	// value row. Sparkline now draws BOTH rx (solid) + tx (dashed) on
-	// a shared Y-axis. Meta line shows device + 5-min rx peak (gives
-	// the sparkline a numeric anchor for "how big is that hill?").
-	onWanStats: function (data) {
-		if (!this.tileNet) return;
-		// If the WAN device is missing or fully offline, hide the tile instead
-		// of showing dashes forever — keeps the dashboard honest.
-		if (data.deviceName === null) {
-			this.tileNet.style.display = 'none';
-			return;
-		}
-		this.tileNet.style.display = '';
-
-		if (data.rxBitsPerSec !== null) this.rings.netRx.push(data.rxBitsPerSec);
-		if (data.txBitsPerSec !== null) this.rings.netTx.push(data.txBitsPerSec);
-
-		var d = fmtBpsSplit(data.rxBitsPerSec);
-		var u = fmtBpsSplit(data.txBitsPerSec);
-
-		// Round 44 Step 206 — Fix-3 (doc/wan_traffic.md §三, follow-up to
-		// Step 205). With sharedHi removed in Step 205, each sparkline
-		// auto-scales independently — the "upload is 1/10 of download"
-		// magnitude relationship that the shared y-axis tried to preserve
-		// is no longer visible in the curves themselves. Compensate by
-		// surfacing BOTH directions' 5-min peaks in the meta line:
-		// "Peak ↓123.4 Mbps ↑12.3 Mbps". Numbers give the magnitude
-		// relationship the sparkline visuals stopped imposing.
-		//
-		// Inline scan since MetricRing doesn't expose a max() accessor.
-		var rxPeak = 0, txPeak = 0;
-		for (var i = 0; i < this.rings.netRx.data.length; i++) {
-			if (this.rings.netRx.data[i] > rxPeak) rxPeak = this.rings.netRx.data[i];
-		}
-		for (var j = 0; j < this.rings.netTx.data.length; j++) {
-			if (this.rings.netTx.data[j] > txPeak) txPeak = this.rings.netTx.data[j];
-		}
-		var peakStr = '';
-		if (rxPeak > 0 || txPeak > 0) {
-			var rxPf = fmtBpsSplit(rxPeak);
-			var txPf = fmtBpsSplit(txPeak);
-			peakStr = ' · Peak ↓' + rxPf.num + ' ' + rxPf.unit
-			        + ' ↑' + txPf.num + ' ' + txPf.unit;
-		}
-
-		setTile(this.tileNet, {
-			prefix:    (d.num === '—') ? '' : '↓',
-			num:       d.num,
-			unit:      d.unit,
-			secondary: {
-				prefix: (u.num === '—') ? '' : '↑',
-				num:    u.num,
-				unit:   u.unit
-			},
-			meta: (data.deviceName || '') + peakStr
-		});
-		renderTileSpark(this.tileNet, this.rings.netRx, this.rings.netTx);
 	},
 
 	tick: function () {
@@ -678,7 +595,11 @@ return baseclass.extend({
 							unit:     '%',
 							trend:    deltaToTrend(pct, prevPct, { threshold: 1.0, suffix: '%', format: function (v) { return v.toFixed(0); } }),
 							progress: pct,
-							meta:     _('Past 5 min · Avg %s%%').format(self.rings.cpu.avg().toFixed(1))
+							// redesign-2026-06 §三.3 / §四: CPU meta must read
+							// "5 min avg" to disambiguate the tile's instantaneous
+							// % from the System info card's averaged CPU row
+							// (data-uniqueness law — the two are different windows).
+							meta:     _('5 min avg %s%%').format(self.rings.cpu.avg().toFixed(1))
 						});
 						renderTileSpark(self.tileCpu, self.rings.cpu);
 					}

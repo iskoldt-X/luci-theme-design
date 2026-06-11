@@ -374,8 +374,8 @@
 .design-tile-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: var(--space-3);
-    margin-bottom: var(--space-4);
+    gap: var(--card-gap);
+    margin-bottom: var(--card-gap);
 }
 
 .design-tile {
@@ -383,7 +383,7 @@
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
-    padding: var(--space-4);
+    padding: var(--card-padding);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
@@ -664,312 +664,258 @@
 .design-tile-status-dot-hot  { color: var(--color-danger); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * §12 WAN HERO CARD — upgrade.md §2.A1
- * First-fold hero on Status > Overview: "is my internet working?" + IP +
- * connection method + uptime + gateway latency. 100% local data.
+ * §12 CONNECTION CARD (merged) — redesign-2026-06 §三.1
+ * Left column: status dot + title, meta (uptime · proto · iface), IP (mono,
+ * click-to-copy), latency number + threshold dot. Right area: 5-min live area
+ * chart (up=--chart-up blue, down=--chart-down green) + current ↓/↑ readouts.
+ * FIXED outer height (~200px) in all states — fixed-size law §一.5.
+ * Data: design-x.wan-stats singleton + local ring buffer. No new RPC.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-.wan-hero {
-    /* Diagonal accent sheen + radial glow background. Step 92 (Round 16):
-       border-left accent stripe removed for pixel-parity with the preview
-       hero (no side stripe in upgrade-preview.html). Padding bumped to
-       space-5 vertical / space-6 horizontal to match preview's 24×32px.
-       --color-accent-500-12 is pre-derived rgba() (see style.css §1.8) —
-       do NOT switch to relative-color rgb(from ...) syntax, the LuCI
-       build minifier mangles it (see styling-progress.md Step 21). */
-    background:
-        linear-gradient(135deg,
-            transparent 0%,
-            var(--color-accent-500-12) 50%,
-            transparent 100%),
-        var(--color-surface-0);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
-    padding: var(--space-5) var(--space-6);
-    margin-bottom: var(--space-4);
-    /* Needed for the ::before glow to anchor inside the card and clip. */
-    position: relative;
-    overflow: hidden;
-}
-
-/* Soft accent glow nudged off the top-right corner — gives the hero card
-   visual weight without adding a heavy shadow. Sits behind content. */
-.wan-hero::before {
-    content: '';
-    position: absolute;
-    top: -40%;
-    right: -10%;
-    width: 280px;
-    height: 280px;
-    background: radial-gradient(circle,
-        var(--color-accent-500-12) 0%,
-        transparent 70%);
-    pointer-events: none;
-    z-index: 0;
-}
-
-/* Lift every direct child above the ::before glow so text/icons render
-   on top regardless of insertion order from wan-hero.js. */
-.wan-hero > * {
-    position: relative;
-    z-index: 1;
-}
-
-/* Step 92 (Round 16): the .wan-hero-status used to be a small pill
-   ("Online" / "Offline" with bg + xs text) inline next to a separate
-   title + ping element. New shape collapses to a single status-line
-   row showing "Internet · Online" with the coloured dot as a ::before
-   pseudo. Matches preview S0 exactly. */
-.wan-hero-status {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-size: var(--text-lg);
-    font-weight: var(--weight-semibold);
-    color: var(--color-text);
-    margin-bottom: var(--space-1);
-}
-
-.wan-hero-status::before {
-    content: '';
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    /* Default neutral grey — visible during the "Checking…" pre-state
-       before refresh() lands. Online / offline classes override. */
-    background: var(--color-text-subtle);
-    flex-shrink: 0;
-}
-
-.wan-hero-status-online::before {
-    background: var(--color-success);
-    box-shadow: 0 0 0 4px var(--color-success-bg);
-    animation: wan-hero-online-pulse 2.2s ease-in-out infinite;
-}
-
-.wan-hero-status-offline::before {
-    background: var(--color-danger);
-    box-shadow: 0 0 0 4px var(--color-danger-bg);
-}
-
-/* Pulse only on the online state — gives a "live, breathing" cue that
-   distinguishes the card from a static dashboard. Auto-halts under
-   prefers-reduced-motion via the global rule in style.css §1. */
-@keyframes wan-hero-online-pulse {
-    0%, 100% { box-shadow: 0 0 0 4px var(--color-success-bg); }
-    50%      { box-shadow: 0 0 0 6px var(--color-success-bg); }
-}
-
-/* Step 92: sub-line under the status — "Online for 9d 14h · Last
-   check 2s ago". updateTagline() in wan-hero.js refreshes the "Xs
-   ago" portion every 5 s so the dashboard reads as live without
-   re-fetching network state. */
-.wan-hero-tagline {
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-    margin-bottom: var(--space-5);
-}
-
-/* Step 92: stat grid — 4 columns at desktop, 2 at mobile. Uses
-   <div class="wan-hero-stat"><dt>Label</dt><dd>Value</dd></div>
-   semantic markup. .wan-hero-stat is the grid item; the dt/dd pair
-   inside it isn't grid-laid (stays default block flow) so the
-   label sits above the value. */
-.wan-hero-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: var(--space-5);
-    margin-bottom: var(--space-4);
-}
-
-.wan-hero-stat {
-    margin: 0;
-    /* min-width:0 lets the dd's word-break actually kick in inside a
-       grid track instead of forcing the column to overflow. */
-    min-width: 0;
-}
-
-.wan-hero-stat dt {
-    font-size: var(--text-xs);
-    color: var(--color-text-subtle);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin: 0 0 var(--space-1) 0;
-}
-
-.wan-hero-stat dd {
-    font-size: var(--text-base);
-    color: var(--color-text);
-    font-weight: var(--weight-medium);
-    font-variant-numeric: tabular-nums;
-    /* Monospace for the technical-looking strings (interface names,
-       latency reading) — pairs visually with the small-caps dt label
-       and prevents jitter as values change. */
-    font-family: var(--font-mono);
-    margin: 0;
-    /* Step 97 (Round 18): word-break + overflow-wrap together cover both
-       long IPv4 / IPv6 strings (which break-all handles via the dot
-       separators) AND unbreakable tokens like "pppoe-wan-0123456789"
-       (which need overflow-wrap to force a break mid-token in a tight
-       grid track). min-width:0 already inherited from .wan-hero-stat. */
-    word-break: break-all;
-    overflow-wrap: anywhere;
-    line-height: 1.3;
-}
-
-/* .big modifier — Public IP + Connection use the bigger sans-serif
-   size to emphasise the two most important facts on the card. */
-.wan-hero-stat.big dd {
-    font-size: var(--text-xl);
-    font-family: var(--font-sans);
-    font-weight: var(--weight-semibold);
-}
-
-/* Step 48 + 92: 5-bar latency indicator. Step 92 moves the bars
-   from the old header row into a grid <dd> so they sit alongside
-   the ms text inside the Latency stat. Bar widths bumped 3→4 px
-   to match preview's spec. */
-.wan-hero-ping-bars {
-    display: inline-flex;
-    align-items: flex-end;
-    gap: 2px;
-    height: 18px;
-    margin-right: var(--space-2);
-    vertical-align: middle;
-}
-.wan-hero-ping-bars > span {
-    display: block;
-    width: 4px;
-    background: var(--color-surface-2);
-    border-radius: 1px;
-    transition: background var(--motion-fast) var(--ease-out);
-}
-.wan-hero-ping-bars > span:nth-child(1) { height: 6px; }
-.wan-hero-ping-bars > span:nth-child(2) { height: 9px; }
-.wan-hero-ping-bars > span:nth-child(3) { height: 12px; }
-.wan-hero-ping-bars > span:nth-child(4) { height: 15px; }
-.wan-hero-ping-bars > span:nth-child(5) { height: 18px; }
-
-/* Active bars: light the first N where N = data-bars value. */
-.wan-hero-ping-bars[data-bars="1"] > span:nth-child(-n+1),
-.wan-hero-ping-bars[data-bars="2"] > span:nth-child(-n+2),
-.wan-hero-ping-bars[data-bars="3"] > span:nth-child(-n+3),
-.wan-hero-ping-bars[data-bars="4"] > span:nth-child(-n+4),
-.wan-hero-ping-bars[data-bars="5"] > span:nth-child(-n+5) {
-    background: var(--color-success);
-}
-
-/* Warning / danger tinge when only 1-2 bars are active — ping is
-   high enough that the user should notice. Preserved from Step 48;
-   preview shows static all-green but our colour-coded variant is
-   strictly more informative. */
-.wan-hero-ping-bars[data-bars="1"] > span:nth-child(1),
-.wan-hero-ping-bars[data-bars="2"] > span:nth-child(-n+2) {
-    background: var(--color-warning);
-}
-.wan-hero-ping-bars[data-bars="1"] > span:nth-child(1) {
-    background: var(--color-danger);
-}
-
-.wan-hero-ping-text {
-    font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-}
-
-/* ─── Step 43 + 92: live throughput strip ───────────────────────────────
-   Step 92: outer .wan-hero-throughput wraps two flex rows directly
-   (the old .wan-hero-throughput-cell wrapper class is gone — preview
-   structure uses bare <div>s). Order is ↑ upload first, ↓ download
-   second per preview. */
-.wan-hero-throughput {
-    display: flex;
-    gap: var(--space-5);
-    padding-top: var(--space-4);
-    border-top: 1px solid var(--color-border-subtle);
-    font-variant-numeric: tabular-nums;
-    flex-wrap: wrap;
-}
-.wan-hero-throughput > div {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-2);
-}
-.wan-hero-throughput-arrow {
-    color: var(--color-accent-500);
-    font-weight: var(--weight-bold);
-    font-size: var(--text-lg);
-}
-.wan-hero-throughput-value {
-    font-size: var(--text-xl);
-    font-weight: var(--weight-semibold);
-    color: var(--color-text);
-    /* Minimum width so the number doesn't reflow violently between
-       e.g. "8" and "456.2" — keeps both columns visually anchored. */
-    min-width: 3.5ch;
-    display: inline-block;
-}
-.wan-hero-throughput-unit {
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    /* Round 44 Step 196 — Bug #10 (Chrome-Claude). Unit string varies
-       between "bps" (3 ch), "Kbps" (4 ch), "Mbps" (4 ch), "Gbps" (4
-       ch). Auto-scale formatter switches them as throughput crosses
-       1k / 1M / 1G — without a min-width the unit column visibly
-       jumps when scale changes (e.g. ↑ 1.1 Mbps + ↓ 121.1 Kbps and
-       the unit ends at different x-coordinates). Pin to 4ch (worst
-       case) so the unit's left edge stays put regardless of scale.
-       inline-block needed for min-width on a span. */
-    display: inline-block;
-    min-width: 4ch;
-}
-
-@media (max-width: 640px) {
-    .wan-hero { padding: var(--space-4); }
-    .wan-hero-grid {
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
-    }
-    .wan-hero-throughput { gap: var(--space-3); }
-    .wan-hero-throughput-value { font-size: var(--text-lg); }
-}
-
-/* Step 97 (Round 18): extra-narrow tier for foldables / split-screen /
-   ultra-small phones (≤360px). Even with box-sizing:border-box, a
-   2-column grid with text-xl .big stats can't fit a long IPv4 +
-   "PPPoE" + bars + interface name in <120 px each. Drop to single
-   column so each stat gets the full content width. Padding tightened
-   one more notch (space-3) so the card itself stays inside the
-   viewport. Below this tier the layout is no longer meant to be
-   "comfortable" — just "doesn't truncate". */
-@media (max-width: 360px) {
-    .wan-hero { padding: var(--space-3); }
-    .wan-hero-grid {
-        grid-template-columns: 1fr;
-        gap: var(--space-2);
-    }
-    .wan-hero-throughput { gap: var(--space-2); flex-direction: column; }
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
- * §13 SPEEDTEST CARD — upgrade.md §2.A5
- * Browser↔router throughput test. Lives at bottom of Overview.
- * ═══════════════════════════════════════════════════════════════════════════ */
-
-.speedtest-card {
+.conn-card {
     background: var(--color-surface-0);
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
-    padding: var(--space-5);
-    margin-bottom: var(--space-4);
+    padding: var(--card-padding);
+    margin-bottom: 0;          /* the row-1 grid owns the gap */
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(0, 1.4fr);
+    gap: var(--card-gap);
+    align-items: stretch;
+    height: 200px;             /* fixed height — never reflows on state change */
+    overflow: hidden;
+}
+
+.conn-left {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+/* Status line: dot + "Internet · Online" (heading scale). */
+.conn-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-heading);
+    line-height: var(--leading-heading);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+}
+.conn-status::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-text-subtle);   /* neutral during "Checking…" */
+    flex-shrink: 0;
+}
+.conn-status-online::before {
+    background: var(--color-success);
+    box-shadow: 0 0 0 4px var(--color-success-bg);
+    animation: conn-online-pulse 2.2s ease-in-out infinite;
+}
+.conn-status-offline::before {
+    background: var(--color-danger);
+    box-shadow: 0 0 0 4px var(--color-danger-bg);
+}
+/* Pulse only when online; auto-halts under prefers-reduced-motion via the
+   global animation-duration override. */
+@keyframes conn-online-pulse {
+    0%, 100% { box-shadow: 0 0 0 4px var(--color-success-bg); }
+    50%      { box-shadow: 0 0 0 6px var(--color-success-bg); }
+}
+
+/* Meta line: uptime · proto · iface (caption scale, uppercase tracking). */
+.conn-meta {
+    font-size: var(--text-caption);
+    line-height: var(--leading-caption);
+    color: var(--color-text-muted);
+    text-transform: none;       /* values like "PPPoE" / iface names stay as-is */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* IP row: caption label above, mono click-to-copy value. */
+.conn-ip-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: var(--space-1);
+}
+.conn-ip-label,
+.conn-latency-label {
+    font-size: var(--text-caption);
+    line-height: var(--leading-caption);
+    color: var(--color-text-subtle);
+    text-transform: uppercase;
+    letter-spacing: var(--caption-tracking);
+    font-weight: var(--weight-medium);
+}
+.conn-ip {
+    font-family: var(--font-mono);
+    font-size: var(--text-mono);
+    line-height: var(--leading-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+    background: transparent;
+    border: 0;
+    padding: 2px 0;
+    text-align: left;
+    cursor: pointer;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    transition: color var(--motion-fast) var(--ease-out);
+}
+.conn-ip:hover { color: var(--color-accent-600); }
+.conn-ip:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+    border-radius: var(--radius-sm);
+}
+
+/* Latency row: caption label + number + threshold dot. The 5-bar signal
+   metaphor is GONE (it was WiFi-strength muscle memory — §三.1). */
+.conn-latency-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: auto;           /* pin latency to the bottom of the left column */
+}
+.conn-latency {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+.conn-latency-num {
+    font-family: var(--font-mono);
+    font-size: var(--text-mono);
+    line-height: var(--leading-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+    font-weight: var(--weight-medium);
+}
+.conn-latency-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--color-text-subtle);
+    border: 0;
+    padding: 0;
+    cursor: help;
+    flex-shrink: 0;
+}
+.conn-latency-dot[data-tier="good"] { background: var(--color-success); }
+.conn-latency-dot[data-tier="warn"] { background: var(--color-warning); }
+.conn-latency-dot[data-tier="bad"]  { background: var(--color-danger); }
+.conn-latency-dot:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+}
+
+/* ── Right area: live 5-min area chart + current readouts ─────────────────── */
+.conn-chart-wrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    transition: opacity var(--motion-normal) var(--ease-out);
+}
+/* Offline state dims the chart area (status dot already turns red). */
+.conn-chart-wrap.conn-chart-offline {
+    opacity: 0.4;
+    filter: grayscale(1);
+}
+
+.conn-readouts {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-4);
+    font-variant-numeric: tabular-nums;
+}
+.conn-readout {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+}
+.conn-readout-arrow { font-weight: var(--weight-bold); }
+.conn-readout-down .conn-readout-arrow,
+.conn-readout-down .conn-readout-num { color: var(--chart-down); }
+.conn-readout-up   .conn-readout-arrow,
+.conn-readout-up   .conn-readout-num { color: var(--chart-up); }
+.conn-readout-num {
+    font-family: var(--font-mono);
+    font-size: var(--text-mono);
+    font-weight: var(--weight-semibold);
+    min-width: 3.5ch;
+    text-align: right;
+    display: inline-block;
+}
+.conn-readout-unit {
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    color: var(--color-text-muted);
+    min-width: 4ch;
+    display: inline-block;
+}
+
+.conn-chart {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+    display: block;
+    margin-top: var(--space-2);
+}
+.conn-chart-baseline {
+    stroke: var(--color-border-subtle);
+    stroke-width: 1;
+}
+.conn-chart-line { stroke-width: 2; fill: none; }
+.conn-chart-line-down { stroke: var(--chart-down); }
+.conn-chart-line-up   { stroke: var(--chart-up); }
+.conn-chart-area      { stroke: none; }
+.conn-chart-area-down { fill: var(--chart-down); opacity: 0.16; }
+.conn-chart-area-up   { fill: var(--chart-up);   opacity: 0.14; }
+
+@media (max-width: 768px) {
+    .conn-card {
+        grid-template-columns: 1fr;
+        height: auto;            /* stacked: let it size to content, but
+                                    each sub-area still fixed enough not to
+                                    jump on data churn */
+    }
+    .conn-chart { min-height: 90px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §13 SPEEDTEST — redesign-2026-06 §三.2
+ * Summary card (always on Overview, fixed height, row 1 right slot) + a
+ * right-side drawer that opens on Run. The drawer holds the controls +
+ * gauges + progress + cancel; the summary card NEVER changes height.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Summary card ─────────────────────────────────────────────────────────── */
+.speedtest-summary {
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: var(--card-padding);
+    margin-bottom: 0;          /* row-1 grid owns the gap */
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    overflow: hidden;
 }
 
 .speedtest-head {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    margin-bottom: var(--space-4);
+    margin-bottom: var(--space-2);
 }
 
 .speedtest-icon {
@@ -979,15 +925,96 @@
 }
 
 .speedtest-title {
-    font-size: var(--text-base);
+    font-size: var(--text-heading);
+    line-height: var(--leading-heading);
     font-weight: var(--weight-semibold);
     color: var(--color-text);
 }
 
 .speedtest-meta {
-    font-size: var(--text-xs);
+    font-size: var(--text-caption);
     color: var(--color-text-muted);
     margin-left: auto;
+}
+
+/* Last-run line: ↓ / ↑ / latency, mono + direction colors (§三.2). */
+.speedtest-last {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+.speedtest-last-metric {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 2px;
+}
+.speedtest-last-arrow { font-weight: var(--weight-bold); }
+.speedtest-last-num {
+    font-size: var(--text-lg);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+}
+.speedtest-last-unit {
+    font-size: var(--text-caption);
+    color: var(--color-text-muted);
+}
+.speedtest-last-down .speedtest-last-arrow,
+.speedtest-last-down .speedtest-last-num { color: var(--chart-down); }   /* ↓ green */
+.speedtest-last-up   .speedtest-last-arrow,
+.speedtest-last-up   .speedtest-last-num { color: var(--chart-up); }     /* ↑ blue */
+.speedtest-last-lat  .speedtest-last-num { color: var(--color-text); }
+
+.speedtest-last-when {
+    font-size: var(--text-caption);
+    color: var(--color-text-subtle);
+    text-transform: uppercase;
+    letter-spacing: var(--caption-tracking);
+}
+
+/* Mini bar chart of the last 5 runs (download Mbps), newest on the right. */
+.speedtest-mini {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
+    /* 32px (was 44): the 200px fixed card minus 2×16px padding leaves a
+       168px budget; at 44px the head+last+when+mini+run stack computes to
+       ~178px and overflow:hidden clips the Run button's bottom edge. */
+    height: 32px;
+    margin-top: auto;          /* push chart + button to the bottom */
+    margin-bottom: var(--space-1);
+}
+.speedtest-mini-bar {
+    flex: 1 1 0;
+    min-width: 6px;
+    max-width: 28px;
+    background: var(--chart-down);
+    opacity: 0.55;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    transition: opacity var(--motion-fast) var(--ease-out),
+                height var(--motion-normal) var(--ease-out);
+}
+.speedtest-mini-bar:hover { opacity: 0.9; }
+.speedtest-mini-empty {
+    font-size: var(--text-caption);
+    color: var(--color-text-subtle);
+    align-self: center;
+}
+
+.speedtest-summary-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+.speedtest-summary-actions .speedtest-run {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+.speedtest-summary-actions .speedtest-run .svg-icon {
+    width: 14px;
+    height: 14px;
 }
 
 /* Step 52: gauge grid — 2 semicircle gauges side-by-side for download
@@ -1046,16 +1073,17 @@
 
 .speedtest-gauge-bar {
     fill: none;
-    stroke: var(--color-accent-500);
+    /* redesign-2026-06 §一.3 direction colors: download gauge = --chart-down
+       (green = 下行), upload gauge = --chart-up (blue = 上行). */
+    stroke: var(--chart-down);
     stroke-width: 10;
     stroke-linecap: round;
     transition: stroke-dashoffset var(--motion-slow) var(--ease-out);
 }
 
-/* Upload gauge uses info blue instead of accent green so the two
-   are visually distinguishable even at a glance. */
+/* Upload gauge = blue (上行) per the direction-color institution. */
 .speedtest-gauge-upload .speedtest-gauge-bar {
-    stroke: var(--color-info);
+    stroke: var(--chart-up);
 }
 
 .speedtest-gauge-value {
@@ -1070,11 +1098,11 @@
 }
 
 .speedtest-gauge-arrow {
-    color: var(--color-accent-500);
+    color: var(--chart-down);   /* ↓ download = green */
     font-weight: var(--weight-bold);
 }
 .speedtest-gauge-upload .speedtest-gauge-arrow {
-    color: var(--color-info);
+    color: var(--chart-up);     /* ↑ upload = blue */
 }
 
 .speedtest-gauge-num {
@@ -1350,6 +1378,130 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * §13b SPEEDTEST DRAWER — redesign-2026-06 §三.2
+ * Right-side drawer opened on Run. position:fixed, --z-drawer, focus trap
+ * (cmdk.js Tab handler), Escape closes, reduced-motion-safe slide. Holds the
+ * Link/Size controls + gauges + stats + live progress + a SEPARATE Cancel
+ * button (controls no longer morph into a status bar).
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.speedtest-drawer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-drawer);
+    display: none;
+    background: rgba(0, 0, 0, 0.4);
+    justify-content: flex-end;
+}
+.speedtest-drawer-overlay.open { display: flex; }
+
+.speedtest-drawer-panel {
+    width: min(420px, 92vw);
+    height: 100%;
+    background: var(--color-surface-0);
+    box-shadow: var(--shadow-lg);
+    border-left: 1px solid var(--color-border-subtle);
+    padding: var(--card-padding);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    overflow-y: auto;
+    /* Slide in from the right. The open class flips translateX 100%→0.
+       Under prefers-reduced-motion the global rule zeroes the duration
+       (we never depend on animationend; the panel is shown via display
+       flip, not an animation callback). */
+    transform: translateX(100%);
+    transition: transform var(--motion-normal) var(--ease-out);
+}
+.speedtest-drawer-overlay.open .speedtest-drawer-panel {
+    transform: translateX(0);
+}
+
+.speedtest-drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.speedtest-drawer-title {
+    font-size: var(--text-heading);
+    line-height: var(--leading-heading);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+}
+.speedtest-drawer-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: background-color var(--motion-fast) var(--ease-out),
+                color var(--motion-fast) var(--ease-out);
+}
+.speedtest-drawer-close:hover { background: var(--color-surface-1); color: var(--color-text); }
+.speedtest-drawer-close:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+.speedtest-drawer-close .svg-icon { width: 18px; height: 18px; }
+
+.speedtest-drawer-controls {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+.speedtest-control {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    flex: 1 1 0;
+    min-width: 0;
+}
+.speedtest-control-label {
+    font-size: var(--text-caption);
+    color: var(--color-text-subtle);
+    text-transform: uppercase;
+    letter-spacing: var(--caption-tracking);
+    font-weight: var(--weight-medium);
+}
+.speedtest-control .speedtest-label-select { width: 100%; }
+
+.speedtest-progress {
+    font-family: var(--font-mono);
+    font-size: var(--text-mono);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+    min-height: 1.4em;
+    text-align: center;
+}
+
+.speedtest-drawer-actions {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: auto;          /* pin the run/cancel row to the drawer bottom */
+}
+.speedtest-drawer-actions .speedtest-drawer-run { flex: 1 1 auto; }
+/* Cancel = ghost danger so it reads as "stop", distinct from the green Run. */
+.speedtest-drawer-cancel {
+    background: transparent !important;
+    color: var(--color-danger) !important;
+    border: 1px solid var(--color-danger) !important;
+}
+.speedtest-drawer-cancel:hover:not([disabled]) {
+    background: var(--color-danger) !important;
+    color: #fff !important;
+}
+.speedtest-drawer-cancel[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+    .speedtest-drawer-panel { width: 100vw; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * §14 DEVICES CARD — upgrade.md §2.A2
  * Compact LAN-client list with OUI/type inference. Click row → expand.
  * Lives at the end of Overview.
@@ -1368,8 +1520,8 @@
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
-    padding: var(--space-5);
-    margin-bottom: var(--space-4);
+    padding: var(--card-padding);
+    margin-bottom: var(--card-gap);
 }
 
 .devices-head {
@@ -1442,12 +1594,17 @@
     grid-template-columns: 32px minmax(160px, 1.4fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(80px, 0.6fr) minmax(90px, 0.7fr) 24px;
     gap: var(--space-3);
     padding: var(--space-2) var(--space-4);
-    background: var(--color-surface-1);
-    font-size: var(--text-xs);
+    /* Unified table style (redesign §三.4): white bg + 1px hairline +
+       caption-style column headers. Header used to sit on surface-1; the
+       hairline separator + caption type carry the "this is a header row"
+       signal now, so the background matches the body (white surface-0). */
+    background: var(--color-surface-0);
+    font-size: var(--text-caption);
+    line-height: var(--leading-caption);
     color: var(--color-text-muted);
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-medium);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: var(--caption-tracking);
     border-bottom: 1px solid var(--color-border-subtle);
 }
 
@@ -1526,8 +1683,8 @@
     grid-template-columns: 32px minmax(160px, 1.4fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(80px, 0.6fr) minmax(90px, 0.7fr) 24px;
     gap: var(--space-3);
     align-items: center;
-    padding: var(--space-2) var(--space-4);
-    min-height: 44px;
+    padding: 0 var(--space-4);
+    min-height: var(--row-height);   /* 40px unified row height (§一.2) */
 }
 
 /* 32×32 rounded box behind the type icon — preview style. Background
@@ -1625,22 +1782,23 @@
 }
 
 .devices-row-name {
+    /* Human name = sans (mono rule §一.1: names/status words sans). */
     font-weight: var(--weight-medium);
     color: var(--color-text);
-    font-size: var(--text-sm);
+    font-size: var(--text-body);
+    line-height: var(--leading-body);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-/* Step 148 (Round 40):.devices-row-mac shares the IP cell's mono/tabular
- * presentation — both are network identifier strings that benefit from
- * fixed-width digits + monospace alignment. */
+/* IP + MAC = mono (mono rule §一.1: machine identifiers mono). Both are
+ * network identifier strings that benefit from fixed-width digits. */
 .devices-row-ip,
 .devices-row-mac {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: var(--text-xs);
+    font-size: var(--text-mono);
     color: var(--color-text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1690,24 +1848,46 @@
 /* Medium signal: light bars 1-3 green, dim 4 */
 .devices-sig-bars-medium > span:nth-child(4) { background: var(--color-surface-2); }
 
-/* Wired pill — replaces the bars when client is on cable / unknown */
-.devices-sig-wired {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px var(--space-2);
-    font-size: 11px;
-    background: var(--color-surface-2);
-    border-radius: var(--radius-sm);
+/* Round 49 (redesign §三.4): wired client = a muted ethernet glyph, not a
+   "Wired" text pill. The glyph is small + subtle so the column reads as
+   "cabled, no signal to report" without 11 identical pills shouting. */
+.devices-sig-wired-glyph {
+    width: 16px;
+    height: 16px;
+    color: var(--color-text-subtle);
+}
+.devices-row:hover .devices-sig-wired-glyph,
+.devices-row-expanded .devices-sig-wired-glyph {
     color: var(--color-text-muted);
 }
 
-/* "Last seen" column. .stale variant for expired-lease rows. */
+/* Status dot on the device icon (redesign §三.4): active/stale lives HERE,
+   not in the Last Seen text. Online = green; stale/offline = neutral. Sits
+   bottom-right of the 32×32 icon box, ringed so it reads on any background. */
+.devices-row-status-dot {
+    position: absolute;
+    bottom: -3px;
+    right: -3px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1.5px solid var(--color-surface-0);
+    pointer-events: none;
+}
+.devices-row-status-dot.devices-status-online { background: var(--color-success); }
+.devices-row-status-dot.devices-status-stale  { background: var(--color-text-subtle); }
+
+/* "Last Seen" column shows a real relative time ("now" / "2 min ago").
+   Round 49 (redesign §三.4): active/stale is signalled by the icon status
+   dot, NOT by green text here — so the online variant is now neutral muted
+   text, the stale variant slightly subtler. No double-encoding. */
 .devices-row-seen {
-    font-size: var(--text-xs);
+    font-size: var(--text-body);
     text-align: right;
     font-variant-numeric: tabular-nums;
+    color: var(--color-text-muted);
 }
-.devices-seen-online { color: var(--color-success); }
+.devices-seen-online { color: var(--color-text-muted); }
 .devices-seen-stale  { color: var(--color-text-subtle); }
 
 /* Chevron at the row's tail — rotates 180° when row expands */
@@ -2164,19 +2344,19 @@
  * etc.) that other cascade rules may touch.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-.wan-hero,
+.conn-card,
 .design-tile,
 .devices-card,
-.speedtest-card {
+.speedtest-summary {
     transition:
         transform var(--motion-fast) var(--ease-out),
         box-shadow var(--motion-fast) var(--ease-out);
 }
 
-.wan-hero:hover,
+.conn-card:hover,
 .design-tile:hover,
 .devices-card:hover,
-.speedtest-card:hover {
+.speedtest-summary:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-md);
 }

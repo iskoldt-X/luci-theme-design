@@ -5,99 +5,85 @@
 'require network';
 'require design-x.wan-stats';
 
-// Step 92 (Round 16): SVG namespace helpers + #i-globe icon reference
-// removed. Pixel-parity rewrite drops the inline globe SVG in favour of a
-// CSS `::before` status dot on .wan-hero-status — same visual weight,
-// no sprite load, no SVGElement vs HTMLUnknownElement gotcha to worry
-// about. See features.css §12 for the dot + pulse rules.
+// ─────────────────────────────────────────────────────────────────────────────
+// Connection card (merged) — redesign-2026-06 §三.1
+//
+// Round 49: the old WAN hero (status + 4-stat grid + signal-bar latency +
+// throughput strip) MERGES with the live WAN-traffic chart that used to be
+// a separate sparkline tile. Per the redesign:
+//   - Left column : status dot + title (heading), meta line
+//                   (uptime · proto · iface, caption), IP (mono, click-to-copy),
+//                   latency = number + threshold dot (<50 green / <100 amber /
+//                   ≥100 red, tooltip legend). The 5-bar signal metaphor is
+//                   DELETED (it was WiFi-strength muscle memory).
+//   - Right area  : 5-min live area chart (up=--chart-up blue, down=--chart-down
+//                   green) + current ↓/↑ readouts (mono) top-right.
+//   - Offline     : chart dims, status dot red, "last online …", outer height
+//                   stays fixed (~200px) in all states.
+//
+// Data: subscribes to the design-x.wan-stats SINGLETON (already emits every
+// 2s via luci-rpc getNetworkDevices) and keeps a LOCAL ring buffer. NO new
+// RPC, no new polling — perf-architecture.md is the controlling law.
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Step 43: throughput formatter (rate in bps → number + unit) — kept inline
-// here rather than importing from a shared module, since the only other
-// consumer is sparkline.js and a 5-line helper isn't worth a module boundary.
+// SVG namespace helpers — LuCI's E('svg',…) makes HTMLUnknownElement which the
+// browser won't paint as SVG. Same rationale as sparkline.js / cmdk.js.
+var SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs, children) {
+	var el = document.createElementNS(SVG_NS, tag);
+	if (attrs) Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+	if (children) {
+		var arr = Array.isArray(children) ? children : [children];
+		arr.forEach(function (c) { if (c) el.appendChild(c); });
+	}
+	return el;
+}
+
+// Throughput formatter (bps → number + unit), split so the readout can size
+// number and unit independently.
 function fmtBpsSplit(bps) {
 	if (bps === null || bps === undefined || !isFinite(bps)) return { num: '—', unit: '' };
-	if (bps < 1000)    return { num: bps.toFixed(0),       unit: 'bps' };
-	if (bps < 1e6)     return { num: (bps / 1000).toFixed(1),  unit: 'Kbps' };
-	if (bps < 1e9)     return { num: (bps / 1e6).toFixed(1),   unit: 'Mbps' };
+	if (bps < 1000)    return { num: bps.toFixed(0),         unit: 'bps' };
+	if (bps < 1e6)     return { num: (bps / 1000).toFixed(1), unit: 'Kbps' };
+	if (bps < 1e9)     return { num: (bps / 1e6).toFixed(1),  unit: 'Mbps' };
 	return { num: (bps / 1e9).toFixed(2), unit: 'Gbps' };
 }
 
-// Step 50: protocol labels for the Connection field. On a DHCP-WAN router
-// w.getProtocol().getI18n() returns null on some LuCI builds because the
-// dhcp Protocol class's i18n string isn't loaded when our view runs (it's
-// registered by luci-app-network's view modules, which Overview doesn't
-// pull in). Fall back to the raw proto config value with a hand-picked
-// label table; fall further back to TitleCase of the raw string.
+// Protocol labels — same fallback chain as before (LuCI 26.x omits proto
+// i18n on Overview because network-view isn't loaded there).
 var PROTO_LABELS = {
-	dhcp:         'DHCP',
-	static:       'Static IP',
-	pppoe:        'PPPoE',
-	pptp:         'PPTP',
-	l2tp:         'L2TP',
-	wireguard:    'WireGuard',
-	openvpn:      'OpenVPN',
-	'3g':         '3G',
-	qmi:          'QMI cellular',
-	ncm:          'NCM cellular',
-	mbim:         'MBIM cellular',
-	dhcpv6:       'DHCPv6',
-	'6in4':       '6in4 tunnel',
-	'6to4':       '6to4 tunnel',
-	'6rd':        '6rd tunnel',
-	gre:          'GRE',
-	vxlan:        'VXLAN',
-	wwan:         'WWAN',
-	modemmanager: 'ModemManager',
-	none:         'Unconfigured',
-	relay:        'Relay'
+	dhcp: 'DHCP', static: 'Static IP', pppoe: 'PPPoE', pptp: 'PPTP', l2tp: 'L2TP',
+	wireguard: 'WireGuard', openvpn: 'OpenVPN', '3g': '3G', qmi: 'QMI cellular',
+	ncm: 'NCM cellular', mbim: 'MBIM cellular', dhcpv6: 'DHCPv6', '6in4': '6in4 tunnel',
+	'6to4': '6to4 tunnel', '6rd': '6rd tunnel', gre: 'GRE', vxlan: 'VXLAN', wwan: 'WWAN',
+	modemmanager: 'ModemManager', none: 'Unconfigured', relay: 'Relay'
 };
 
 function getProtoLabel(w) {
 	try {
 		var p = (typeof w.getProtocol === 'function') ? w.getProtocol() : null;
-		// Try the localized i18n label first — works when network-view loaded
 		if (p && typeof p.getI18n === 'function') {
 			var i18n = p.getI18n();
 			if (i18n) return i18n;
 		}
-		// Fall back: the raw proto name. Some Protocol classes expose it
-		// directly, but worst case w.get('proto') reads it from uci.
 		var raw = null;
-		if (p && typeof p.getProtocol === 'function') {
-			raw = p.getProtocol();
-		}
-		if (!raw && typeof w.get === 'function') {
-			raw = w.get('proto');
-		}
-		if (raw) {
-			return PROTO_LABELS[raw] || (String(raw).charAt(0).toUpperCase() + String(raw).slice(1));
-		}
+		if (p && typeof p.getProtocol === 'function') raw = p.getProtocol();
+		if (!raw && typeof w.get === 'function') raw = w.get('proto');
+		if (raw) return PROTO_LABELS[raw] || (String(raw).charAt(0).toUpperCase() + String(raw).slice(1));
 	} catch (e) {
-		if (console && console.warn) console.warn('wan-hero: getProtoLabel failed:', e);
+		if (console && console.warn) console.warn('connection-card: getProtoLabel failed:', e);
 	}
 	return null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// WAN Hero card — upgrade.md §2.A1
-//
-// Big first-fold card on the Status > Overview page answering "is my internet
-// working?". All data is 100% local (no third-party ISP API by default —
-// privacy decision per upgrade.md A1).
-//
-//   - online / offline status (ubus network.interface.wan)
-//   - public IP, connection method (proto), uptime
-//   - gateway latency (via /cgi-bin/design/ping × 5 samples → median)
-//
-// Deferred for follow-up:
-//   - Real-time up/down throughput (needs second polling thread + interface
-//     device discovery)
-//   - ISP lookup opt-in (third-party API with consent modal)
-// ─────────────────────────────────────────────────────────────────────────────
-
 var PING_SAMPLES = 2;
 var PING_TIMEOUT_MS = 1500;
-var REFRESH_MS = 60000;   // re-check WAN state every 60s
+var REFRESH_MS = 60000;   // re-check WAN state every 60s (state, not throughput)
+
+// Chart geometry. wan-stats emits every 2s → 150 samples = 5 minutes.
+var CHART_RING = 150;
+var CHART_W = 300;
+var CHART_H = 120;
 
 function median(arr) {
 	if (!arr.length) return null;
@@ -129,15 +115,6 @@ function pingOnce() {
 	}).catch(function () { clearTimeout(to); return null; });
 }
 
-// Sequential 5-sample latency measurement, NOT five independent
-// capability checks. The serial `return next()` chain means each fetch
-// completes before the next starts — total wall time is ~5 × ping RTT.
-// On a LAN that yields ~250 ms; in DevTools' network panel it looks
-// like a "thundering herd" of pings at page load (Round 43 Chrome-Claude
-// Bug #8 flagged this as a dedup miss; investigation found it's the
-// intentional measurement burst, working as designed). capability.js
-// has its own CACHE so the wireless/thermal/nlbw probes never duplicate
-// across modules — those are the real capability checks.
 function measurePing() {
 	var samples = [];
 	function next() {
@@ -150,17 +127,41 @@ function measurePing() {
 	return next();
 }
 
-// Step 48: map a ping median (ms) → number of active "signal" bars.
-// Thresholds chosen so a typical LAN ping (1-3ms) maxes out at 5,
-// Wi-Fi-to-WAN (10-30ms) sits at 3-4, congested or distant gateway
-// (100ms+) drops to 1. Returns 0 if the ping itself failed.
-function pingToBars(ms) {
-	if (ms === null || ms === undefined || !isFinite(ms)) return 0;
-	if (ms < 5)    return 5;
-	if (ms < 20)   return 4;
-	if (ms < 50)   return 3;
-	if (ms < 100)  return 2;
-	return 1;
+// Latency → threshold tier (redesign §三.1): <50 green / <100 amber / ≥100 red.
+function pingTier(ms) {
+	if (ms === null || ms === undefined || !isFinite(ms)) return 'unknown';
+	if (ms < 50)  return 'good';
+	if (ms < 100) return 'warn';
+	return 'bad';
+}
+
+// ── Ring buffer for the live chart ─────────────────────────────────────────
+function RateRing(max) { this.max = max; this.data = []; }
+RateRing.prototype.push = function (v) {
+	this.data.push((v === null || v === undefined || !isFinite(v)) ? 0 : v);
+	if (this.data.length > this.max) this.data.shift();
+};
+
+// Build an SVG area path string for a ring, scaled to a shared upper bound so
+// up and down read on the same vertical scale (their magnitude relationship
+// stays honest). Returns { line, area } path d-strings, or null if <2 samples.
+function ringPaths(ring, hi, w, h) {
+	var n = ring.data.length;
+	if (n < 2) return null;
+	if (!(hi > 0)) hi = 1;
+	var stepX = w / (CHART_RING - 1);
+	// Right-align the data so the newest sample sits at the right edge.
+	var offset = w - (n - 1) * stepX;
+	var line = '';
+	for (var i = 0; i < n; i++) {
+		var x = offset + i * stepX;
+		var y = h - Math.min(1, ring.data[i] / hi) * h * 0.92 - h * 0.04;
+		line += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+	}
+	var firstX = offset.toFixed(1);
+	var lastX  = (offset + (n - 1) * stepX).toFixed(1);
+	var area = line + 'L' + lastX + ',' + h + ' L' + firstX + ',' + h + ' Z';
+	return { line: line.trim(), area: area.trim() };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -168,6 +169,9 @@ function pingToBars(ms) {
 return baseclass.extend({
 	__init__: function () {
 		if (!document.body.classList.contains('node-admin-status-overview')) return;
+		this.ringRx = new RateRing(CHART_RING);   // download
+		this.ringTx = new RateRing(CHART_RING);   // upload
+		this._online = null;
 		this.tryInject();
 	},
 
@@ -181,222 +185,270 @@ return baseclass.extend({
 		this.injectCard();
 		this.refresh();
 		this._timer = window.DXScheduler.every(REFRESH_MS, L.bind(this.refresh, this));
-		// Step 92 (Round 16): the "Last check Xs ago" portion of the
-		// tagline updates every 5 s independently of the 30 s WAN-state
-		// refresh. Cheap text swap, no network calls — pure UI ticker.
+		// "Last check Xs ago" / "last online" relative-time ticker, 5s, pure
+		// text — no network calls.
 		this._taglineTimer = window.DXScheduler.every(5000, L.bind(this.updateTagline, this));
 	},
 
 	injectCard: function () {
-		// Step 92 (Round 16): pixel-parity rewrite to match S0 of
-		// doc/upgrade-preview.html. Structural changes from prior shape:
-		//   - .wan-hero-head row removed entirely (no inline globe SVG,
-		//     no inline status pill, no inline ping — those collapse into
-		//     two single rows: .wan-hero-status + .wan-hero-tagline)
-		//   - Body grid renamed .wan-hero-body → .wan-hero-grid, switched
-		//     from div/div to semantic <dt>/<dd> markup
-		//   - Two stats (Public IP, Connection) get .big modifier — they
-		//     render at text-xl, sans-serif, semibold to emphasise the
-		//     two most important facts on the card
-		//   - Uptime moved out of grid into tagline ("Online for Xh Ym")
-		//   - Latency takes uptime's grid slot, with 5-bar indicator now
-		//     inline inside its <dd>
-		//   - Throughput strip: ↑ row before ↓ row (preview ordering),
-		//     wrapper divs lose their .wan-hero-throughput-cell class
-		var card = E('div', { 'class': 'wan-hero', 'id': 'wan-hero' }, [
-			// ── Status line: "Internet · Online" with coloured ::before dot
-			E('div', { 'class': 'wan-hero-status', 'id': 'wan-hero-status' }, _('Checking…')),
-
-			// ── Tagline: "Online for Xh Ym · Last check Xs ago" (updated by
-			//    updateTagline() — both on refresh and on the 5 s ticker)
-			E('div', { 'class': 'wan-hero-tagline', 'id': 'wan-hero-tagline' }, ''),
-
-			// ── 4-stat grid with dt/dd semantic markup
-			E('div', { 'class': 'wan-hero-grid' }, [
-				// Big stat #1: Public IP
-				E('div', { 'class': 'wan-hero-stat big' }, [
-					E('dt', {}, _('Public IP')),
-					E('dd', { 'id': 'wan-hero-ip' }, '—')
+		var card = E('div', { 'class': 'conn-card', 'id': 'conn-card' }, [
+			// ── Left column: status + identity ──────────────────────────────
+			E('div', { 'class': 'conn-left' }, [
+				E('div', { 'class': 'conn-status', 'id': 'conn-status' }, _('Checking…')),
+				E('div', { 'class': 'conn-meta', 'id': 'conn-meta' }, ''),
+				E('div', { 'class': 'conn-ip-row' }, [
+					E('span', { 'class': 'conn-ip-label' }, _('Public IP')),
+					E('button', {
+						'type': 'button',
+						'class': 'conn-ip',
+						'id': 'conn-ip',
+						'title': _('Click to copy'),
+						'click': L.bind(this.copyIp, this)
+					}, '—')
 				]),
-				// Big stat #2: Connection method (DHCP / PPPoE / Static / …)
-				E('div', { 'class': 'wan-hero-stat big' }, [
-					E('dt', {}, _('Connection')),
-					E('dd', { 'id': 'wan-hero-proto' }, '—')
-				]),
-				// Stat #3: Gateway latency — 5-bar signal + ms text inline in <dd>
-				E('div', { 'class': 'wan-hero-stat' }, [
-					E('dt', {}, _('Response Time')),
-					E('dd', {}, [
-						E('span', { 'class': 'wan-hero-ping-bars', 'id': 'wan-hero-ping-bars', 'data-bars': '0' }, [
-							E('span'), E('span'), E('span'), E('span'), E('span')
-						]),
-						E('span', { 'class': 'wan-hero-ping-text', 'id': 'wan-hero-ping-text' }, '—')
+				E('div', { 'class': 'conn-latency-row' }, [
+					E('span', { 'class': 'conn-latency-label' }, _('Latency')),
+					E('span', { 'class': 'conn-latency', 'id': 'conn-latency' }, [
+						E('span', { 'class': 'conn-latency-num', 'id': 'conn-latency-num' }, '—'),
+						E('span', {
+							'class': 'conn-latency-dot',
+							'id': 'conn-latency-dot',
+							'data-tier': 'unknown',
+							'tabindex': '0',
+							'title': _('Latency: < 50 ms good · < 100 ms fair · ≥ 100 ms poor')
+						}, '')
 					])
-				]),
-				// Stat #4: WAN interface name (eth1 / pppoe-wan / …)
-				E('div', { 'class': 'wan-hero-stat' }, [
-					E('dt', {}, _('Interface')),
-					E('dd', { 'id': 'wan-hero-iface' }, '—')
 				])
 			]),
 
-			// ── Live throughput strip (fed by design-x.wan-stats every 2 s)
-			//    Preview puts ↑ (upload) first, ↓ (download) second.
-			E('div', { 'class': 'wan-hero-throughput', 'id': 'wan-hero-throughput' }, [
-				E('div', {}, [
-					E('span', { 'class': 'wan-hero-throughput-arrow' }, '↑'),
-					E('span', { 'class': 'wan-hero-throughput-value', 'id': 'wan-hero-up' }, '—'),
-					E('span', { 'class': 'wan-hero-throughput-unit',  'id': 'wan-hero-up-unit' }, '')
+			// ── Right area: live 5-min chart + current readouts ─────────────
+			E('div', { 'class': 'conn-chart-wrap', 'id': 'conn-chart-wrap' }, [
+				E('div', { 'class': 'conn-readouts' }, [
+					E('span', { 'class': 'conn-readout conn-readout-down' }, [
+						E('span', { 'class': 'conn-readout-arrow' }, '↓'),
+						E('span', { 'class': 'conn-readout-num', 'id': 'conn-down' }, '—'),
+						E('span', { 'class': 'conn-readout-unit', 'id': 'conn-down-unit' }, '')
+					]),
+					E('span', { 'class': 'conn-readout conn-readout-up' }, [
+						E('span', { 'class': 'conn-readout-arrow' }, '↑'),
+						E('span', { 'class': 'conn-readout-num', 'id': 'conn-up' }, '—'),
+						E('span', { 'class': 'conn-readout-unit', 'id': 'conn-up-unit' }, '')
+					])
 				]),
-				E('div', {}, [
-					E('span', { 'class': 'wan-hero-throughput-arrow' }, '↓'),
-					E('span', { 'class': 'wan-hero-throughput-value', 'id': 'wan-hero-down' }, '—'),
-					E('span', { 'class': 'wan-hero-throughput-unit',  'id': 'wan-hero-down-unit' }, '')
-				])
+				this.makeChart()
 			])
 		]);
-		// Sparkline tiles were injected before view.firstChild; put hero BEFORE them
+
 		var view = document.getElementById('view');
 		view.insertBefore(card, view.firstChild);
 
-		// Step 43: subscribe to design-x.wan-stats for live throughput. Same singleton
-		// the Net tile uses — one RPC stream, two consumers.
+		// Subscribe to the wan-stats singleton — same stream sparkline used.
+		// One RPC stream, shared. NO new polling.
 		var self = this;
 		L.require('design-x.wan-stats').then(function (ws) {
-			ws.subscribe(L.bind(self.onWanStats, self));
+			self._unsub = ws.subscribe(L.bind(self.onWanStats, self));
 		}).catch(function () {
-			// design-x.wan-stats unavailable — hide the throughput strip rather than
-			// show forever-"—" telemetry.
-			var strip = document.getElementById('wan-hero-throughput');
-			if (strip) strip.style.display = 'none';
+			// wan-stats unavailable — leave readouts at "—" and chart empty.
 		});
 	},
 
-	// Step 43: render live ↑/↓ throughput from the design-x.wan-stats singleton.
+	makeChart: function () {
+		// Two stacked area series (down + up) on a shared Y-axis. Both areas
+		// fill at low opacity; lines at full. Colors come from CSS so they
+		// flip with light/dark + obey the direction-color tokens.
+		var downFill = svgEl('path', { 'class': 'conn-chart-area conn-chart-area-down', 'd': '' });
+		var upFill   = svgEl('path', { 'class': 'conn-chart-area conn-chart-area-up',   'd': '' });
+		var downLine = svgEl('path', { 'class': 'conn-chart-line conn-chart-line-down', 'd': '', 'fill': 'none' });
+		var upLine   = svgEl('path', { 'class': 'conn-chart-line conn-chart-line-up',   'd': '', 'fill': 'none' });
+		var baseline = svgEl('line', {
+			'class': 'conn-chart-baseline',
+			'x1': '0', 'y1': CHART_H - 1, 'x2': CHART_W, 'y2': CHART_H - 1
+		});
+		return svgEl('svg', {
+			'class': 'conn-chart',
+			'id': 'conn-chart',
+			'viewBox': '0 0 ' + CHART_W + ' ' + CHART_H,
+			'preserveAspectRatio': 'none',
+			'aria-hidden': 'true'
+		}, [baseline, downFill, upFill, downLine, upLine]);
+	},
+
+	// Live throughput from wan-stats. Push into local rings, redraw chart,
+	// update the ↓/↑ readouts. This is the ONLY data feed for the chart.
 	onWanStats: function (data) {
+		var online = data.online !== false && data.deviceName !== null;
+		this.ringRx.push(online ? data.rxBitsPerSec : 0);
+		this.ringTx.push(online ? data.txBitsPerSec : 0);
+
 		var d = fmtBpsSplit(data.rxBitsPerSec);
 		var u = fmtBpsSplit(data.txBitsPerSec);
-		var setText = function (id, txt) {
-			var el = document.getElementById(id);
-			if (el) el.textContent = txt;
+		var set = function (id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; };
+		set('conn-down', d.num); set('conn-down-unit', d.unit);
+		set('conn-up',   u.num); set('conn-up-unit',   u.unit);
+
+		this.renderChart();
+	},
+
+	renderChart: function () {
+		var svg = document.getElementById('conn-chart');
+		if (!svg) return;
+		// Shared upper bound across both series so magnitude reads honestly.
+		var hi = 1;
+		var i;
+		for (i = 0; i < this.ringRx.data.length; i++) if (this.ringRx.data[i] > hi) hi = this.ringRx.data[i];
+		for (i = 0; i < this.ringTx.data.length; i++) if (this.ringTx.data[i] > hi) hi = this.ringTx.data[i];
+
+		var dp = ringPaths(this.ringRx, hi, CHART_W, CHART_H);
+		var up = ringPaths(this.ringTx, hi, CHART_W, CHART_H);
+
+		var setD = function (cls, val) {
+			var el = svg.querySelector('.' + cls);
+			if (el) el.setAttribute('d', val || '');
 		};
-		setText('wan-hero-down', d.num);
-		setText('wan-hero-down-unit', d.unit);
-		setText('wan-hero-up', u.num);
-		setText('wan-hero-up-unit', u.unit);
+		setD('conn-chart-area-down', dp ? dp.area : '');
+		setD('conn-chart-line-down', dp ? dp.line : '');
+		setD('conn-chart-area-up',   up ? up.area : '');
+		setD('conn-chart-line-up',   up ? up.line : '');
+	},
+
+	copyIp: function () {
+		var el = document.getElementById('conn-ip');
+		if (!el) return;
+		var text = el.textContent;
+		if (!text || text === '—') return;
+		var done = function () {
+			if (window.toast) window.toast.success(_('IP copied'));
+		};
+		try {
+			if (navigator.clipboard && navigator.clipboard.writeText) {
+				navigator.clipboard.writeText(text).then(done, function () {});
+				return;
+			}
+		} catch (e) { /* fall through to legacy path */ }
+		// Legacy fallback for non-secure contexts where Clipboard API is blocked.
+		try {
+			var ta = document.createElement('textarea');
+			ta.value = text;
+			ta.setAttribute('readonly', '');
+			ta.style.position = 'absolute';
+			ta.style.left = '-9999px';
+			document.body.appendChild(ta);
+			ta.select();
+			document.execCommand('copy');
+			document.body.removeChild(ta);
+			done();
+		} catch (e2) { /* give up silently */ }
 	},
 
 	refresh: function () {
 		var self = this;
 		this._refreshTime = Date.now();
 
-		// Per-field try/catch so one broken accessor doesn't blank the whole
-		// card. User report on ImmortalWrt 24.10: IP populated but Connection /
-		// Uptime / Interface all blank + status showed "Unable to read WAN state"
-		// — that was the .catch firing AFTER IP was already set. Now each
-		// field stands alone.
 		function safe(fn, fallback) {
 			try {
 				var v = fn();
 				return (v === null || v === undefined || v === '') ? fallback : v;
-			} catch (e) {
-				return fallback;
-			}
+			} catch (e) { return fallback; }
 		}
 
-		return network.getWANNetworks().then(function (wans) {
+		network.getWANNetworks().then(function (wans) {
 			if (!wans || !wans.length) {
 				self.setStatus('offline', _('Internet · Offline'));
-				self._taglinePrefix = _('No WAN configured');
+				self._metaPrefix = _('No WAN configured');
+				self.setMeta([]);
 				self.updateTagline();
 				return;
 			}
 			var w = wans[0];
-
-			// isUp() can throw on some forks if the interface is mid-restart
 			var up = safe(function () { return w.isUp(); }, null);
+
+			var proto = safe(function () { return getProtoLabel(w); }, null);
+			var iface = safe(function () { var d = w.getDevice(); return d ? d.getName() : w.getName(); }, null);
+			var upSec = safe(function () { return w.getUptime(); }, null);
+
 			if (up === null) {
 				self.setStatus('unknown', _('Internet · Checking'));
-				self._taglinePrefix = _('WAN state transient');
+				self._metaPrefix = _('WAN state transient');
+				self._online = null;
 			} else if (up) {
 				self.setStatus('online', _('Internet · Online'));
-				// Step 92: uptime moved out of the grid into the tagline,
-				// rendered as "Online for 9d 14h" — matches preview phrasing.
-				var upSec = safe(function () { return w.getUptime(); }, null);
-				self._taglinePrefix = (upSec !== null)
-					? _('Online for ') + formatUptime(upSec)
-					: _('Online');
+				self._metaPrefix = (upSec !== null) ? formatUptime(upSec) : _('Online');
+				self._online = true;
+				self._lastOnline = Date.now();
 			} else {
 				self.setStatus('offline', _('Internet · Offline'));
-				self._taglinePrefix = _('No connectivity');
+				self._metaPrefix = _('No connectivity');
+				self._online = false;
 			}
+
+			// Meta line: uptime · proto · iface (caption). Imperative push so
+			// no null sneaks into the children array (E() renders null as the
+			// literal text "null").
+			var parts = [];
+			if (self._metaPrefix) parts.push(self._metaPrefix);
+			if (proto) parts.push(proto);
+			if (iface) parts.push(iface);
+			self.setMeta(parts);
 			self.updateTagline();
 
-			// ── Grid stat #1: Public IP (IPv4 first, IPv6 fallback)
+			// Public IP (IPv4 first, IPv6 fallback)
 			var ipv4 = safe(function () { return w.getIPAddrs(); }, []);
-			document.getElementById('wan-hero-ip').textContent =
-				(ipv4 && ipv4.length) ? ipv4[0].split('/')[0] : safe(function () {
-					var v6 = w.getIP6Addrs();
-					return (v6 && v6.length) ? v6[0].split('/')[0] : '—';
-				}, '—');
-
-			// ── Grid stat #2: Connection (Step 50 fallback chain — LuCI 26.x
-			//    omits proto i18n on Overview because network-view doesn't load)
-			document.getElementById('wan-hero-proto').textContent = safe(function () {
-				return getProtoLabel(w);
+			var ip = (ipv4 && ipv4.length) ? ipv4[0].split('/')[0] : safe(function () {
+				var v6 = w.getIP6Addrs();
+				return (v6 && v6.length) ? v6[0].split('/')[0] : '—';
 			}, '—');
-
-			// ── Grid stat #4: Interface name (eth1, pppoe-wan, …)
-			document.getElementById('wan-hero-iface').textContent = safe(function () {
-				var d = w.getDevice();
-				return d ? d.getName() : w.getName();
-			}, '—');
+			var ipEl = document.getElementById('conn-ip');
+			if (ipEl) ipEl.textContent = ip;
 		}).catch(function (e) {
-			// Outer rejection: getWANNetworks itself failed. Only NOW do we
-			// claim full unknown. Single fields handled by per-field try/catch
-			// above.
 			self.setStatus('unknown', _('Internet · Unknown'));
-			self._taglinePrefix = _('Unable to read WAN state');
+			self._metaPrefix = _('Unable to read WAN state');
+			self.setMeta([]);
 			self.updateTagline();
-			if (console && console.warn) console.warn('wan-hero: getWANNetworks failed:', e);
+			if (console && console.warn) console.warn('connection-card: getWANNetworks failed:', e);
 		});
 
-		// ── Grid stat #3: Latency — 5-bar indicator + ms text, runs
-		//    independently of WAN state since the ping CGI is local and
-		//    works even when WAN is down.
+		// Latency — number + threshold dot. Local ping CGI works even when
+		// WAN is down, so it runs independently of WAN state.
 		measurePing().then(function (ms) {
-			var bars = document.getElementById('wan-hero-ping-bars');
-			var text = document.getElementById('wan-hero-ping-text');
-			if (bars) bars.setAttribute('data-bars', String(pingToBars(ms)));
-			if (text) text.textContent = (ms === null) ? '—' : ms.toFixed(1) + ' ms';
+			var num = document.getElementById('conn-latency-num');
+			var dot = document.getElementById('conn-latency-dot');
+			if (num) num.textContent = (ms === null) ? '—' : ms.toFixed(0) + ' ms';
+			if (dot) dot.setAttribute('data-tier', pingTier(ms));
 		});
 	},
 
-	// Step 92 (Round 16): renders the tagline below the status line.
-	// Shape: "{prefix} · Last check {age}". prefix is set by refresh()
-	// based on WAN state ("Online for 9d 14h" / "No connectivity" / …);
-	// age portion ticks every 5 s via the timer in tryInject() so it
-	// feels live without re-running expensive refreshes.
+	setMeta: function (parts) {
+		var el = document.getElementById('conn-meta');
+		if (el) el.textContent = parts.join(' · ');
+	},
+
+	// Tagline lives inside the meta line's "last online" suffix only when
+	// offline; when online the meta already shows uptime. Keeps a fixed-height
+	// card regardless of state.
 	updateTagline: function () {
-		var el = document.getElementById('wan-hero-tagline');
-		if (!el) return;
-		var prefix = this._taglinePrefix || '';
-		var lastCheck = '';
-		if (this._refreshTime) {
-			var ageS = Math.floor((Date.now() - this._refreshTime) / 1000);
-			var ageStr;
-			if (ageS < 5)       ageStr = _('just now');
-			else if (ageS < 60) ageStr = ageS + 's ago';
-			else                ageStr = Math.floor(ageS / 60) + 'm ago';
-			lastCheck = _('Last check ') + ageStr;
+		var wrap = document.getElementById('conn-chart-wrap');
+		if (wrap) {
+			if (this._online === false) wrap.classList.add('conn-chart-offline');
+			else wrap.classList.remove('conn-chart-offline');
 		}
-		el.textContent = (prefix && lastCheck) ? (prefix + ' · ' + lastCheck) : (prefix || lastCheck);
+		// When offline, append a "last online …" hint to the meta line.
+		if (this._online === false && this._lastOnline) {
+			var el = document.getElementById('conn-meta');
+			if (el) {
+				var ageS = Math.floor((Date.now() - this._lastOnline) / 1000);
+				var ageStr;
+				if (ageS < 60)        ageStr = _('just now');
+				else if (ageS < 3600) ageStr = Math.floor(ageS / 60) + _(' min ago');
+				else                  ageStr = Math.floor(ageS / 3600) + _(' h ago');
+				el.textContent = (this._metaPrefix || _('Offline')) + ' · ' + _('last online ') + ageStr;
+			}
+		}
 	},
 
 	setStatus: function (kind, label) {
-		var el = document.getElementById('wan-hero-status');
+		var el = document.getElementById('conn-status');
 		if (!el) return;
-		el.className = 'wan-hero-status wan-hero-status-' + kind;
+		el.className = 'conn-status conn-status-' + kind;
 		el.textContent = label;
 	}
 });

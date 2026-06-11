@@ -224,40 +224,52 @@ function formatLastSeen(lease) {
 }
 
 // Round 44 Step 218 — presence-aware formatter for the LAN Clients
-// "Lease" column. When host-presence data is available, prefer real
+// "Last Seen" column. When host-presence data is available, prefer real
 // activity (ARP presence + wifi inactive_ms) over DHCP lease validity.
 // Falls back to formatLastSeen(lease) when no presence info exists
 // (e.g. host-presence rpcd method returned null, or the MAC isn't in
 // the presence map at all).
 //
-// Semantic mapping:
-//   wifi active (inactive < 5s)     → "Active"  not stale
-//   wifi recent (inactive < 60s)    → "<Xs ago" not stale
-//   wifi staler (inactive < 3600s)  → "Xm ago"  stale
-//   wifi very stale                 → "Xh ago"  stale
-//   arp present (ATF_COM)           → "Active"  not stale
-//   no presence info available      → formatLastSeen(lease) (Round 38 path)
-//   presence map exists but MAC absent → "Offline" stale
+// Round 49 (redesign-2026-06 §三.4): the column must NEVER show the word
+// "Active". Active/stale state is expressed by the status dot on the row's
+// device icon (the `online` flag here drives it). The text column always
+// shows a real RELATIVE TIME ("now" / "2 min ago" / "1 h ago"). The
+// returned shape is { stale, online, text }:
+//   stale  : dims the whole row (offline/very-stale devices)
+//   online : drives the icon status dot (green when reachable now)
+//   text   : relative-time string for the Last Seen cell
+//
+// Semantic mapping (wifi inactive_ms / arp presence → relative time):
+//   wifi inactive < 5s     → online, "now"
+//   wifi inactive < 60s    → online, "X sec ago"
+//   wifi inactive < 1h     → stale,  "X min ago"
+//   wifi inactive ≥ 1h     → stale,  "X h ago"
+//   arp present            → online, "now"
+//   no presence backend    → formatLastSeen(lease) (Round 38 path)
+//   presence map, MAC absent → stale, "Offline"
 function formatPresence(presenceMap, mac, lease) {
-	if (!presenceMap || !mac) return formatLastSeen(lease);
+	if (!presenceMap || !mac) {
+		var f = formatLastSeen(lease);
+		// Lease-based fallback has no real activity signal; treat a valid
+		// (non-stale) lease as "online" for the icon dot, expired as offline.
+		f.online = !f.stale;
+		return f;
+	}
 	var entry = presenceMap[mac];
 	if (!entry) {
-		// presence_map exists but no row for this MAC → genuinely offline
-		// (not in ARP, no wifi assoc). Override lease — even a valid
-		// DHCP lease doesn't mean the device is reachable right now.
-		return { stale: true, text: _('Offline') };
+		// presence_map exists but no row for this MAC → genuinely offline.
+		return { stale: true, online: false, text: _('Offline') };
 	}
 	if (entry.via === 'wifi') {
 		var ms = entry.inactive_ms || 0;
-		if (ms < 5000)    return { stale: false, text: _('Active') };
-		if (ms < 60000)   return { stale: false, text: Math.floor(ms / 1000) + 's' };
-		if (ms < 3600000) return { stale: true,  text: Math.floor(ms / 60000) + 'm' };
-		return { stale: true, text: Math.floor(ms / 3600000) + 'h' };
+		if (ms < 5000)    return { stale: false, online: true,  text: _('now') };
+		if (ms < 60000)   return { stale: false, online: true,  text: Math.floor(ms / 1000) + _(' sec ago') };
+		if (ms < 3600000) return { stale: true,  online: false, text: Math.floor(ms / 60000) + _(' min ago') };
+		return { stale: true, online: false, text: Math.floor(ms / 3600000) + _(' h ago') };
 	}
-	// via === 'arp' → kernel ARP table has a complete entry, so the
-	// host responded to ARP recently (within ~5-15 min depending on
-	// arp_table_gc_thresh). Treat as active.
-	return { stale: false, text: _('Active') };
+	// via === 'arp' → kernel ARP table has a complete entry, so the host
+	// responded recently. Treat as reachable now.
+	return { stale: false, online: true, text: _('now') };
 }
 
 function relativeAge(ageSec) {
@@ -862,11 +874,14 @@ return baseclass.extend({
 			this.headerCell('ip',    _('IP'),     'devices-col-ip'),
 			// MAC column promoted main-row in Step 148; left non-sortable.
 			E('span', { 'class': 'devices-col-mac' }, _('MAC')),
-			E('span', { 'class': 'devices-col-sig' }, _('Signal')),
+			// Round 49 (redesign §三.4): "Signal" → "Connection". The column no
+			// longer shows an 11-row "Wired" pill (zero information) — wired =
+			// a muted ethernet glyph, wireless = real dBm.
+			E('span', { 'class': 'devices-col-sig' }, _('Connection')),
 			// Step 237 (Round 45): column header "Lease" → "Last Seen".
-			// Data shown has been presence-based since Step 218
-			// (formatPresence: "Active" / "Xs" / "Xm" / "Offline").
-			// Header label finally catches up to the data source.
+			// Round 49 (redesign §三.4): the cell shows a real relative time
+			// (formatPresence: "now" / "X sec ago" / "X min ago" / "Offline")
+			// — never the word "Active" (that state is the icon status dot).
 			// sortState key stays 'lease' for localStorage compatibility
 			// with Step 235 saves.
 			this.headerCell('lease', _('Last Seen'),  'devices-col-seen'),
@@ -945,25 +960,30 @@ return baseclass.extend({
 			|| l.hostname
 			|| (vendor ? vendor + ' ' + _('device') : _('Unknown device'));
 
-		// Step 93/94 (Round 17): if this MAC appears in the Wi-Fi station
-		// map (built from /cgi-bin/design/wifi-stations on refresh), render
-		// signal-bars + dBm. Otherwise the client is wired or the router
-		// has no Wi-Fi — show the "Wired" pill. The map lookup is O(1) so
-		// rendering N rows stays linear.
+		// Step 93/94 (Round 17): if this MAC appears in the Wi-Fi station map
+		// (built from wifi-stations on refresh), render real signal (dBm +
+		// bars). Round 49 (redesign §三.4): a WIRED client is now a muted
+		// ethernet glyph — NOT the old "Wired" text pill (which carried zero
+		// information when every row said the same thing). The map lookup is
+		// O(1) so rendering N rows stays linear.
 		var wifi = self.stations && self.stations[mac];
 		var sigCell;
 		if (wifi) {
 			var dBm = wifi.station && wifi.station.signal;
 			var barsClass = ('devices-sig-bars ' + signalToBarsClass(dBm)).trim();
-			sigCell = E('span', { 'class': 'devices-row-sig' }, [
+			sigCell = E('span', { 'class': 'devices-row-sig devices-row-sig-wifi' }, [
 				E('span', { 'class': barsClass }, [
 					E('span'), E('span'), E('span'), E('span')
 				]),
-				E('span', { 'class': 'devices-sig-db' }, (dBm != null ? dBm + 'dBm' : ''))
+				E('span', { 'class': 'devices-sig-db' }, (dBm != null ? dBm + ' dBm' : ''))
 			]);
 		} else {
-			sigCell = E('span', { 'class': 'devices-row-sig' }, [
-				E('span', { 'class': 'devices-sig-wired' }, _('Wired'))
+			sigCell = E('span', { 'class': 'devices-row-sig devices-row-sig-wired' }, [
+				svgEl('svg', {
+					'class': 'svg-icon devices-sig-wired-glyph',
+					'aria-label': _('Wired'),
+					'title': _('Wired (Ethernet)')
+				}, svgUse(self.iconBase + '#i-network'))
 			]);
 		}
 
@@ -1016,6 +1036,17 @@ return baseclass.extend({
 						svgEl('svg', { 'class': 'svg-icon devices-row-icon', 'aria-hidden': 'true' },
 							svgUse(self.iconBase + '#' + type.icon))
 					];
+					// Round 49 (redesign §三.4): active/stale state lives HERE as
+					// a status dot on the device icon — the Last Seen column no
+					// longer says "Active". Online = green dot; stale/offline =
+					// neutral dot. Imperative push (E() renders a null child as
+					// the literal text "null" — memory [[luci-e-helper-no-null-skip]]).
+					iconKids.push(E('span', {
+						'class': 'devices-row-status-dot ' + (seen.online
+							? 'devices-status-online' : 'devices-status-stale'),
+						'aria-label': seen.online ? _('Online') : _('Inactive'),
+						'title': seen.online ? _('Active now') : _('Inactive')
+					}));
 					if (isBlocked) {
 						iconKids.push(E('span', {
 							'class': 'devices-row-blocked-dot',

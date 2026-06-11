@@ -37,6 +37,28 @@
     --text-2xl:  1.5rem;    /* 24px */
     --text-3xl:  1.875rem;  /* 30px */
 
+    /* ─── 1.2b 字阶（redesign-2026-06 §一.1）— 5 档，全站只许用这 5 档 ───
+       Each token bundles size + line-height + weight semantics. Component
+       rules apply the size token and the matching weight token together.
+         --text-display : 28px/1.2 semibold — 磁贴大数字，全页仅此一处
+         --text-heading : 15px/1.4 semibold — 卡片标题
+         --text-body    : 13px/1.5 regular  — 表格内容、正文
+         --text-caption : 11px/1.3 medium 大写 +0.04em — 列头、统计标签
+         --text-mono    : 12px/1.4 mono     — 见 mono 规则 */
+    --text-display: 1.75rem;   /* 28px */
+    --text-heading: 0.9375rem; /* 15px */
+    --text-body:    0.8125rem; /* 13px */
+    --text-caption: 0.6875rem; /* 11px */
+    --text-mono:    0.75rem;   /* 12px */
+
+    --leading-display: 1.2;
+    --leading-heading: 1.4;
+    --leading-body:    1.5;
+    --leading-caption: 1.3;
+    --leading-mono:    1.4;
+
+    --caption-tracking: 0.04em;
+
     /* ─── 1.3 字重与行高 ─── */
     --weight-normal:   400;
     --weight-medium:   500;
@@ -47,12 +69,26 @@
     --leading-normal: 1.5;
     --leading-relaxed:1.7;
 
-    /* ─── 1.4 圆角节奏 ─── */
-    --radius-sm:  6px;
-    --radius-md: 10px;
-    --radius-lg: 14px;
-    --radius-xl: 20px;
+    /* ─── 1.4 圆角节奏 ───
+       redesign-2026-06 §一.2 工具密度: 卡片圆角 12→8px. The component
+       radius tokens (-sm/-md/-lg) below are tightened one notch each so
+       cards/tiles/buttons read denser without touching hundreds of rules.
+       --radius-lg was 14px (card corner) → 8px tool-density. */
+    --radius-sm:  4px;
+    --radius-md:  6px;
+    --radius-lg:  8px;
+    --radius-xl: 12px;
     --radius-pill: 999px;
+
+    /* ─── 1.4b 工具密度间距（redesign-2026-06 §一.2）───
+       Card padding 16px, card gap 12px, table row-height 40px.
+       Components reference these instead of raw --space-* so a future
+       density change is one edit. Card padding was 24px (--space-5),
+       now 16px (--space-4) per tool-density. */
+    --card-padding: var(--space-4);   /* 16px — 卡片内边距 24→16 */
+    --card-gap:     var(--space-3);   /* 12px — 卡片间距 */
+    --row-height:   40px;             /* 表格行高 */
+    --section-gap:  var(--space-5);   /* 24px — 章节间距 */
 
     /* ─── 1.5 动效 ─── */
     --motion-fast:   120ms;
@@ -144,6 +180,16 @@
     --chart-3: #f59e0b;
     --chart-4: #8b5cf6;
 
+    /* ─── 1.10c Direction colors (redesign-2026-06 §一.3) ───────────
+       色彩职责制度: 上行(upload)=蓝, 下行(download)=绿. Applies to
+       EVERY direction-carrying element page-wide: WAN area chart up/down
+       fills + lines, speedtest gauges, ↑/↓ arrows. These are DIRECTION
+       identity tokens, not semantic good/bad. Kept in sync across all
+       four token blocks (light :root, prefers-dark, data-theme=dark,
+       data-theme=light). */
+    --chart-up:   #3b82f6;   /* 蓝 — 上行 / upload */
+    --chart-down: #10b981;   /* 绿 — 下行 / download */
+
     /* ─── 1.11 阴影（浅色） ─── */
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
@@ -229,6 +275,10 @@
         --color-warning-bg: rgba(245, 158, 11, 0.12);
         --color-danger-bg:  rgba(239, 68, 68, 0.12);
         --color-info-bg:    rgba(59, 130, 246, 0.12);
+
+        /* —— 方向色深色版（提亮保对比，同 chart palette） —— */
+        --chart-up:   #60a5fa;   /* 蓝 — 上行 */
+        --chart-down: #34d399;   /* 绿 — 下行 */
 
         /* —— 阴影改 1px 边框（深色下阴影不可见） —— */
         --shadow-xs: none;
@@ -448,6 +498,10 @@ html[data-theme="dark"] {
     --chart-3: #fbbf24;
     --chart-4: #a78bfa;
 
+    /* Direction colors — dark variants (kept in sync with prefers-dark block) */
+    --chart-up:   #60a5fa;   /* 蓝 — 上行 */
+    --chart-down: #34d399;   /* 绿 — 下行 */
+
     --shadow-xs: none;
     --shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.05);
     --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.06);
@@ -486,6 +540,10 @@ html[data-theme="light"] {
     --color-warning-bg: #fef3c7;
     --color-danger-bg:  #fee2e2;
     --color-info-bg:    #dbeafe;
+
+    /* Direction colors — light variants (kept in sync with :root block) */
+    --chart-up:   #3b82f6;   /* 蓝 — 上行 */
+    --chart-down: #10b981;   /* 绿 — 下行 */
 
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
@@ -1060,18 +1118,9 @@ header > .fill > .container > .brand {
 header > .fill > .container > .brand:hover {
     color: var(--color-accent-600);
 }
-/* Brand 前面加一个 accent dot 作为身份识别 */
-header > .fill > .container > .brand::before {
-    content: '';
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--color-accent-500);
-    margin-right: var(--space-2);
-    vertical-align: middle;
-    transform: translateY(-1px);
-}
+/* redesign-2026-06 §六: brand 前绿点移除 — it shared the same shape as
+   the online/offline status dot but carried no meaning, so it muddied
+   the dot vocabulary. Removed; the brand is now just the hostname. */
 
 header > .fill > .container > a[class="brand"]:after {
     content:"";
@@ -1186,89 +1235,17 @@ span[data-indicator="uci-changes"] {
     transition: all var(--motion-normal) var(--ease-out);
 }
 
-/* Step 109 (Round 25):reshape LuCI's poll-status indicator from a
-   16×4 nearly-invisible gray blob into a discoverable 8 px coloured
-   dot. Step 136 (Round 35):升级再升级 — 8px dot → 36×36 icon button
-   match cmdk/quick-actions/theme-toggle 同尺寸,Chrome-Claude 实测后
-   提议(Round 35 audit "扁条按钮 = 没用?")。设计哲学转向:indicator
-   = clickable BUTTON,不再是 "subtle status signal"。
-
-   功能:点击切换 active ↔ inactive,暂停整页 LuCI 轮询(CPU/Memory/
-   bandwidth/realtime charts 全靠)。
-   active   = success 绿 refresh-cw icon,5s 旋转一圈(同步典型 polling
-              cadence)
-   inactive = muted subtle pause icon,无动画
-
-   Icon 走 inline SVG data URI + mask(同 .node-main-login 登录页盾牌
-   mask 模式,L3784)。不用 icons.svg sprite #use 因为 LuCI 控制 span
-   inner HTML,我们不能注入 <svg> 标签,所以走 ::before pseudo + mask。
-*/
+/* redesign-2026-06 §六: 处决旋转按钮.
+   LuCI core injects <span data-indicator="poll-status"> into #indicators
+   — Steps 109/136 had turned it into a 36×36 emerald refresh-cw button
+   that spins once every 5s (poll-spin keyframes). The redesign removes
+   the spinning-refresh affordance from the topbar entirely: the button
+   was a "pause auto-refresh" control that overlapped the page's own
+   polling story and added topbar noise. We can't delete LuCI's injected
+   markup, so hide it; the JS that annotated it (js/style.js §1) is
+   removed in lockstep. The uci-changes indicator pill below is kept. */
 [data-indicator="poll-status"] {
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    border-radius: var(--radius-md);
-    background-color: transparent;
-    color: var(--color-text-muted);
-    cursor: pointer;
-    font-size: 0;
-    line-height: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    border: none;
-    transition: background-color var(--motion-fast) var(--ease-out),
-                color var(--motion-fast) var(--ease-out);
-}
-
-[data-indicator="poll-status"]::before {
-    content: '';
-    display: block;
-    width: 18px;
-    height: 18px;
-    background-color: currentColor;
-    -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='23 4 23 10 17 10'/><polyline points='1 20 1 14 7 14'/><path d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15'/></svg>");
-    mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='23 4 23 10 17 10'/><polyline points='1 20 1 14 7 14'/><path d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15'/></svg>");
-    -webkit-mask-size: contain;
-    mask-size: contain;
-    -webkit-mask-position: center;
-    mask-position: center;
-    -webkit-mask-repeat: no-repeat;
-    mask-repeat: no-repeat;
-}
-
-[data-indicator="poll-status"][data-style="active"] {
-    color: var(--color-success);
-}
-[data-indicator="poll-status"][data-style="active"]::before {
-    animation: poll-spin 5s linear infinite;
-}
-
-[data-indicator="poll-status"][data-style="inactive"] {
-    color: var(--color-text-subtle);
-    opacity: 0.7;
-}
-[data-indicator="poll-status"][data-style="inactive"]::before {
-    -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'><rect x='6' y='4' width='4' height='16' rx='1'/><rect x='14' y='4' width='4' height='16' rx='1'/></svg>");
-    mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'><rect x='6' y='4' width='4' height='16' rx='1'/><rect x='14' y='4' width='4' height='16' rx='1'/></svg>");
-    animation: none;
-}
-
-[data-indicator="poll-status"]:hover {
-    background-color: var(--color-surface-1);
-    opacity: 0.85;
-}
-[data-indicator="poll-status"]:hover[data-style="active"] {
-    color: var(--color-success);
-}
-[data-indicator="poll-status"]:hover[data-style="inactive"] {
-    color: var(--color-text);
-}
-
-@keyframes poll-spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
+    display: none !important;
 }
 
 .error {
@@ -1561,7 +1538,7 @@ div.cbi-section {
 #cbi-wireless > #wifi_assoclist_table,
 [data-tab-title],
 [data-page="admin-system-opkg"] #maincontent > .container {
-   padding: var(--space-5);
+   padding: var(--card-padding);
    font-weight: var(--weight-normal);
    font-style: normal;
    line-height: var(--leading-normal);
@@ -1694,9 +1671,11 @@ table > thead > tr > th,
 .table > .thead > .tr > .th,
 .table > .tr > .td.cbi-value-field,
 .table > .tr > .th.cbi-section-table-cell {
-    padding: 12px;
+    /* Tool-density (redesign-2026-06 §一.2): 40px row height. 13px body +
+       1.5 line-height ≈ 20px text box + 10px top/bottom padding = 40px. */
+    padding: 10px 12px;
     white-space: nowrap;
-    line-height:1.5;
+    line-height: 1.5;
     vertical-align: middle !important;
 }
 
@@ -1807,12 +1786,17 @@ table.table:not(.cbi-section-table) > thead > tr > th,
 .table:not(.cbi-section-table) > .thead > .tr > .th,
 .table:not(.cbi-section-table) > .tr.table-titles,
 .table:not(.cbi-section-table) > .tr.table-titles > .th {
-	background: var(--color-surface-1);
-	font-size: var(--text-xs);
+	/* Unified table (redesign §三.4): white bg + 1px hairline + caption
+	   headers, matching the Clients .devices-thead. Header background was
+	   surface-1; the hairline + caption type carry the header signal so it
+	   sits on the white body surface. */
+	background: var(--color-surface-0);
+	font-size: var(--text-caption);
+	line-height: var(--leading-caption);
 	color: var(--color-text-muted);
-	font-weight: var(--weight-semibold);
+	font-weight: var(--weight-medium);
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
+	letter-spacing: var(--caption-tracking);
 	border-bottom: 1px solid var(--color-border-subtle);
 }
 
@@ -1871,6 +1855,33 @@ table.table:not(.cbi-section-table) td[data-title*="Hostname" i],
 table.table:not(.cbi-section-table) td.right,
 .table:not(.cbi-section-table) .td.right {
 	text-align: right;
+}
+
+/* Round 49 (redesign-2026-06 §三.5): Delete buttons inside data tables
+   (UPnP "Delete", and any other in-table remove action) become GHOST
+   DANGER — red text + red border, transparent fill, fill only on hover.
+   Four high-saturation solid-red blocks in the UPnP table were visual
+   noise; the ghost treatment keeps the danger affordance without four red
+   slabs. Scoped to in-table buttons so the project-wide destructive
+   buttons (Reset/Remove on config forms) keep their solid fill. The
+   higher specificity (table-scope + class) wins over the global
+   .cbi-button-remove solid rule. */
+.table:not(.cbi-section-table) .cbi-button-remove,
+.table:not(.cbi-section-table) .cbi-button-negative,
+.table:not(.cbi-section-table) .cbi-input-remove,
+table.table:not(.cbi-section-table) .cbi-button-remove,
+table.table:not(.cbi-section-table) .cbi-button-negative {
+	background-color: transparent !important;
+	color: var(--color-danger) !important;
+	border: 1px solid var(--color-danger) !important;
+}
+.table:not(.cbi-section-table) .cbi-button-remove:hover,
+.table:not(.cbi-section-table) .cbi-button-negative:hover,
+.table:not(.cbi-section-table) .cbi-input-remove:hover,
+table.table:not(.cbi-section-table) .cbi-button-remove:hover,
+table.table:not(.cbi-section-table) .cbi-button-negative:hover {
+	background-color: var(--color-danger) !important;
+	color: #fff !important;
 }
 
 /* ═══════════ End Round 43 Step 185 universal table upgrade ═══════════ */
@@ -3287,10 +3298,16 @@ body.modal-overlay-active #modal_overlay {
 
 td > .ifacebadge,
 .td > .ifacebadge {
-	font-size: .8rem;
-	background-color: var(--activecolor);
-	color: var(--color-text-onaccent);
-	border-color: transparent;
+	/* redesign-2026-06 §三.5: port speed is a NEUTRAL badge, never accent
+	   green (and never red — link state, not speed, carries the color).
+	   Was --activecolor (emerald) on white text, which over-emphasised a
+	   neutral fact (the negotiated link speed). */
+	font-size: var(--text-mono);
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	background-color: var(--color-surface-1);
+	color: var(--color-text-muted);
+	border: 1px solid var(--color-border-subtle);
 	border-radius: var(--radius-sm);
 }
 
@@ -3300,14 +3317,50 @@ td > .ifacebadge,
 	align-self: flex-start;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * Round 49 (redesign-2026-06 §三.5) — Port status: left-aligned horizontal
+ * chips. The stock LuCI port-status table floats boxes in a centered "sea of
+ * whitespace"; left-align the wrap and let chips size to content so ports
+ * read as a tidy left-anchored chip row. Link state carries the only color
+ * (green = up, neutral = down); speed is the neutral badge handled above.
+ * CSS-only — DOM stays 100% upstream LuCI.
+ * ═══════════════════════════════════════════════════════════════════════ */
 .network-status-table {
 	display: flex;
 	flex-wrap: wrap;
+	justify-content: flex-start;   /* left-anchor, kill the centered sea */
+	gap: var(--space-2);
+	align-items: stretch;
 }
 
 .network-status-table .ifacebox {
-	flex-grow: 1;
-	margin: .5em;
+	flex-grow: 0;                  /* size to content, don't stretch to fill */
+	margin: 0;                     /* gap on the container owns the spacing */
+}
+
+/* tx/rx counters under each port — small mono (machine numbers, §一.1). */
+.network-status-table .ifacebox-body {
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	font-size: var(--text-mono);
+	color: var(--color-text-muted);
+}
+
+/* Link-state color: green = up (head.active rule above already does this);
+   down = neutral. Defensive: neutralize any upstream LuCI red applied to a
+   port-speed / link-down badge — speed is never red (§一.3 color roles). */
+.network-status-table .ifacebox-head:not(.active) {
+	color: var(--color-text-muted);
+	background: var(--color-surface-1);
+}
+.network-status-table .ifacebadge[style*="background"],
+.network-status-table .ifacebox [style*="ef4444"],
+.network-status-table .ifacebox [style*="dc2626"] {
+	/* Override inline red LuCI may set on a down/error port speed chip.
+	   Use a neutral surface; link-up state is signalled by .ifacebox-head
+	   .active, not by reddening the speed. */
+	background-color: var(--color-surface-1) !important;
+	color: var(--color-text-muted) !important;
 }
 
 .network-status-table .ifacebox-body {
@@ -3542,11 +3595,17 @@ td > .ifacebadge,
 	letter-spacing: 0.05em;
 }
 
+/* redesign-2026-06 §三.5: kill the pale-green banner fill. The active
+   (link-up / connected) state is now signalled by a 3px green LEFT STRIPE
+   on a NEUTRAL header background — same "green = up" meaning, but no
+   full-width pale-green banner that read as a design-language break on the
+   Network IPv4/IPv6 panels. Text stays neutral muted so the header reads
+   as a caption label, not a colored status pill. */
 .ifacebox-head.active {
 	position: relative;
-	background: var(--color-success-bg);
-	color: var(--color-success);
-	border-bottom-color: var(--color-success);
+	background: var(--color-surface-1);
+	color: var(--color-text-muted);
+	border-bottom-color: var(--color-border-subtle);
 }
 
 .ifacebox-head.active::before {
@@ -5263,11 +5322,11 @@ td.cbi-button, .cbi-button-apply,
    sequence regardless of DOM insertion timing (multiple L.require
    modules race to inject; load order isn't guaranteed).
    Step 232 (Round 45): .traffic-card removed from the extras band. */
-.node-admin-status-overview #view > .wan-hero,
+.node-admin-status-overview #view > .conn-card,
 .node-admin-status-overview #view > .design-tile-grid {
     grid-column: 1 / -1;
 }
-.node-admin-status-overview #view > .wan-hero         { order: -3; }
+.node-admin-status-overview #view > .conn-card        { order: -3; }
 .node-admin-status-overview #view > .design-tile-grid { order: -2; }
 /* LuCI's .cbi-section elements default to order: 0 — Status/Memory/
    Storage/UPnP/Wireless etc. all share that. Step 233 (Round 45):
@@ -5277,8 +5336,11 @@ td.cbi-button, .cbi-button-apply,
    uptime — promoting the Clients card matches that mental model.
    Speedtest stays at order:11 so it sits at the bottom of the page,
    in line with its on-demand (not always-needed) nature. */
-.node-admin-status-overview #view > .devices-card     { order: -1; }
-.node-admin-status-overview #view > .speedtest-card   { order: 11; }
+.node-admin-status-overview #view > .devices-card      { order: -1; }
+/* Round 49: speedtest summary card lifts to top-right of row 1 (order
+   matches .conn-card's row); the explicit grid-column placement below
+   pairs them. It is no longer parked at the page bottom. */
+.node-admin-status-overview #view > .speedtest-summary { order: -3; }
 
 /* ═══════════════════════════════════════════════════════════════════════
  * Round 44 Step 195 — first-row "2/3 hero + 1/3 speedtest" layout
@@ -5310,29 +5372,39 @@ td.cbi-button, .cbi-button-apply,
  * Step 232 (Round 45): .traffic-card pull — the full-width override
  * that used to sit at the bottom of this media query is gone with it.
  * ═══════════════════════════════════════════════════════════════════════ */
-@media (min-width: 1280px) {
+/* Round 49 (redesign-2026-06 §二): row 1 = Connection card (2/3) +
+   Speedtest summary (1/3). Both cards are FIXED equal height so the
+   stretch-coupling problem (a tall card forcing the other to whitespace)
+   is physically impossible — fixed-size law §一.5. Applies at ≥769px
+   (the existing max-width:768 single-column rule below owns ≤768px); below
+   that the base grid stacks everything single-column. */
+@media (min-width: 769px) {
     .node-admin-status-overview #view {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
-    .node-admin-status-overview #view > .wan-hero {
+    .node-admin-status-overview #view > .conn-card {
         grid-column: 1 / 3;
         grid-row: 1;
-        align-self: stretch;
-        /* Spread hero internals vertically when stretched. The card's
-           direct children are: status badge row, IP/connection grid,
-           throughput row. justify-content: space-between pushes the
-           status badge to top, throughput row to bottom — looks
-           intentional even before hero gets enriched in Phase 2. */
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
+        height: 200px;          /* fixed; matches .conn-card base height */
     }
 
-    .node-admin-status-overview #view > .speedtest-card {
+    .node-admin-status-overview #view > .speedtest-summary {
         grid-column: 3 / 4;
         grid-row: 1;
-        align-self: stretch;
+        height: 200px;          /* equal fixed height — no stretch coupling */
+    }
+}
+
+/* ≤768px: row-1 grid placement is off, so `order` decides the stack. Both
+   row-1 cards sit at order:-3 and module injection order is a race — the
+   speedtest summary could land ABOVE the Connection card nondeterministically.
+   Pin it: on-demand tooling goes to the page bottom on phones (the same
+   philosophy as its pre-redesign order:11 parking spot). */
+@media (max-width: 768px) {
+    .node-admin-status-overview #view > .speedtest-summary {
+        order: 1;
+        height: auto;           /* single column: let content size it */
     }
 }
 
