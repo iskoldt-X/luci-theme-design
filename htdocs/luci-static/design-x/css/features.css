@@ -1491,6 +1491,13 @@
     margin-top: auto;          /* pin the run/cancel row to the drawer bottom */
 }
 .speedtest-drawer-actions .speedtest-drawer-run { flex: 1 1 auto; }
+/* Round 52: Clear-history sits apart from Run/Cancel at the row's end,
+   caption-sized so it reads as a secondary, low-stakes action. */
+.speedtest-drawer-actions .speedtest-drawer-clear {
+    margin-left: auto;
+    font-size: var(--text-caption);
+    color: var(--color-text-muted);
+}
 /* Cancel = ghost danger so it reads as "stop", distinct from the green Run. */
 .speedtest-drawer-cancel {
     background: transparent !important;
@@ -1619,12 +1626,12 @@
         justify-content (on the flex box) plus justify-self (on the grid
         cell) to truly center. Plain-span headers (MAC / CONNECTION) just
         need justify-self + text-align.
-   The chevron keeps its own 24px column untouched. Mobile (≤640px below)
+   Round 52: the chevron column was removed entirely. Mobile (≤640px below)
    hides the thead and re-flows the summary, so this centering is desktop
    grid only. */
 .devices-thead {
     display: grid;
-    grid-template-columns: 32px minmax(160px, 1.4fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(80px, 0.6fr) minmax(90px, 0.7fr) 24px;
+    grid-template-columns: 32px minmax(160px, 1.4fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(80px, 0.6fr) minmax(90px, 0.7fr);
     gap: var(--space-3);
     padding: var(--space-2) var(--space-4);
     /* Unified table style (redesign §三.4): white bg + 1px hairline +
@@ -1719,7 +1726,7 @@
    rationale. */
 .devices-summary {
     display: grid;
-    grid-template-columns: 32px minmax(160px, 1.4fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(80px, 0.6fr) minmax(90px, 0.7fr) 24px;
+    grid-template-columns: 32px minmax(160px, 1.4fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(80px, 0.6fr) minmax(90px, 0.7fr);
     gap: var(--space-3);
     align-items: center;
     padding: 0 var(--space-4);
@@ -1934,16 +1941,9 @@
 .devices-seen-online { color: var(--color-text-muted); }
 .devices-seen-stale  { color: var(--color-text-subtle); }
 
-/* Chevron at the row's tail — rotates 180° when row expands */
-.devices-row-chev {
-    width: 14px;
-    height: 14px;
-    color: var(--color-text-subtle);
-    transition: transform var(--motion-fast) var(--ease-out);
-}
-.devices-row-expanded .devices-row-chev {
-    transform: rotate(180deg);
-}
+/* Round 52: the row-tail chevron and its 24px grid track were removed
+   (user request) — hover background, pointer cursor and the expanded-row
+   highlight carry the expand affordance now. */
 
 /* Step 93: detail expand zone — max-height transition (preserved from
    Step 44). max-height bumped 600→400 to feel snappier; if a row's
@@ -2033,14 +2033,13 @@
     /* Mobile: hide the column header, re-flow each row to two lines */
     .devices-thead { display: none; }
     .devices-summary {
-        grid-template-columns: 32px 1fr auto 24px;
+        grid-template-columns: 32px 1fr auto;
         grid-template-rows: auto auto;
     }
     .devices-row-name { grid-column: 2; grid-row: 1; }
     .devices-row-ip   { grid-column: 2; grid-row: 2; }
     .devices-row-sig  { grid-column: 3; grid-row: 1; justify-content: flex-end; }
     .devices-row-seen { grid-column: 3; grid-row: 2; }
-    .devices-row-chev { grid-column: 4; grid-row: 1 / 3; align-self: center; }
     .devices-detail-grid,
     .devices-actions {
         padding-left: var(--space-4);

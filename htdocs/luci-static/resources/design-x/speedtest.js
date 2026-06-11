@@ -264,7 +264,16 @@ return baseclass.extend({
 					'id': 'speedtest-drawer-cancel',
 					'disabled': 'disabled',
 					'click': L.bind(this.cancelTest, this)
-				}, _('Cancel'))
+				}, _('Cancel')),
+				// Round 52: history lives only as the summary mini chart — the old
+				// card's "Clear" affordance was lost in the drawer rewrite. Local
+				// data, low stakes: single click, toast feedback, no confirm modal.
+				E('button', {
+					'type': 'button',
+					'class': 'cbi-button speedtest-drawer-clear',
+					'id': 'speedtest-drawer-clear',
+					'click': L.bind(this.clearHistory, this)
+				}, _('Clear history'))
 			])
 		]);
 
@@ -557,6 +566,12 @@ return baseclass.extend({
 		try { if (this._activeAbort) this._activeAbort.abort(); } catch (e) {}
 		try { if (this._activeXhr)   this._activeXhr.abort();   } catch (e) {}
 		this.setProgress(_('Cancelling…'));
+	},
+
+	clearHistory: function () {
+		saveHistory([]);
+		this.renderSummary();
+		if (window.toast) toast.info(_('Speed test history cleared'));
 	},
 
 	// ── Summary render (mini bar chart + last-run line) ───────────────────

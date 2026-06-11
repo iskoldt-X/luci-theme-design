@@ -884,8 +884,11 @@ return baseclass.extend({
 			// — never the word "Active" (that state is the icon status dot).
 			// sortState key stays 'lease' for localStorage compatibility
 			// with Step 235 saves.
-			this.headerCell('lease', _('Last Seen'),  'devices-col-seen'),
-			E('span', { 'class': 'devices-col-chev' }, '')
+			this.headerCell('lease', _('Last Seen'),  'devices-col-seen')
+			// Round 52: chevron column removed entirely (user request) — row
+			// hover background + cursor + expanded-row highlight carry the
+			// expand affordance. Grid templates in features.css dropped the
+			// trailing 24px track in the same change.
 		];
 	},
 
@@ -1061,9 +1064,8 @@ return baseclass.extend({
 				// Step 148 (Round 40):MAC in main row, mono/tabular like IP
 				E('span', { 'class': 'devices-row-mac' }, mac || '—'),
 				sigCell,
-				seenCell,
-				svgEl('svg', { 'class': 'svg-icon devices-row-chev', 'aria-hidden': 'true' },
-					svgUse(self.iconBase + '#i-arrow-down'))
+				seenCell
+				// Round 52: chevron removed with its grid column (user request).
 			]),
 			// Detail is always in DOM — max-height transition handles the
 			// visual collapse/expand. Cheaper than rebuilding rows on each
