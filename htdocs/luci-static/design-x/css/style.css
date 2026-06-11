@@ -5962,23 +5962,30 @@ td.cbi-button, .cbi-button-apply,
     background-color: transparent;
 }
 
-/* Per-level active bars. */
-.ifacebadge:has(> img[src*="signal-000-025"])::after {
+/* Per-level active bars.
+ * Round 55: doubled attribute selector ON PURPOSE — the buildroot CSS
+ * minifier RESTRUCTURES rules (verified on device: the base
+ * ::after{background-color:transparent} was reordered to AFTER these
+ * level rules, so at equal specificity it won and every glyph went
+ * grey). Two [src*=…] attributes lift these to (0,3,2) over the base
+ * rule (0,2,2) — the cascade no longer depends on source order, so
+ * minifier reordering cannot break it. */
+.ifacebadge:has(> img[src*="/icons/signal-"][src*="signal-000-025"])::after {
     background-color: var(--color-accent-600);
     -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/></svg>');
     mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/></svg>');
 }
-.ifacebadge:has(> img[src*="signal-025-050"])::after {
+.ifacebadge:has(> img[src*="/icons/signal-"][src*="signal-025-050"])::after {
     background-color: var(--color-accent-600);
     -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/></svg>');
     mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/></svg>');
 }
-.ifacebadge:has(> img[src*="signal-050-075"])::after {
+.ifacebadge:has(> img[src*="/icons/signal-"][src*="signal-050-075"])::after {
     background-color: var(--color-accent-600);
     -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="14" rx="1"/></svg>');
     mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="14" rx="1"/></svg>');
 }
-.ifacebadge:has(> img[src*="signal-075-100"])::after {
+.ifacebadge:has(> img[src*="/icons/signal-"][src*="signal-075-100"])::after {
     background-color: var(--color-accent-600);
     -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="14" rx="1"/><rect x="20" y="3" width="3" height="18" rx="1"/></svg>');
     mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="14" rx="1"/><rect x="20" y="3" width="3" height="18" rx="1"/></svg>');
