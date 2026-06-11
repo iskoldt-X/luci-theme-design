@@ -547,6 +547,7 @@ return baseclass.extend({
 		this.expanded     = {};                   // mac → bool
 		this.customNames  = loadCustomNames();    // mac → string
 		this.stations     = {};                   // mac → { iface, info, station } (Step 94)
+		this.wifiCapable  = false;                 // router has any Wi-Fi radio (wifi-stations.available) — FIX 1
 		this.presence     = {};                   // mac-nocolon → { via, iface, state, inactive_ms? } (Step 218)
 		this.hintsByMac   = {};                   // MAC-with-colons → host-hints entry (Step 234)
 		this.blockedMacs  = {};                   // MAC uppercase → true (Step 243)
@@ -786,6 +787,16 @@ return baseclass.extend({
 			if (leasesData.dhcp6_leases) leases = leases.concat(leasesData.dhcp6_leases);
 
 			self.stations = buildStationMap(wifiData);
+			// FIX 1 (Apple-Watch-shows-Wired): record whether this router has
+			// ANY Wi-Fi capability. wifi-stations returns {available:true}
+			// whenever iwinfo reports radios (even with zero associated
+			// stations); {available:false} on Wi-Fi-less boxes. We use this
+			// to decide how to render via:"arp" hosts (unknown link): on a
+			// Wi-Fi router an ARP-only host could be wired OR a power-saving
+			// wireless client, so we show a neutral "LAN" glyph rather than
+			// falsely claiming "Wired"; on a Wi-Fi-less box everything truly
+			// is wired, so we keep the ethernet glyph + "Wired".
+			self.wifiCapable = !!(wifiData && wifiData.available);
 			// host-presence returns { hosts: { "AABBCC...": {...} } } or
 			// null. Reduce to just the inner map so buildRow can look up
 			// by MAC directly. Null-safe: empty object if absent.
@@ -970,6 +981,15 @@ return baseclass.extend({
 		// information when every row said the same thing). The map lookup is
 		// O(1) so rendering N rows stays linear.
 		var wifi = self.stations && self.stations[mac];
+		// FIX 1 (Apple-Watch-shows-Wired): the host-presence map now carries a
+		// ground-truth link class derived from the bridge FDB:
+		//   via "wifi"  → associated/FDB-wireless but no per-client signal data
+		//   via "wired" → FDB resolved the MAC to a wired bridge port
+		//   via "arp"   → unknown (no FDB binary or MAC not in FDB)
+		// The station-map hit (assoclist) still wins when present — it carries
+		// real dBm. Otherwise we fall back to the FDB class.
+		var presenceEntry = self.presence && self.presence[macKey];
+		var via = presenceEntry && presenceEntry.via;
 		var sigCell;
 		if (wifi) {
 			var dBm = wifi.station && wifi.station.signal;
@@ -980,7 +1000,40 @@ return baseclass.extend({
 				]),
 				E('span', { 'class': 'devices-sig-db' }, (dBm != null ? dBm + ' dBm' : ''))
 			]);
+		} else if (via === 'wifi') {
+			// FDB says wireless but we have no association signal data (the
+			// power-save / BT-relay case that prompted this fix). Show the
+			// Wi-Fi glyph with no dBm and a clarifying title.
+			sigCell = E('span', { 'class': 'devices-row-sig devices-row-sig-wifi devices-row-sig-wifi-nodata' }, [
+				svgEl('svg', {
+					'class': 'svg-icon devices-sig-wifi-glyph',
+					'aria-label': _('Wi-Fi'),
+					'title': _('Wi-Fi (no signal data)')
+				}, svgUse(self.iconBase + '#i-wifi'))
+			]);
+		} else if (via === 'wired') {
+			sigCell = E('span', { 'class': 'devices-row-sig devices-row-sig-wired' }, [
+				svgEl('svg', {
+					'class': 'svg-icon devices-sig-wired-glyph',
+					'aria-label': _('Wired'),
+					'title': _('Wired (Ethernet)')
+				}, svgUse(self.iconBase + '#i-network'))
+			]);
+		} else if (self.wifiCapable) {
+			// via "arp" (unknown) on a Wi-Fi-capable router: do NOT claim
+			// "Wired" — an ARP-only host may be a power-saving wireless
+			// client the FDB has not yet (re)learned. Show a neutral link
+			// glyph + honest "LAN".
+			sigCell = E('span', { 'class': 'devices-row-sig devices-row-sig-lan' }, [
+				svgEl('svg', {
+					'class': 'svg-icon devices-sig-lan-glyph',
+					'aria-label': _('LAN'),
+					'title': _('LAN (link type unknown)')
+				}, svgUse(self.iconBase + '#i-globe'))
+			]);
 		} else {
+			// No Wi-Fi radio on this box at all → everything genuinely is
+			// wired. Keep the ethernet glyph + "Wired".
 			sigCell = E('span', { 'class': 'devices-row-sig devices-row-sig-wired' }, [
 				svgEl('svg', {
 					'class': 'svg-icon devices-sig-wired-glyph',
@@ -1223,7 +1276,19 @@ return baseclass.extend({
 					_('Tx') + ' ' + formatRateKbps(txKbps)));
 			}
 		} else {
-			cells.push(this.detailCell(_('Connection'), _('Wired')));
+			// FIX 1 (Apple-Watch-shows-Wired): mirror the summary sigCell
+			// classification for the detail-panel Connection text. FDB-derived
+			// via wins; the unknown ("arp") case shows honest "LAN" on a
+			// Wi-Fi-capable router and "Wired" only when there is no radio.
+			var macKey = mac.replace(/:/g, '');
+			var presenceEntry = this.presence && this.presence[macKey];
+			var via = presenceEntry && presenceEntry.via;
+			var connText;
+			if (via === 'wifi') connText = _('Wi-Fi');
+			else if (via === 'wired') connText = _('Wired');
+			else if (this.wifiCapable) connText = _('LAN');
+			else connText = _('Wired');
+			cells.push(this.detailCell(_('Connection'), connText));
 		}
 
 		// Step 140 (Round 38):lease.expires is REMAINING SECONDS, not Unix

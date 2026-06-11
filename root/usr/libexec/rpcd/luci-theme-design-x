@@ -214,9 +214,50 @@ run_method() {
 					done
 				done
 			fi
+			# FIX 1 (Apple-Watch-shows-Wired): ground-truth wired/wireless
+			# classification from the bridge forwarding database. iwinfo
+			# assoclist misses some associated stations (a 2.4GHz radio can
+			# report zero associations under power-save / BT-relay), so a
+			# device present only in ARP was being labelled "Wired" even
+			# when its bridge port is a wireless interface. The FDB maps each
+			# MAC to the physical bridge port it was last seen on, which is
+			# authoritative for the wired-vs-wireless question.
+			#
+			# Capture once per call (host-presence is cached 30s, so the cost
+			# is amortized). Degrade gracefully: if the bridge binary is not
+			# installed, FDB stays empty and every ARP host keeps via:"arp"
+			# (current behaviour). Build one lookup string of
+			# " <NOCOLON_UPPER_MAC>=<dev> " tokens — same delimiter-padded
+			# technique as MGMT_MACS — so the awk can resolve a MAC to its
+			# port with index() and decide wifi / wired / arp.
+			#
+			# Lines from `bridge fdb show` look like:
+			#   aa:5f:eb:13:24:45 dev phy1-ap0 master br-lan
+			# We sanitize dev to a safe token charset before storing it; only
+			# the wireless/wired CLASS derived from it is emitted into JSON,
+			# never the raw dev string, so JSON stays valid for any input.
+			FDB_MAP=""
+			if command -v bridge >/dev/null 2>&1; then
+				FDB_MAP=$(bridge fdb show 2>/dev/null | awk '
+					{
+						mac = ""; dev = ""
+						for (i = 1; i <= NF; i++) {
+							if ($i == "dev" && (i + 1) <= NF) { dev = $(i + 1) }
+						}
+						mac = $1
+						if (mac !~ /^[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]$/) next
+						if (dev == "") next
+						gsub(/[^A-Za-z0-9_.-]/, "", dev)
+						if (dev == "") next
+						key = toupper(mac)
+						gsub(/:/, "", key)
+						printf " %s=%s", key, dev
+					}
+				')
+			fi
 			arp_json=""
 			if [ -r /proc/net/arp ]; then
-				arp_json=$(awk -v wifi="$wifi_json" -v mgmt=" $MGMT_MACS " '
+				arp_json=$(awk -v wifi="$wifi_json" -v mgmt=" $MGMT_MACS " -v fdb="$FDB_MAP " '
 					BEGIN { first = 1 }
 					NR == 1 { next }
 					{
@@ -227,8 +268,21 @@ run_method() {
 						gsub(":", "", key)
 						if (index(wifi, "\"" key "\":") > 0) next
 						is_mgmt = (index(mgmt, " " key " ") > 0) ? "true" : "false"
+						# Resolve the FDB port for this MAC, if any. Token form
+						# is " KEY=dev " — find " KEY=" then read up to the next
+						# space. No dev (or no bridge binary) leaves via "arp".
+						via = "arp"
+						p = index(fdb, " " key "=")
+						if (p > 0) {
+							rest = substr(fdb, p + length(key) + 2)
+							sp = index(rest, " ")
+							dev = (sp > 0) ? substr(rest, 1, sp - 1) : rest
+							if (dev ~ /^(phy|wlan|ra|ap|wds|mesh)/) via = "wifi"
+							else if (dev ~ /^(eth|lan)/) via = "wired"
+							else via = "wired"
+						}
 						if (!first) printf ","
-						printf "\"%s\":{\"via\":\"arp\",\"iface\":\"%s\",\"state\":\"active\",\"is_mgmt\":%s}", key, iface, is_mgmt
+						printf "\"%s\":{\"via\":\"%s\",\"iface\":\"%s\",\"state\":\"active\",\"is_mgmt\":%s}", key, via, iface, is_mgmt
 						first = 0
 					}
 				' /proc/net/arp)
