@@ -267,8 +267,16 @@ function formatPresence(presenceMap, mac, lease) {
 		if (ms < 3600000) return { stale: true,  online: false, text: Math.floor(ms / 60000) + _(' min ago') };
 		return { stale: true, online: false, text: Math.floor(ms / 3600000) + _(' h ago') };
 	}
-	// via === 'arp' → kernel ARP table has a complete entry, so the host
-	// responded recently. Treat as reachable now.
+	// Round 54: the backend now distinguishes liveness. A host the bridge
+	// FDB has not seen frames from (state "stale") kept only a leftover
+	// kernel ARP entry — a sleeping device, not a reachable one (verified
+	// on device: dormant Apple Watch had a complete ARP row but failed
+	// ping). Show it as idle instead of claiming "now".
+	if (entry.state === 'stale') {
+		return { stale: true, online: false, text: _('Idle') };
+	}
+	// via 'wired'/'arp' with active state → the bridge sees frames from
+	// this host (or no FDB data is available). Treat as reachable now.
 	return { stale: false, online: true, text: _('now') };
 }
 

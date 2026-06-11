@@ -254,6 +254,45 @@ run_method() {
 						printf " %s=%s", key, dev
 					}
 				')
+			elif command -v brctl >/dev/null 2>&1; then
+				# Round 54: BusyBox-only fallback. Some builds ship no
+				# iproute2 bridge binary (verified on a JDCloud RE-CP-03)
+				# but BusyBox brctl is present. showmacs prints a DECIMAL
+				# port number per MAC; sysfs brif/<ifname>/port_no gives
+				# the HEX port number per interface. Build portno=ifname
+				# tokens first, then translate showmacs rows into the
+				# same " KEY=dev " map the bridge path produces. Rows with
+				# is-local yes are the router MACs and are skipped.
+				for _brif in /sys/class/net/*/brif; do
+					[ -d "$_brif" ] || continue
+					_br=${_brif%/brif}; _br=${_br##*/}
+					_pmap=""
+					for _pdir in "$_brif"/*; do
+						[ -d "$_pdir" ] || continue
+						_ifn=${_pdir##*/}
+						_pno=$(cat "$_pdir/port_no" 2>/dev/null) || continue
+						case "$_ifn" in *[!A-Za-z0-9_.-]*) continue ;; esac
+						_pmap="$_pmap $((_pno))=$_ifn"
+					done
+					[ -n "$_pmap" ] || continue
+					FDB_MAP="$FDB_MAP$(brctl showmacs "$_br" 2>/dev/null | awk -v pm="$_pmap " '
+						NR == 1 { next }
+						$3 == "yes" { next }
+						{
+							key = toupper($2)
+							gsub(/:/, "", key)
+							if (length(key) != 12) next
+							if (key ~ /[^0-9A-F]/) next
+							p = index(pm, " " $1 "=")
+							if (p == 0) next
+							rest = substr(pm, p + length($1) + 2)
+							sp = index(rest, " ")
+							dev = (sp > 0) ? substr(rest, 1, sp - 1) : rest
+							if (dev == "") next
+							printf " %s=%s", key, dev
+						}
+					')"
+				done
 			fi
 			arp_json=""
 			if [ -r /proc/net/arp ]; then
@@ -281,8 +320,20 @@ run_method() {
 							else if (dev ~ /^(eth|lan)/) via = "wired"
 							else via = "wired"
 						}
+						# Round 54: ARP completeness is NOT liveness. A kernel
+						# ARP entry survives long after a host goes dormant
+						# (verified on device: a sleeping Apple Watch kept a
+						# complete ARP row while absent from the FDB and not
+						# answering ping). When we HAVE FDB data, a MAC the
+						# bridge has not seen frames from is reported stale
+						# so the UI shows it as idle instead of claiming
+						# active-now. Without FDB data (length(fdb) <= 1,
+						# the var always carries one trailing space) we keep
+						# the old optimistic behaviour.
+						st = "active"
+						if (length(fdb) > 1 && p == 0) st = "stale"
 						if (!first) printf ","
-						printf "\"%s\":{\"via\":\"%s\",\"iface\":\"%s\",\"state\":\"active\",\"is_mgmt\":%s}", key, via, iface, is_mgmt
+						printf "\"%s\":{\"via\":\"%s\",\"iface\":\"%s\",\"state\":\"%s\",\"is_mgmt\":%s}", key, via, iface, st, is_mgmt
 						first = 0
 					}
 				' /proc/net/arp)

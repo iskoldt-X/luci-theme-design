@@ -5923,125 +5923,76 @@ td.cbi-button, .cbi-button-apply,
     mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13a10 10 0 0 1 14 0"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M2 8.82a15 15 0 0 1 20 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>') no-repeat center / contain;
 }
 
-/* 3 — 4-bar signal glyph for the signal-XXX-YYY badges/cells.
- * Two stacked masks on the parent:
- *   ::before = full 4-bar "track" in subtle color (all bars faint),
- *   ::after  = the active bars only, in accent (per-level mask data-URI).
- * Bars rise left→right; rx="1" rounded tops, Lucide stroke feel via fill.
- * Size ~18px in radio boxes (.ifacebox), ~16px in table cells. */
-.ifacebox .ifacebox-body:has(> img[src*="/icons/signal-"])::before,
-.ifacebox .ifacebox-body:has(> span > img[src*="/icons/signal-"])::before,
+/* 3 — 4-bar signal glyph (Round 54 rewrite).
+ * Verified ON DEVICE (deployed 60_wifi.js): both the radio-box SSID block
+ * and the Associated-Stations signal cell are renderBadge() output — an
+ * .ifacebadge whose <img> is a DIRECT child. The previous multi-variant
+ * selector list (td / .td / .ifacebox-body / "> span > img") matched the
+ * badge AND its ancestors, painting every glyph TWICE (the misaligned
+ * doubles in the Round 53 user report). One nearest-parent selector now.
+ * Also: the deployed build uses signal-none.svg (absent from the upstream
+ * branch docs); without a per-level rule its maskless ::after painted a
+ * solid accent square — the default ::after is now transparent and only
+ * leveled rules switch the accent on.
+ * Glyph is pinned absolutely (padding reserves the slot) so it cannot
+ * interfere with the badge text flow in either context. */
+.ifacebadge:has(> img[src*="/icons/signal-"]) {
+    position: relative;
+    padding-left: 28px;
+}
 .ifacebadge:has(> img[src*="/icons/signal-"])::before,
-.ifacebadge:has(> span > img[src*="/icons/signal-"])::before,
-td:has(> img[src*="/icons/signal-"])::before,
-td:has(> span > img[src*="/icons/signal-"])::before,
-.td:has(> img[src*="/icons/signal-"])::before,
-.td:has(> span > img[src*="/icons/signal-"])::before {
+.ifacebadge:has(> img[src*="/icons/signal-"])::after {
     content: "";
-    display: inline-block;
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
     width: 16px;
     height: 16px;
-    flex-shrink: 0;
-    vertical-align: middle;
-    background-color: var(--color-text-subtle);
-    opacity: 0.25;
     -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="14" rx="1"/><rect x="20" y="3" width="3" height="18" rx="1"/></svg>') no-repeat center / contain;
     mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="14" rx="1"/><rect x="20" y="3" width="3" height="18" rx="1"/></svg>') no-repeat center / contain;
 }
-.ifacebox .ifacebox-body:has(> img[src*="/icons/signal-"])::after,
-.ifacebox .ifacebox-body:has(> span > img[src*="/icons/signal-"])::after,
-.ifacebadge:has(> img[src*="/icons/signal-"])::after,
-.ifacebadge:has(> span > img[src*="/icons/signal-"])::after,
-td:has(> img[src*="/icons/signal-"])::after,
-td:has(> span > img[src*="/icons/signal-"])::after,
-.td:has(> img[src*="/icons/signal-"])::after,
-.td:has(> span > img[src*="/icons/signal-"])::after {
-    content: "";
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    margin-left: -16px;   /* overlay exactly on top of the ::before track */
-    flex-shrink: 0;
-    vertical-align: middle;
-    background-color: var(--color-accent-600);
-    -webkit-mask-repeat: no-repeat;
-    -webkit-mask-position: center;
-    -webkit-mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    mask-size: contain;
+.ifacebadge:has(> img[src*="/icons/signal-"])::before {
+    background-color: var(--color-text-subtle);
+    opacity: 0.25;
 }
-
-/* Per-level active-bar mask (how many bars light up in accent). 000-000 has
- * no active bars — the ::after mask is empty so only the faint track shows. */
-.ifacebox .ifacebox-body:has(> img[src*="signal-000-000"])::after,
-.ifacebox .ifacebox-body:has(> span > img[src*="signal-000-000"])::after,
-.ifacebadge:has(> img[src*="signal-000-000"])::after,
-.ifacebadge:has(> span > img[src*="signal-000-000"])::after,
-td:has(> img[src*="signal-000-000"])::after,
-td:has(> span > img[src*="signal-000-000"])::after,
-.td:has(> img[src*="signal-000-000"])::after,
-.td:has(> span > img[src*="signal-000-000"])::after {
-    /* No active bars at this level — suppress the accent overlay entirely
-     * (a missing mask would otherwise paint a solid accent square). The
-     * faint ::before track still renders all four bars at 25% opacity. */
+.ifacebadge:has(> img[src*="/icons/signal-"])::after {
+    /* transparent until a level rule below lights it up — covers
+       signal-none.svg and signal-000-000.svg with the faint track only */
     background-color: transparent;
 }
-.ifacebox .ifacebox-body:has(> img[src*="signal-000-025"])::after,
-.ifacebox .ifacebox-body:has(> span > img[src*="signal-000-025"])::after,
-.ifacebadge:has(> img[src*="signal-000-025"])::after,
-.ifacebadge:has(> span > img[src*="signal-000-025"])::after,
-td:has(> img[src*="signal-000-025"])::after,
-td:has(> span > img[src*="signal-000-025"])::after,
-.td:has(> img[src*="signal-000-025"])::after,
-.td:has(> span > img[src*="signal-000-025"])::after {
+
+/* Per-level active bars. */
+.ifacebadge:has(> img[src*="signal-000-025"])::after {
+    background-color: var(--color-accent-600);
     -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/></svg>');
     mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/></svg>');
 }
-.ifacebox .ifacebox-body:has(> img[src*="signal-025-050"])::after,
-.ifacebox .ifacebox-body:has(> span > img[src*="signal-025-050"])::after,
-.ifacebadge:has(> img[src*="signal-025-050"])::after,
-.ifacebadge:has(> span > img[src*="signal-025-050"])::after,
-td:has(> img[src*="signal-025-050"])::after,
-td:has(> span > img[src*="signal-025-050"])::after,
-.td:has(> img[src*="signal-025-050"])::after,
-.td:has(> span > img[src*="signal-025-050"])::after {
+.ifacebadge:has(> img[src*="signal-025-050"])::after {
+    background-color: var(--color-accent-600);
     -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/></svg>');
     mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/></svg>');
 }
-.ifacebox .ifacebox-body:has(> img[src*="signal-050-075"])::after,
-.ifacebox .ifacebox-body:has(> span > img[src*="signal-050-075"])::after,
-.ifacebadge:has(> img[src*="signal-050-075"])::after,
-.ifacebadge:has(> span > img[src*="signal-050-075"])::after,
-td:has(> img[src*="signal-050-075"])::after,
-td:has(> span > img[src*="signal-050-075"])::after,
-.td:has(> img[src*="signal-050-075"])::after,
-.td:has(> span > img[src*="signal-050-075"])::after {
+.ifacebadge:has(> img[src*="signal-050-075"])::after {
+    background-color: var(--color-accent-600);
     -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="14" rx="1"/></svg>');
     mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="14" rx="1"/></svg>');
 }
-.ifacebox .ifacebox-body:has(> img[src*="signal-075-100"])::after,
-.ifacebox .ifacebox-body:has(> span > img[src*="signal-075-100"])::after,
-.ifacebadge:has(> img[src*="signal-075-100"])::after,
-.ifacebadge:has(> span > img[src*="signal-075-100"])::after,
-td:has(> img[src*="signal-075-100"])::after,
-td:has(> span > img[src*="signal-075-100"])::after,
-.td:has(> img[src*="signal-075-100"])::after,
-.td:has(> span > img[src*="signal-075-100"])::after {
+.ifacebadge:has(> img[src*="signal-075-100"])::after {
+    background-color: var(--color-accent-600);
     -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="14" rx="1"/><rect x="20" y="3" width="3" height="18" rx="1"/></svg>');
     mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="15" width="3" height="6" rx="1"/><rect x="8" y="11" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="14" rx="1"/><rect x="20" y="3" width="3" height="18" rx="1"/></svg>');
 }
 
-/* In the radio boxes the glyph wants to be a touch larger (~18px) than the
- * 16px table-cell size set above. */
-.ifacebox .ifacebox-body:has(> img[src*="/icons/signal-"])::before,
-.ifacebox .ifacebox-body:has(> span > img[src*="/icons/signal-"])::before,
-.ifacebox .ifacebox-body:has(> img[src*="/icons/signal-"])::after,
-.ifacebox .ifacebox-body:has(> span > img[src*="/icons/signal-"])::after {
+/* Multi-line radio badge: pin to the first text line and go a touch
+ * larger; the single-line table badge keeps the vertically-centered 16px. */
+.ifacebox .ifacebadge:has(> img[src*="/icons/signal-"]) {
+    padding-left: 30px;
+}
+.ifacebox .ifacebadge:has(> img[src*="/icons/signal-"])::before,
+.ifacebox .ifacebadge:has(> img[src*="/icons/signal-"])::after {
+    top: 12px;
+    transform: none;
     width: 18px;
     height: 18px;
-}
-.ifacebox .ifacebox-body:has(> img[src*="/icons/signal-"])::after,
-.ifacebox .ifacebox-body:has(> span > img[src*="/icons/signal-"])::after {
-    margin-left: -18px;
 }
